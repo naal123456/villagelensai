@@ -9,43 +9,126 @@
     :root { color-scheme: dark; font-family: system-ui, sans-serif; }
     * { box-sizing: border-box; }
     body { margin: 0; min-height: 100vh; background: #101418; color: #f5f7fa; }
-    main { width: min(100%, 720px); margin: auto; padding: 18px; text-align: center; }
-    h1 { font-size: clamp(1.45rem, 6vw, 2.4rem); }
-    .camera {
-      display: grid; place-items: center; width: min(72vw, 260px); aspect-ratio: 1;
-      margin: 28px auto; border: 4px solid #ffcd00; border-radius: 50%;
-      background: #26323b; color: white; font-size: min(26vw, 110px); cursor: pointer;
-    }
-    .camera:focus-visible { outline: 5px solid #65d6ff; outline-offset: 5px; }
-    #preview { display: none; max-width: 100%; max-height: 62vh; margin: 18px auto;
-      border-radius: 12px; object-fit: contain; }
-    #status { min-height: 3em; font-size: 1.08rem; line-height: 1.5; color: #d9e2ec; }
-    .note { color: #9fb3c8; font-size: .9rem; }
+    main { width: min(100%, 780px); margin: auto; padding: 12px; text-align: center; }
+    .toolbar { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; position: sticky;
+      top: 0; z-index: 3; padding: 8px 0; background: rgba(16,20,24,.94); }
+    button { min-height: 52px; border: 2px solid #52606d; border-radius: 12px;
+      background: #26323b; color: white; font-size: 1.35rem; }
+    button:focus-visible { outline: 4px solid #65d6ff; outline-offset: 2px; }
+    .quality { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin: 8px 0; }
+    .bar { height: 16px; border: 1px solid #64717d; border-radius: 5px; background: #46515b; }
+    #bar-1.ready { background: #e5bc27; border-color: #ffe071; }
+    #bar-2.ready { background: #9adfae; } #bar-3.ready { background: #4ebd78; }
+    #bar-4.ready { background: #168447; box-shadow: 0 0 8px #3fbd70; }
+    #timer { min-height: 1.5em; color: #c7d1da; font-variant-numeric: tabular-nums; }
+    .stage { position: relative; display: none; max-width: 100%; margin: auto; background: #222; }
+    #preview { display: block; max-width: 100%; max-height: 68vh; object-fit: contain; }
+    #overlay { position: absolute; inset: 0; width: 100%; height: 100%; }
+    .hit { fill: transparent; stroke: none; }
+    .underline { stroke: #49c7ff; stroke-width: 2; vector-effect: non-scaling-stroke; pointer-events: none; }
+    .underline.active { stroke: #fff36a; stroke-width: 6; }
+    #status, #current { min-height: 2em; line-height: 1.5; }
+    #current { font-size: clamp(1.4rem, 5vw, 2.6rem); }
+    .note { color: #9fb3c8; font-size: .85rem; }
   </style>
 </head>
 <body>
   <main>
-    <h1>VillageLensAI</h1>
-    <button class="camera" id="camera" aria-label="Take a picture" title="Take a picture">📷</button>
-    <input id="camera-input" type="file" accept="image/*" capture="environment" hidden>
-    <img id="preview" alt="Captured page preview">
+    <nav class="toolbar" aria-label="Reading controls">
+      <button id="camera" aria-label="Take a picture" title="Take a picture">📷</button>
+      <button id="stop" aria-label="Stop sound" title="Stop sound">■</button>
+    </nav>
+    <input id="camera-input" type="file" accept="image/jpeg,image/png,image/webp" capture="environment" hidden>
+    <div class="quality" aria-label="Reading quality">
+      <span class="bar" id="bar-1"></span><span class="bar" id="bar-2"></span>
+      <span class="bar" id="bar-3"></span><span class="bar" id="bar-4"></span>
+    </div>
+    <div id="timer" aria-live="polite">waiting</div>
     <p id="status" aria-live="polite">ಚಿತ್ರ ತೆಗೆಯಲು ಕ್ಯಾಮೆರಾ ಗುರುತನ್ನು ಒತ್ತಿ.</p>
-    <p class="note">Camera-shell POC only. Recognition is not connected yet.</p>
+    <div class="stage" id="stage">
+      <img id="preview" alt="Captured page">
+      <svg id="overlay" aria-label="Readable words"></svg>
+    </div>
+    <div id="current" lang="kn"></div>
+    <p class="note">AI-assisted reading may make mistakes.</p>
   </main>
   <script>
     const input = document.getElementById('camera-input');
     const preview = document.getElementById('preview');
+    const overlay = document.getElementById('overlay');
+    const stage = document.getElementById('stage');
     const status = document.getElementById('status');
-    document.getElementById('camera').addEventListener('click', () => input.click());
-    input.addEventListener('change', () => {
-      const file = input.files && input.files[0];
+    const current = document.getElementById('current');
+    const timer = document.getElementById('timer');
+    let timerId = 0, started = 0;
+
+    function reset() {
+      if ('speechSynthesis' in window) speechSynthesis.cancel();
+      overlay.textContent = ''; current.textContent = '';
+      for (let level = 1; level <= 4; level++) document.getElementById(`bar-${level}`).classList.remove('ready');
+    }
+    function beginTimer() {
+      started = Date.now(); clearInterval(timerId); timer.textContent = '0s';
+      timerId = setInterval(() => timer.textContent = `${Math.floor((Date.now() - started) / 1000)}s`, 1000);
+    }
+    function endTimer() {
+      clearInterval(timerId); timer.textContent = `${Math.round((Date.now() - started) / 1000)}s`;
+    }
+    function speak(text) {
+      if (!text || !('speechSynthesis' in window)) return;
+      speechSynthesis.cancel();
+      const speech = new SpeechSynthesisUtterance(text);
+      speech.lang = (text.match(/[\u0c80-\u0cff]/g) || []).length ? 'kn-IN' : 'en-IN';
+      speech.rate = .72; speechSynthesis.speak(speech);
+    }
+    function selectWord(word) {
+      document.querySelectorAll('.underline').forEach(
+        node => node.classList.toggle('active', node.dataset.id === word.id),
+      );
+      current.textContent = word.text; speak(word.text);
+    }
+    function render(value) {
+      overlay.textContent = '';
+      overlay.setAttribute('viewBox', `0 0 ${value.image_size.width} ${value.image_size.height}`);
+      for (const word of value.words || []) {
+        const hit = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        for (const key of ['x', 'y', 'width', 'height']) hit.setAttribute(key, word.box[key]);
+        hit.setAttribute('class', 'hit'); hit.dataset.id = word.id;
+        hit.addEventListener('click', () => selectWord(word)); overlay.appendChild(hit);
+        const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+        const y = word.box.y + word.box.height + Math.max(2, Math.round(word.box.height * .06));
+        line.setAttribute('x1', word.box.x); line.setAttribute('x2', word.box.x + word.box.width);
+        line.setAttribute('y1', y); line.setAttribute('y2', y); line.setAttribute('class', 'underline');
+        line.dataset.id = word.id; overlay.appendChild(line);
+      }
+      document.getElementById('bar-1').classList.add('ready');
+      status.textContent = value.words.length
+        ? 'ಓದಲು ಪದವನ್ನು ಸ್ಪರ್ಶಿಸಿ.' : 'ಪಠ್ಯ ಸಿಗಲಿಲ್ಲ. ಮತ್ತೊಮ್ಮೆ ಚಿತ್ರ ತೆಗೆಯಿರಿ.';
+    }
+    async function useCapture(file) {
       if (!file) return;
-      const url = URL.createObjectURL(file);
-      preview.onload = () => URL.revokeObjectURL(url);
-      preview.src = url;
-      preview.style.display = 'block';
-      status.textContent = 'ಚಿತ್ರ ಸಿದ್ಧವಾಗಿದೆ. ಓದುವ ಸೇವೆಯನ್ನು ಇನ್ನೂ ಸಂಪರ್ಕಿಸಲಾಗುತ್ತಿದೆ.';
+      reset(); beginTimer(); status.textContent = 'ಚಿತ್ರವನ್ನು ಓದುತ್ತಿದೆ…';
+      const objectUrl = URL.createObjectURL(file);
+      preview.onload = () => URL.revokeObjectURL(objectUrl);
+      preview.src = objectUrl; stage.style.display = 'inline-block';
+      try {
+        const response = await fetch('/api/capture', {
+          method: 'POST', headers: { 'Content-Type': file.type }, body: file,
+        });
+        const value = await response.json();
+        if (!response.ok) throw new Error(value.error || 'CAPTURE_FAILED');
+        render(value);
+      } catch (error) {
+        status.textContent = 'ಈ ಚಿತ್ರವನ್ನು ಓದಲು ಆಗಲಿಲ್ಲ. ಮತ್ತೊಮ್ಮೆ ಪ್ರಯತ್ನಿಸಿ.';
+      } finally {
+        endTimer(); input.value = '';
+      }
+    }
+    document.getElementById('camera').addEventListener('click', () => input.click());
+    document.getElementById('stop').addEventListener('click', () => {
+      if ('speechSynthesis' in window) speechSynthesis.cancel();
     });
+    input.addEventListener('change', () => useCapture(input.files && input.files[0]));
   </script>
 </body>
 </html>

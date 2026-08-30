@@ -1,13 +1,15 @@
 # Google Cloud POC architecture
 
 Date: 2026-08-30
-Status: repository initialized; Google project and billing authorization pending
+Status: project and billing active; stage-one implementation locally tested;
+temporary Cloud Run deployment pending
 
 ## Objective
 
 Run the existing still-photo guided-reading experience independently of the
-development Mac for two controlled testers in India. The domain can be attached
-after temporary GitHub Pages and Cloud Run URLs pass acceptance testing.
+development Mac for two controlled testers in India. `villagelensai.com` is
+registered and delegated to Cloudflare; it will be attached only after temporary
+GitHub Pages and Cloud Run URLs pass acceptance testing.
 
 ## Architecture
 
@@ -99,11 +101,12 @@ Free allowances reduce expected POC cost but do not guarantee a zero bill.
 
 ## Owner inputs
 
-1. Create or authorize an isolated Google Cloud project and active billing link.
-2. Provide only the project ID and confirmation that billing is enabled.
+1. Google Cloud project `villagelensai` and its billing link are active.
+2. A $100 Google budget alert has been configured by the project owner.
 3. Create a dedicated OpenAI API project with a low budget; enter its key
    directly into Secret Manager rather than chat or repository files.
-4. Purchase and delegate DNS for the final domain when available.
+4. `villagelensai.com` is registered and delegated to Cloudflare nameservers;
+   application DNS records remain intentionally unset until validation.
 5. Provide non-personal labels for the two test devices.
 
 ## Implementation order

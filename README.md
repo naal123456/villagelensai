@@ -3,7 +3,8 @@
 VillageLensAI is a phone-oriented guided-reading proof of concept for Kannada and
 English text in book pages, signs, billboards, and phone screens.
 
-Status: repository initialized; cloud recognition is not deployed yet.
+Status: stage-one Tesseract API implemented and locally tested; Cloud Run build
+and deployment pending.
 
 ## Intended experience
 
@@ -39,7 +40,9 @@ See [the Google Cloud POC architecture](docs/GOOGLE_CLOUD_POC.md).
 
 ## Current boundary
 
-The initial HTML shell can invoke a phone camera and preview a still image. It
-does not upload the image or claim recognition. The next step is to promote the
-tested Tesseract capture contract from `smart-glasses-phase1`, containerize it,
-and reproduce the yellow stage locally before cloud deployment.
+The `/a` client invokes a phone camera, sends one bounded still image to the
+same-origin API, and renders the returned word geometry as touchable underlines.
+Only the genuine Tesseract yellow stage is enabled. The API is stateless and
+reports that it did not retain the source image. OpenAI, Google Vision, feedback
+persistence, device enrollment, and the remaining quality stages are still
+disabled.
