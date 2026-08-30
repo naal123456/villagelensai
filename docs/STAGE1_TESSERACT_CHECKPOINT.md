@@ -51,11 +51,12 @@ mixed illustration/stylized-title case and the returned text contains errors.
 
 ## Deployed validation
 
-- Cloud Build ID: `3285f53a-9eb8-45c3-af04-3848efbaf637` (`SUCCESS`).
+- Runtime source commit: `5993036`.
+- Cloud Build ID: `6be298bf-98fe-4164-960b-ae3525e8d491` (`SUCCESS`).
 - Image digest:
-  `sha256:f538cc94f3ae94e3ea0453fbbbdeac61930cbd485915ae8624f7818fb9edfa51`.
+  `sha256:acd8fca39b6ff76bf38c130cd7a4188357ce4b183a1a4f6db25899df9fd046a9`.
 - Cloud Run service: `vlens-a`, region `us-central1`, revision
-  `vlens-a-00001-vcg`.
+  `vlens-a-00002-8pl`.
 - Temporary tester URL:
   `https://vlens-a-816984866085.us-central1.run.app/a/`.
 - `GET /a/`: HTTP 200; `GET /`: HTTP 302 to `/a/`.
