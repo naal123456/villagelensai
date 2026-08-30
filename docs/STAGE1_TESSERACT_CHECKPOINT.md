@@ -13,18 +13,20 @@ This checkpoint implements only the first yellow quality stage:
 - word and line geometry with a 32-region UI cap;
 - thin, touchable word underlines and browser `kn-IN`/`en-IN` speech;
 - no source-image retention;
+- server-side shared-code gate backed by Google Secret Manager;
 - no OpenAI, Google Vision, Firestore, device enrollment, or custom-domain DNS.
 
 ## Automated validation
 
 ```text
 .venv/bin/python -m unittest discover -s tests -v
-Ran 4 tests
+Ran 6 tests
 OK
 ```
 
 The tests cover the tester route, pinned-model health, invalid media rejection,
-stage-one geometry, no-retention reporting, and `no-store` API responses.
+stage-one geometry, no-retention reporting, `no-store` API responses,
+unauthenticated denial, and Secure/HttpOnly cookie issuance.
 
 ## Real fixture validation
 
@@ -51,15 +53,18 @@ mixed illustration/stylized-title case and the returned text contains errors.
 
 ## Deployed validation
 
-- Runtime source commit: `5993036`.
-- Cloud Build ID: `6be298bf-98fe-4164-960b-ae3525e8d491` (`SUCCESS`).
+- Runtime source commit: `830b2c2`.
+- Cloud Build ID: `613e2ce4-593d-4761-af08-4f98350e760e` (`SUCCESS`).
 - Image digest:
-  `sha256:acd8fca39b6ff76bf38c130cd7a4188357ce4b183a1a4f6db25899df9fd046a9`.
+  `sha256:1c4765f824f38e859e210f693d78c28319650e54ea024c9f93e93dd996eaac70`.
 - Cloud Run service: `vlens-a`, region `us-central1`, revision
-  `vlens-a-00002-8pl`.
+  `vlens-a-00004-4h8`.
 - Temporary tester URL:
   `https://vlens-a-816984866085.us-central1.run.app/a/`.
-- `GET /a/`: HTTP 200; `GET /`: HTTP 302 to `/a/`.
+- `GET /health`: HTTP 200 with `access_gate: enabled`.
+- Unauthenticated `GET /a/`: HTTP 302 to `/access`.
+- Unauthenticated `POST /api/capture`: HTTP 401.
+- Correct code: HTTP 303 to `/a/`; issued cookie then returns HTTP 200.
 - Public I2 `POST /api/capture`: HTTP 200 in 69.9 seconds from a cold,
   one-CPU instance; 47 selected words, 32 lines, and `retained: false`.
 
@@ -83,7 +88,18 @@ alias.
 - Pinned English model SHA-256:
   `7d4322bd2a7749724879683fc3912cb542f19906c83bcc1a52132556427170b2`.
 - `villagelensai.com` is delegated to Cloudflare, with application records
-  intentionally unset pending temporary-URL validation.
+  intentionally unset pending Google ownership verification.
+- Runtime identity: `villagelens-runtime@villagelensai.iam.gserviceaccount.com`,
+  with accessor permission only on `villagelens-access-code` and
+  `villagelens-session-secret`.
+
+The owner can retrieve the current tester code directly in a trusted terminal,
+without placing it in chat or Git:
+
+```sh
+gcloud secrets versions access latest \
+  --secret=villagelens-access-code --project=villagelensai
+```
 
 The local Docker daemon was not running, so Google Cloud Build performed and
 passed the container build. The deployment references the immutable digest

@@ -1,15 +1,15 @@
 # Google Cloud POC architecture
 
 Date: 2026-08-30
-Status: project and billing active; stage-one implementation deployed and
-fixture-validated on the temporary US Cloud Run URL
+Status: project and billing active; access-gated stage-one implementation
+deployed and fixture-validated; custom-domain ownership verification pending
 
 ## Objective
 
 Run the existing still-photo guided-reading experience independently of the
 development Mac for two controlled testers in India. `villagelensai.com` is
-registered and delegated to Cloudflare; it will be attached only after temporary
-GitHub Pages and Cloud Run URLs pass acceptance testing.
+registered and delegated to Cloudflare. The tester-facing deployment will expose
+only `https://villagelensai.com` after certificate validation.
 
 ## Architecture
 
@@ -52,11 +52,12 @@ evidence rather than the sole location source.
 
 ## Access and user interface
 
-The tester does not use email or enter an access code. A helper opens a one-time
-invitation URL, registers the phone, approves camera/audio permission, and adds
-the `/a` page to the Home Screen. The backend uses a revocable device token,
-daily request limit, image-size limit, bounded concurrency, and an emergency
-disable switch.
+The tester does not use email. A helper enters the shared POC access code once,
+approves camera/audio permission, and adds the page to the Home Screen. A signed,
+HttpOnly, Secure, SameSite cookie remembers that phone for 30 days. The access
+code and independent cookie-signing secret live only in Google Secret Manager.
+This shared-code gate is appropriate only for the controlled POC; revocable
+per-device enrollment and quotas remain the stronger follow-up.
 
 The interface remains icon- and speech-led. It supports one-word touch reading,
 continuous words, continuous sentences, sentence meanings, and a whole-page
@@ -107,7 +108,7 @@ Free allowances reduce expected POC cost but do not guarantee a zero bill.
 3. Create a dedicated OpenAI API project with a low budget; enter its key
    directly into Secret Manager rather than chat or repository files.
 4. `villagelensai.com` is registered and delegated to Cloudflare nameservers;
-   application DNS records remain intentionally unset until validation.
+   Google domain verification and final application DNS records are pending.
 5. Provide non-personal labels for the two test devices.
 
 ## Implementation order
@@ -126,7 +127,8 @@ Free allowances reduce expected POC cost but do not guarantee a zero bill.
 
 ## Acceptance criteria
 
-- One helper-installed icon; no tester login or typing afterward.
+- One helper-installed icon; one access-code entry per phone every 30 days, with
+  no tester login or typing afterward.
 - A touchable initial result survives every cloud-reader failure.
 - Later stages update without blocking interaction.
 - Kannada audio works on iPhone Safari in India.
