@@ -3,8 +3,8 @@
 VillageLensAI is a phone-oriented guided-reading proof of concept for Kannada and
 English text in book pages, signs, billboards, and phone screens.
 
-Status: stage-one Tesseract API implemented and locally tested; Cloud Run build
-and deployment pending.
+Status: stage-one Tesseract API deployed on Cloud Run; custom-domain and
+access-code rollout in progress.
 
 ## Intended experience
 
@@ -46,3 +46,7 @@ Only the genuine Tesseract yellow stage is enabled. The API is stateless and
 reports that it did not retain the source image. OpenAI, Google Vision, feedback
 persistence, device enrollment, and the remaining quality stages are still
 disabled.
+
+The deployed tester page and capture API are protected by a server-side access
+code. The code and cookie-signing secret live in Google Secret Manager and are
+never sent to GitHub or embedded in browser JavaScript.

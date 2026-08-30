@@ -25,8 +25,18 @@ def image_bytes() -> bytes:
 
 class ApiTests(unittest.TestCase):
     def setUp(self) -> None:
-        app.config.update(TESTING=True)
+        app.config.update(
+            TESTING=True,
+            VILLAGELENS_ACCESS_CODE="",
+            VILLAGELENS_SESSION_SECRET="",
+        )
         self.client = app.test_client()
+
+    def enable_access_gate(self) -> None:
+        app.config.update(
+            VILLAGELENS_ACCESS_CODE="test-code",
+            VILLAGELENS_SESSION_SECRET="test-session-secret",
+        )
 
     def test_tester_page_is_served(self) -> None:
         response = self.client.get("/a/")
@@ -38,6 +48,31 @@ class ApiTests(unittest.TestCase):
         response = self.client.get("/health")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.get_json()["status"], "ok")
+
+    def test_access_gate_protects_page_and_api(self) -> None:
+        self.enable_access_gate()
+        page = self.client.get("/a/")
+        self.assertEqual(page.status_code, 302)
+        self.assertEqual(page.headers["Location"], "/access")
+        api_response = self.client.post(
+            "/api/capture", data=image_bytes(), content_type="image/jpeg",
+        )
+        self.assertEqual(api_response.status_code, 401)
+        self.assertEqual(api_response.get_json()["error"], "ACCESS_REQUIRED")
+
+    def test_correct_access_code_sets_secure_cookie(self) -> None:
+        self.enable_access_gate()
+        response = self.client.post("/access", data={"code": "test-code"})
+        self.assertEqual(response.status_code, 303)
+        cookie = response.headers["Set-Cookie"]
+        self.assertIn("HttpOnly", cookie)
+        self.assertIn("Secure", cookie)
+        self.assertIn("SameSite=Lax", cookie)
+        token = cookie.split(";", 1)[0].split("=", 1)[1]
+        self.client.set_cookie("villagelens_access", token, secure=True)
+        allowed = self.client.get("/a/", base_url="https://localhost")
+        self.addCleanup(allowed.close)
+        self.assertEqual(allowed.status_code, 200)
 
     def test_capture_rejects_non_image(self) -> None:
         response = self.client.post("/api/capture", data=b"hello", content_type="text/plain")

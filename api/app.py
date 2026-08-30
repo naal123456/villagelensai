@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import hashlib
+import hmac
 import io
 import os
 import subprocess
@@ -12,7 +13,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
-from flask import Flask, Response, jsonify, redirect, request, send_from_directory
+from flask import Flask, Response, jsonify, make_response, redirect, request, send_from_directory
 from PIL import Image, ImageOps, UnidentifiedImageError
 
 
@@ -25,6 +26,8 @@ MAX_CAPTURE_BYTES = int(os.environ.get("VILLAGELENS_MAX_CAPTURE_BYTES", 15 * 102
 MAX_IMAGE_PIXELS = int(os.environ.get("VILLAGELENS_MAX_IMAGE_PIXELS", 25_000_000))
 MAX_IMAGE_EDGE = int(os.environ.get("VILLAGELENS_MAX_IMAGE_EDGE", 4096))
 ALLOWED_MEDIA_TYPES = {"image/jpeg", "image/png", "image/webp"}
+ACCESS_COOKIE_NAME = "villagelens_access"
+ACCESS_COOKIE_TTL_SECONDS = 30 * 24 * 60 * 60
 MODEL_SHA256 = {
     "kan": "bd31e6b6ae93271e3bcf5383d306d8eefbb91542937cd6d735a5930c970e61d8",
     "eng": "7d4322bd2a7749724879683fc3912cb542f19906c83bcc1a52132556427170b2",
@@ -34,6 +37,57 @@ Image.MAX_IMAGE_PIXELS = MAX_IMAGE_PIXELS
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = MAX_CAPTURE_BYTES
+app.config["VILLAGELENS_ACCESS_CODE"] = os.environ.get("VILLAGELENS_ACCESS_CODE", "")
+app.config["VILLAGELENS_SESSION_SECRET"] = os.environ.get("VILLAGELENS_SESSION_SECRET", "")
+
+
+def _access_configured() -> bool:
+    return bool(
+        app.config.get("VILLAGELENS_ACCESS_CODE")
+        and app.config.get("VILLAGELENS_SESSION_SECRET")
+    )
+
+
+def _access_signature(issued: str) -> str:
+    code_hash = hashlib.sha256(
+        str(app.config["VILLAGELENS_ACCESS_CODE"]).encode("utf-8")
+    ).hexdigest()
+    return hmac.new(
+        str(app.config["VILLAGELENS_SESSION_SECRET"]).encode("utf-8"),
+        f"{issued}:{code_hash}".encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+
+
+def _access_token() -> str:
+    issued = str(int(time.time()))
+    return f"{issued}.{_access_signature(issued)}"
+
+
+def _has_access() -> bool:
+    if not _access_configured():
+        return not (
+            app.config.get("VILLAGELENS_ACCESS_CODE")
+            or app.config.get("VILLAGELENS_SESSION_SECRET")
+        )
+    try:
+        issued, signature = request.cookies.get(ACCESS_COOKIE_NAME, "").split(".", 1)
+        age = int(time.time()) - int(issued)
+    except (TypeError, ValueError):
+        return False
+    return (
+        -60 <= age <= ACCESS_COOKIE_TTL_SECONDS
+        and hmac.compare_digest(signature, _access_signature(issued))
+    )
+
+
+@app.before_request
+def _require_access() -> Response | tuple[Response, int] | None:
+    if request.path in {"/access", "/health", "/healthz"} or _has_access():
+        return None
+    if request.path.startswith("/api/"):
+        return jsonify(error="ACCESS_REQUIRED"), 401
+    return redirect("/access", code=302)
 
 
 def _allowed_origins() -> set[str]:
@@ -49,7 +103,7 @@ def _response_headers(response: Response) -> Response:
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["Referrer-Policy"] = "no-referrer"
     response.headers["Permissions-Policy"] = "camera=(self)"
-    if request.path.startswith("/api/"):
+    if request.path.startswith("/api/") or request.path == "/access":
         response.headers["Cache-Control"] = "no-store"
         origin = request.headers.get("Origin", "")
         if origin and origin in _allowed_origins():
@@ -68,6 +122,44 @@ def root() -> Response:
     return redirect("/a/", code=302)
 
 
+@app.route("/access", methods=["GET", "POST"])
+def access() -> Response:
+    if not _access_configured():
+        return redirect("/a/", code=302)
+    failed = False
+    if request.method == "POST":
+        submitted = request.form.get("code", "").strip()
+        expected = str(app.config["VILLAGELENS_ACCESS_CODE"])
+        if submitted and hmac.compare_digest(submitted, expected):
+            response = make_response(redirect("/a/", code=303))
+            response.set_cookie(
+                ACCESS_COOKIE_NAME,
+                _access_token(),
+                max_age=ACCESS_COOKIE_TTL_SECONDS,
+                secure=True,
+                httponly=True,
+                samesite="Lax",
+                path="/",
+            )
+            return response
+        failed = True
+    message = "ಕೋಡ್ ಸರಿಯಾಗಿಲ್ಲ. ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ." if failed else "ಪ್ರವೇಶ ಕೋಡ್ ನಮೂದಿಸಿ"
+    page = f"""<!doctype html>
+<html lang="kn"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
+<meta name="theme-color" content="#101418"><title>VillageLensAI Access</title>
+<style>body{{margin:0;min-height:100vh;display:grid;place-items:center;background:#101418;
+color:#f5f7fa;font-family:system-ui,sans-serif}}main{{width:min(92vw,420px);text-align:center}}
+label{{display:block;font-size:1.35rem;margin:1rem}}input,button{{width:100%;min-height:58px;
+border-radius:12px;font-size:1.4rem}}input{{padding:0 14px;border:2px solid #64717d}}
+button{{margin-top:14px;border:0;background:#168447;color:white;font-weight:700}}</style></head>
+<body><main><h1>VillageLensAI</h1><form method="post" action="/access">
+<label for="code">{message}<br><small>Access code</small></label>
+<input id="code" name="code" type="password" autocomplete="one-time-code"
+required autofocus aria-label="Access code"><button type="submit">🔓</button></form></main></body></html>"""
+    return make_response(page, 401 if failed else 200)
+
+
 @app.get("/a/")
 def tester_page() -> Response:
     return send_from_directory(WEB_ROOT / "a", "index.html")
@@ -81,8 +173,16 @@ def health() -> tuple[Response, int]:
         for language in MODEL_SHA256
         if not (TESSDATA_DIRECTORY / f"{language}.traineddata").is_file()
     ]
-    status = 200 if not missing else 503
-    return jsonify(status="ok" if not missing else "not_ready", missing_models=missing), status
+    access_misconfigured = bool(
+        app.config.get("VILLAGELENS_ACCESS_CODE")
+        or app.config.get("VILLAGELENS_SESSION_SECRET")
+    ) and not _access_configured()
+    status = 200 if not missing and not access_misconfigured else 503
+    return jsonify(
+        status="ok" if status == 200 else "not_ready",
+        missing_models=missing,
+        access_gate="enabled" if _access_configured() else "disabled",
+    ), status
 
 
 def _normalized_image(data: bytes) -> tuple[Image.Image, bool]:
