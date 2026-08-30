@@ -62,6 +62,7 @@ class ApiTests(unittest.TestCase):
 
     def test_correct_access_code_sets_secure_cookie(self) -> None:
         self.enable_access_gate()
+        app.config["VILLAGELENS_ACCESS_CODE"] = "test-code\n"
         response = self.client.post("/access", data={"code": "test-code"})
         self.assertEqual(response.status_code, 303)
         cookie = response.headers["Set-Cookie"]

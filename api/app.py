@@ -37,21 +37,23 @@ Image.MAX_IMAGE_PIXELS = MAX_IMAGE_PIXELS
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = MAX_CAPTURE_BYTES
-app.config["VILLAGELENS_ACCESS_CODE"] = os.environ.get("VILLAGELENS_ACCESS_CODE", "")
+app.config["VILLAGELENS_ACCESS_CODE"] = os.environ.get("VILLAGELENS_ACCESS_CODE", "").strip()
 app.config["VILLAGELENS_SESSION_SECRET"] = os.environ.get("VILLAGELENS_SESSION_SECRET", "")
+
+
+def _access_code() -> str:
+    return str(app.config.get("VILLAGELENS_ACCESS_CODE", "")).strip()
 
 
 def _access_configured() -> bool:
     return bool(
-        app.config.get("VILLAGELENS_ACCESS_CODE")
+        _access_code()
         and app.config.get("VILLAGELENS_SESSION_SECRET")
     )
 
 
 def _access_signature(issued: str) -> str:
-    code_hash = hashlib.sha256(
-        str(app.config["VILLAGELENS_ACCESS_CODE"]).encode("utf-8")
-    ).hexdigest()
+    code_hash = hashlib.sha256(_access_code().encode("utf-8")).hexdigest()
     return hmac.new(
         str(app.config["VILLAGELENS_SESSION_SECRET"]).encode("utf-8"),
         f"{issued}:{code_hash}".encode("utf-8"),
@@ -129,7 +131,7 @@ def access() -> Response:
     failed = False
     if request.method == "POST":
         submitted = request.form.get("code", "").strip()
-        expected = str(app.config["VILLAGELENS_ACCESS_CODE"])
+        expected = _access_code()
         if submitted and hmac.compare_digest(submitted, expected):
             response = make_response(redirect("/a/", code=303))
             response.set_cookie(
