@@ -73,6 +73,7 @@ def tester_page() -> Response:
     return send_from_directory(WEB_ROOT / "a", "index.html")
 
 
+@app.get("/health")
 @app.get("/healthz")
 def health() -> tuple[Response, int]:
     missing = [

@@ -2,7 +2,8 @@
 
 The initial Cloud Run API exposes:
 
-- `GET /healthz` for pinned-model readiness;
+- `GET /health` for pinned-model readiness (`/healthz` remains a local alias,
+  but Cloud Run reserves paths ending in `z`);
 - `GET /a/` for the tester camera client;
 - `POST /api/capture` for bounded JPEG, PNG, or WebP input and stage-one
   repository-local Tesseract `kan+eng` geometry.

@@ -1,7 +1,7 @@
 # Stage 1 Tesseract cloud checkpoint
 
 Date: 2026-08-30
-Status: local API and real HTTP validation passed; remote container build pending
+Status: local and deployed real-HTTP validation passed
 
 ## Scope
 
@@ -49,10 +49,33 @@ This proves transport, model loading, OCR execution, TSV parsing, region
 selection, and response formation. It is not an accuracy score; I2 remains a
 mixed illustration/stylized-title case and the returned text contains errors.
 
+## Deployed validation
+
+- Cloud Build ID: `3285f53a-9eb8-45c3-af04-3848efbaf637` (`SUCCESS`).
+- Image digest:
+  `sha256:f538cc94f3ae94e3ea0453fbbbdeac61930cbd485915ae8624f7818fb9edfa51`.
+- Cloud Run service: `vlens-a`, region `us-central1`, revision
+  `vlens-a-00001-vcg`.
+- Temporary tester URL:
+  `https://vlens-a-816984866085.us-central1.run.app/a/`.
+- `GET /a/`: HTTP 200; `GET /`: HTTP 302 to `/a/`.
+- Public I2 `POST /api/capture`: HTTP 200 in 69.9 seconds from a cold,
+  one-CPU instance; 47 selected words, 32 lines, and `retained: false`.
+
+The deployed result proves the public still-photo path. It is not a recognition
+accuracy result. The cold full-resolution latency is a measured optimization
+target.
+
+Cloud Run currently intercepts paths ending in `z` in some projects, including
+`/healthz`, with a Google-front-end 404 before the container. `/health` is the
+canonical readiness endpoint; `/healthz` remains only a local compatibility
+alias.
+
 ## Runtime boundaries
 
 - Google project: `villagelensai`, billing active.
-- Intended region: `asia-south1` (Mumbai).
+- Current temporary region: `us-central1`; intended later region:
+  `asia-south1` (Mumbai).
 - Minimum instances: `0`; maximum instances: `1`.
 - Pinned Kannada model SHA-256:
   `bd31e6b6ae93271e3bcf5383d306d8eefbb91542937cd6d735a5930c970e61d8`.
@@ -61,6 +84,7 @@ mixed illustration/stylized-title case and the returned text contains errors.
 - `villagelensai.com` is delegated to Cloudflare, with application records
   intentionally unset pending temporary-URL validation.
 
-The local Docker daemon was not running, so the same Dockerfile will be built
-and validated through Google Cloud Build. Deployment must reference the commit
-containing this checkpoint and retain the limits above.
+The local Docker daemon was not running, so Google Cloud Build performed and
+passed the container build. The deployment references the immutable digest
+above and uses one CPU, 2 GiB memory, concurrency `1`, a 90-second timeout,
+minimum instances `0`, and maximum instances `1`.

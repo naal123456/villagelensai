@@ -1,8 +1,8 @@
 # Google Cloud POC architecture
 
 Date: 2026-08-30
-Status: project and billing active; stage-one implementation locally tested;
-temporary Cloud Run deployment pending
+Status: project and billing active; stage-one implementation deployed and
+fixture-validated on the temporary US Cloud Run URL
 
 ## Objective
 
@@ -16,7 +16,7 @@ GitHub Pages and Cloud Run URLs pass acceptance testing.
 ```text
 iPhone Safari
   -> GitHub Pages client at /a
-  -> Cloud Run API in asia-south1 (Mumbai)
+  -> Cloud Run API (temporary POC in us-central1; target asia-south1 Mumbai)
        -> repository-local Tesseract kan+eng
        -> Google Cloud Vision Kannada/English OCR
        -> OpenAI fast whole-image reading
@@ -89,7 +89,8 @@ retention and a short lifecycle.
 ## Cost and credential controls
 
 - Prefer a dedicated Google project for cost and permission isolation.
-- Cloud Run region `asia-south1`, minimum instances `0`, maximum instances `1`.
+- Temporary Cloud Run region `us-central1`; migrate to `asia-south1` after the
+  initial POC. Minimum instances `0`, maximum instances `1` in either region.
 - No Kubernetes cluster, GPU, or self-hosted large vision model.
 - Normalize and bound the image before provider fan-out.
 - Cap Google Vision and OpenAI requests independently.
