@@ -2,7 +2,8 @@
 
 Date: 2026-08-30
 Status: project and billing active; access-gated stage-one implementation
-deployed and fixture-validated; custom-domain ownership verification pending
+deployed and fixture-validated; custom-domain mapping created and managed
+certificate provisioning pending
 
 ## Objective
 
@@ -107,8 +108,8 @@ Free allowances reduce expected POC cost but do not guarantee a zero bill.
 2. A $100 Google budget alert has been configured by the project owner.
 3. Create a dedicated OpenAI API project with a low budget; enter its key
    directly into Secret Manager rather than chat or repository files.
-4. `villagelensai.com` is registered and delegated to Cloudflare nameservers;
-   Google domain verification and final application DNS records are pending.
+4. `villagelensai.com` is verified, mapped to `vlens-a`, and delegated through
+   DNS-only Google A/AAAA records in Cloudflare. Certificate issuance is pending.
 5. Provide non-personal labels for the two test devices.
 
 ## Implementation order

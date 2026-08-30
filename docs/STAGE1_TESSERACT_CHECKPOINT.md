@@ -87,8 +87,11 @@ alias.
   `bd31e6b6ae93271e3bcf5383d306d8eefbb91542937cd6d735a5930c970e61d8`.
 - Pinned English model SHA-256:
   `7d4322bd2a7749724879683fc3912cb542f19906c83bcc1a52132556427170b2`.
-- `villagelensai.com` is delegated to Cloudflare, with application records
-  intentionally unset pending Google ownership verification.
+- `villagelensai.com` ownership is verified under `nnagarajayya@gmail.com`.
+- Cloud Run domain mapping `villagelensai.com` -> `vlens-a` is created in
+  `us-central1`; all returned A/AAAA records resolve from Cloudflare's
+  authoritative DNS and public Google/Cloudflare resolvers. Managed certificate
+  issuance remains pending.
 - Runtime identity: `villagelens-runtime@villagelensai.iam.gserviceaccount.com`,
   with accessor permission only on `villagelens-access-code` and
   `villagelens-session-secret`.
