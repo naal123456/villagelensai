@@ -1,0 +1,15 @@
+.DS_Store
+.env
+.env.*
+!.env.example
+.venv/
+node_modules/
+dist/
+coverage/
+__pycache__/
+*.pyc
+
+# Tester photographs, OCR output, and provider payloads are runtime data.
+captures/
+evaluation/user-feedback/
+credentials/

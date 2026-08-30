@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="kn">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+  <meta name="theme-color" content="#101418">
+  <title>VillageLensAI</title>
+  <style>
+    :root { color-scheme: dark; font-family: system-ui, sans-serif; }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; background: #101418; color: #f5f7fa; }
+    main { width: min(100%, 720px); margin: auto; padding: 18px; text-align: center; }
+    h1 { font-size: clamp(1.45rem, 6vw, 2.4rem); }
+    .camera {
+      display: grid; place-items: center; width: min(72vw, 260px); aspect-ratio: 1;
+      margin: 28px auto; border: 4px solid #ffcd00; border-radius: 50%;
+      background: #26323b; color: white; font-size: min(26vw, 110px); cursor: pointer;
+    }
+    .camera:focus-visible { outline: 5px solid #65d6ff; outline-offset: 5px; }
+    #preview { display: none; max-width: 100%; max-height: 62vh; margin: 18px auto;
+      border-radius: 12px; object-fit: contain; }
+    #status { min-height: 3em; font-size: 1.08rem; line-height: 1.5; color: #d9e2ec; }
+    .note { color: #9fb3c8; font-size: .9rem; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>VillageLensAI</h1>
+    <button class="camera" id="camera" aria-label="Take a picture" title="Take a picture">📷</button>
+    <input id="camera-input" type="file" accept="image/*" capture="environment" hidden>
+    <img id="preview" alt="Captured page preview">
+    <p id="status" aria-live="polite">ಚಿತ್ರ ತೆಗೆಯಲು ಕ್ಯಾಮೆರಾ ಗುರುತನ್ನು ಒತ್ತಿ.</p>
+    <p class="note">Camera-shell POC only. Recognition is not connected yet.</p>
+  </main>
+  <script>
+    const input = document.getElementById('camera-input');
+    const preview = document.getElementById('preview');
+    const status = document.getElementById('status');
+    document.getElementById('camera').addEventListener('click', () => input.click());
+    input.addEventListener('change', () => {
+      const file = input.files && input.files[0];
+      if (!file) return;
+      const url = URL.createObjectURL(file);
+      preview.onload = () => URL.revokeObjectURL(url);
+      preview.src = url;
+      preview.style.display = 'block';
+      status.textContent = 'ಚಿತ್ರ ಸಿದ್ಧವಾಗಿದೆ. ಓದುವ ಸೇವೆಯನ್ನು ಇನ್ನೂ ಸಂಪರ್ಕಿಸಲಾಗುತ್ತಿದೆ.';
+    });
+  </script>
+</body>
+</html>
