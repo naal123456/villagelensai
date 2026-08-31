@@ -42,14 +42,14 @@
   <main>
     <section class="controls" aria-label="Reading controls">
       <nav class="toolbar" aria-label="Touch reading">
-        <button id="mode-word" class="active" aria-label="Touch a word" data-tip="Touch a word">☝️</button>
-        <button id="mode-sentence" aria-label="Touch a sentence" data-tip="Touch a sentence">☝️➖</button>
+        <button id="mode-word" class="active" aria-label="Touch a word" data-tip="Touch a word">ಅ</button>
+        <button id="mode-sentence" aria-label="Touch a sentence" data-tip="Touch a sentence"><small>ಅ ಆ ಇ</small></button>
         <button id="mode-meaning" aria-label="Touch for meaning" data-tip="Meaning">💡</button>
         <button id="camera" aria-label="Take a picture" data-tip="Take a picture">📷</button>
       </nav>
       <nav class="toolbar" aria-label="Continuous reading">
-        <button id="play-words" aria-label="Read words continuously" data-tip="Read words">▶️ ಅ</button>
-        <button id="play-sentences" aria-label="Read sentences continuously" data-tip="Read sentences">▶️ ➖</button>
+        <button id="play-words" aria-label="Read words continuously" data-tip="Read words">▶ ಅ</button>
+        <button id="play-sentences" aria-label="Read sentences continuously" data-tip="Read sentences"><small>▶ ಅ ಆ ಇ</small></button>
         <button id="play-meanings" aria-label="Explain sentences continuously" data-tip="Explain sentences">▶️ 💡</button>
         <button id="play-whole" aria-label="Explain the whole page" data-tip="Explain whole page">📖 💡</button>
       </nav>
@@ -120,12 +120,13 @@
       document.querySelectorAll('.underline').forEach(node=>node.classList.toggle('active',node.dataset.id===id));
       current.textContent=text||'';
     }
-    function explainUnavailable() {
-      stop(); current.textContent='Meaning will be available when the cloud reader is connected.';
-      status.textContent='Meaning is not available in this first reading stage yet.';
+    function explainMeaning() {
+      stop(); const meaning=result&&result.summary_kn;
+      if (meaning) { current.textContent=meaning; status.textContent='ಪುಟದ ಅರ್ಥ'; speak(meaning); return; }
+      current.textContent='Meaning is still being prepared.'; status.textContent='ಅರ್ಥ ಇನ್ನೂ ಸಿದ್ಧವಾಗಿಲ್ಲ.';
     }
     async function selectWord(word) {
-      if (mode==='meaning') return explainUnavailable();
+      if (mode==='meaning') return explainMeaning();
       const target=mode==='sentence' ? lineForWord(word) : word;
       if (!target) return; activate(target.id,target.text); await speak(target.text);
     }
@@ -135,7 +136,7 @@
       line.setAttribute('x1',box.x); line.setAttribute('x2',box.x+box.width); line.setAttribute('y1',y); line.setAttribute('y2',y);
       line.setAttribute('class','underline'); line.dataset.id=target.id; overlay.appendChild(line);
     }
-    function render(value) {
+    function render(value,markStageOne=true) {
       result=value; overlay.textContent=''; current.textContent='';
       overlay.setAttribute('viewBox',`0 0 ${value.image_size.width} ${value.image_size.height}`);
       for (const word of value.words||[]) {
@@ -145,7 +146,7 @@
         hit.addEventListener('click',()=>{ if (!suppressTap) selectWord(word); }); overlay.appendChild(hit);
         addUnderline(word,word.box);
       }
-      $('quality-1').classList.add('ready');
+      if (markStageOne) $('quality-1').classList.add('ready');
       status.textContent=(value.words||[]).length?'ಪದ ಅಥವಾ ಸಾಲನ್ನು ಸ್ಪರ್ಶಿಸಿ.':'ಪಠ್ಯ ಸಿಗಲಿಲ್ಲ. ಮತ್ತೊಂದು ಚಿತ್ರ ಪ್ರಯತ್ನಿಸಿ.';
     }
     function sceneToResult(scene) {
@@ -190,7 +191,12 @@
       stop(); galleryIndex=(index+gallery.length)%gallery.length; const item=gallery[galleryIndex];
       position.textContent=`${item.label}  ${galleryIndex+1}/${gallery.length}`; status.textContent='ಚಿತ್ರವನ್ನು ಸಿದ್ಧಪಡಿಸುತ್ತಿದೆ…';
       image.src=item.image_url; stage.style.display='inline-block'; resetQuality();
-      try { render(await loadItem(item)); }
+      try {
+        render(await loadItem(item));
+        if (item.stage2) $('quality-2').classList.add('ready');
+        if (item.stage3) $('quality-3').classList.add('ready');
+        startCloudReaders(item);
+      }
       catch (_) { status.textContent='ಈ ಉಳಿಸಿದ ಚಿತ್ರವನ್ನು ಓದಲು ಆಗಲಿಲ್ಲ.'; }
     }
     async function loadGallery() {
@@ -207,23 +213,59 @@
       }
       if (generation===playbackGeneration) { stage.classList.remove('playing'); document.querySelectorAll('.underline').forEach(n=>n.classList.remove('active')); }
     }
+    function newCaptureId() {
+      return (crypto.randomUUID?crypto.randomUUID():`${Date.now()}-${Math.random()}`).replace(/-/g,'').replace(/[^0-9a-f]/gi,'').padEnd(32,'0').slice(0,32).toLowerCase();
+    }
+    async function callReader(stageNumber,blob,captureId,item) {
+      try {
+        const response=await fetch(`/api/read/${stageNumber}`,{method:'POST',headers:{'Content-Type':blob.type||'image/jpeg','X-VillageLens-Capture-ID':captureId},body:blob});
+        if (response.status===401) return location.href='/access';
+        const value=await response.json(); if (!response.ok) throw new Error(value.error||'READER_FAILED');
+        $('quality-'+stageNumber).classList.add('ready'); item[`stage${stageNumber}`]=value;
+        if (stageNumber===2&&item.id!=='demo-i2'&&(value.words||[]).length) {
+          item.result=value; if (item.summary_kn) item.result.summary_kn=item.summary_kn;
+          if (gallery[galleryIndex]===item) render(value,false);
+        }
+        if (stageNumber===3) {
+          item.summary_kn=value.summary_kn||''; if (item.result) item.result.summary_kn=item.summary_kn;
+          if (gallery[galleryIndex]===item&&value.summary_kn) status.textContent='ಓದುವಿಕೆ ಮತ್ತು ಅರ್ಥ ಸಿದ್ಧವಾಗಿದೆ.';
+        }
+        return true;
+      } catch (_) { return false; }
+    }
+    async function startCloudReaders(item,blob) {
+      if (item.cloudStarted) return; item.cloudStarted=true; beginTimer();
+      try {
+        if (!blob) { const response=await fetch(item.image_url); if (!response.ok) throw new Error('IMAGE_FAILED'); blob=await response.blob(); }
+        const captureId=/^[0-9a-f]{32}$/.test(item.id)?item.id:'';
+        const outcomes=await Promise.all([callReader(2,blob,captureId,item),callReader(3,blob,captureId,item)]);
+        if (gallery[galleryIndex]===item) status.textContent=outcomes.filter(Boolean).length
+          ? `${1+outcomes.filter(Boolean).length}/3 reading stages ready.` : 'ಮೊದಲ ಓದುವಿಕೆ ಸಿದ್ಧವಾಗಿದೆ.';
+      } finally { endTimer(); }
+    }
     async function useCapture(file) {
       if (!file) return; stop(); resetQuality(); beginTimer(); status.textContent='ಚಿತ್ರವನ್ನು ಓದುತ್ತಿದೆ…';
+      const captureId=newCaptureId();
       const objectUrl=URL.createObjectURL(file); image.src=objectUrl; stage.style.display='inline-block';
+      const item={id:captureId,label:'Captured page',kind:'capture',image_url:objectUrl,result:null,cloudStarted:true};
+      gallery.splice(Math.min(2,gallery.length),0,item); galleryIndex=gallery.indexOf(item); position.textContent=`Captured page  ${galleryIndex+1}/${gallery.length}`;
+      const cloudPromise=Promise.all([callReader(2,file,captureId,item),callReader(3,file,captureId,item)]);
       try {
-        const response=await fetch('/api/capture',{method:'POST',headers:{'Content-Type':file.type||'image/jpeg'},body:file});
+        const response=await fetch('/api/capture',{method:'POST',headers:{'Content-Type':file.type||'image/jpeg','X-VillageLens-Capture-ID':captureId},body:file});
         if (response.status===401) return location.href='/access'; const value=await response.json();
         if (!response.ok) throw new Error(value.error||'CAPTURE_FAILED');
-        const item={id:value.capture_id,label:'Captured page',kind:'capture',image_url:value.retained?value.image_url:objectUrl,result:value};
-        gallery.splice(Math.min(2,gallery.length),0,item); await showGallery(gallery.indexOf(item)); render(value);
+        item.id=value.capture_id; item.image_url=value.retained?value.image_url:objectUrl;
+        if (!item.result||!item.stage2) item.result=value;
+        if (item.summary_kn) item.result.summary_kn=item.summary_kn;
+        render(item.result);
         if (!value.retained) status.textContent+=' This test could not be saved.';
       } catch (_) { status.textContent='ಈ ಚಿತ್ರವನ್ನು ಓದಲು ಆಗಲಿಲ್ಲ. ಮತ್ತೊಮ್ಮೆ ಪ್ರಯತ್ನಿಸಿ.'; }
-      finally { endTimer(); input.value=''; if (image.src!==objectUrl) URL.revokeObjectURL(objectUrl); }
+      finally { await cloudPromise; endTimer(); input.value=''; if (image.src!==objectUrl) URL.revokeObjectURL(objectUrl); }
     }
     $('mode-word').onclick=()=>setMode('word'); $('mode-sentence').onclick=()=>setMode('sentence');
     $('mode-meaning').onclick=()=>setMode('meaning'); $('camera').onclick=()=>input.click();
     $('play-words').onclick=()=>result&&play(result.words||[]); $('play-sentences').onclick=()=>result&&play(result.lines||[]);
-    $('play-meanings').onclick=explainUnavailable; $('play-whole').onclick=explainUnavailable; $('stop').onclick=stop;
+    $('play-meanings').onclick=explainMeaning; $('play-whole').onclick=explainMeaning; $('stop').onclick=stop;
     $('previous').onclick=()=>showGallery(galleryIndex-1); $('next').onclick=()=>showGallery(galleryIndex+1);
     input.onchange=()=>useCapture(input.files&&input.files[0]);
     stage.addEventListener('pointerdown',event=>{ pointerStart={x:event.clientX,y:event.clientY}; suppressTap=false; });

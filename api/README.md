@@ -10,11 +10,15 @@ The initial Cloud Run API exposes:
 - `GET /api/captures/<id>/image` for authenticated private capture retrieval;
 - `POST /api/capture` for bounded JPEG, PNG, or WebP input and stage-one
   repository-local Tesseract `kan+eng` geometry and optional durable retention.
+- `POST /api/read/2` for Google Vision document OCR geometry;
+- `POST /api/read/3` for an OpenAI structured whole-image reading and Kannada
+  page explanation.
 
 When `VILLAGELENS_CAPTURE_BUCKET` is set, source images and structured results
 are stored privately under `captures/<id>/`; without it, capture still succeeds
 but returns `retained: false`. When
 `VILLAGELENS_ACCESS_CODE` and `VILLAGELENS_SESSION_SECRET` are supplied, all
 tester and capture routes require a signed, HttpOnly, Secure cookie. Supplying
-only one secret fails readiness and fails closed. OpenAI, Google Vision,
-feedback persistence, and device enrollment are not enabled in this slice.
+only one access secret fails readiness and fails closed. The OpenAI adapter
+requires `OPENAI_API_KEY` only on the server and defaults to `gpt-5-mini` unless
+`VILLAGELENS_OPENAI_MODEL` is explicitly set.

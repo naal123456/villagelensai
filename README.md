@@ -47,9 +47,11 @@ camera, sends one bounded still image to the same-origin API, and renders the
 returned word geometry as touchable underlines. Captures and their stage-one
 results are retained in the private `villagelensai-captures` Cloud Storage
 bucket and returned in the authenticated gallery, newest first after I2 and I1.
-Only the genuine Tesseract yellow stage is enabled. OpenAI, Google Vision,
-feedback persistence, device enrollment, and later quality stages remain
-disabled.
+The browser starts Tesseract, Google Vision document OCR, and the OpenAI image
+reader independently. Yellow appears for Tesseract, light green for Vision, and
+dark green for OpenAI; the elapsed clock runs until enabled readers finish or
+time out. The OpenAI stage remains gray when its server-side API secret is not
+configured. Feedback persistence and device enrollment remain future work.
 
 The deployed tester page and capture API are protected by a server-side access
 code. The code and cookie-signing secret live in Google Secret Manager and are

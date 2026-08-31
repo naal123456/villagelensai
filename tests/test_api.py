@@ -46,6 +46,7 @@ class ApiTests(unittest.TestCase):
         self.assertIn(b'id="mode-word"', response.data)
         self.assertIn(b'id="play-sentences"', response.data)
         self.assertIn(b"Swipe the page", response.data)
+        self.assertIn("ಅ ಆ ಇ".encode(), response.data)
 
     def test_demo_assets_are_served(self) -> None:
         image = self.client.get("/a/demo/i2.jpeg")
@@ -125,6 +126,26 @@ class ApiTests(unittest.TestCase):
         )
         self.assertFalse(value["retained"])
         self.assertEqual(response.headers["Cache-Control"], "no-store")
+
+    @patch("api.app._store_reader_evidence")
+    @patch("api.app._vision_reader")
+    def test_stage_two_reader_contract(self, reader: object, store: object) -> None:
+        reader.return_value = {
+            "schema": "villagelens.reader.v1", "stage": 2,
+            "image_size": {"width": 320, "height": 120}, "words": [], "lines": [],
+        }
+        capture_id = "a" * 32
+        response = self.client.post(
+            "/api/read/2", data=image_bytes(), content_type="image/jpeg",
+            headers={"X-VillageLens-Capture-ID": capture_id},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["stage"], 2)
+        store.assert_called_once_with(capture_id, 2, reader.return_value)
+
+    def test_unknown_reader_stage_is_rejected(self) -> None:
+        response = self.client.post("/api/read/4", data=image_bytes(), content_type="image/jpeg")
+        self.assertEqual(response.status_code, 404)
 
 
 if __name__ == "__main__":

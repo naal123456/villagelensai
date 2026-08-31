@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import base64
 import hashlib
 import hmac
 import io
@@ -15,6 +16,8 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+import requests
 
 from flask import Flask, Response, jsonify, make_response, redirect, request, send_from_directory
 from PIL import Image, ImageOps, UnidentifiedImageError
@@ -31,6 +34,7 @@ MAX_IMAGE_PIXELS = int(os.environ.get("VILLAGELENS_MAX_IMAGE_PIXELS", 25_000_000
 MAX_IMAGE_EDGE = int(os.environ.get("VILLAGELENS_MAX_IMAGE_EDGE", 4096))
 ALLOWED_MEDIA_TYPES = {"image/jpeg", "image/png", "image/webp"}
 CAPTURE_BUCKET = os.environ.get("VILLAGELENS_CAPTURE_BUCKET", "")
+OPENAI_MODEL = os.environ.get("VILLAGELENS_OPENAI_MODEL", "gpt-5-mini")
 ACCESS_COOKIE_NAME = "villagelens_access"
 ACCESS_COOKIE_TTL_SECONDS = 30 * 24 * 60 * 60
 MODEL_SHA256 = {
@@ -302,6 +306,103 @@ def _tesseract(image_path: Path) -> tuple[list[dict[str, Any]], list[dict[str, A
     return words, lines, round((time.monotonic() - started) * 1000)
 
 
+def _vision_reader(data: bytes, width: int, height: int) -> dict[str, Any]:
+    from google.cloud import vision
+
+    started = time.monotonic()
+    response = vision.ImageAnnotatorClient().document_text_detection(
+        image=vision.Image(content=data), timeout=70,
+    )
+    if response.error.message:
+        raise RuntimeError("VISION_OCR_FAILED")
+    words: list[dict[str, Any]] = []
+    lines: list[dict[str, Any]] = []
+    for page in response.full_text_annotation.pages:
+        for block in page.blocks:
+            for paragraph in block.paragraphs:
+                line_words: list[dict[str, Any]] = []
+                for source_word in paragraph.words:
+                    text = "".join(symbol.text for symbol in source_word.symbols).strip()
+                    vertices = list(source_word.bounding_box.vertices)
+                    if not text or not vertices:
+                        continue
+                    xs = [vertex.x for vertex in vertices]
+                    ys = [vertex.y for vertex in vertices]
+                    word = {
+                        "id": f"vision-word-{len(words) + 1:04d}", "text": text,
+                        "confidence": round(float(source_word.confidence) * 100, 3),
+                        "box": {"x": min(xs), "y": min(ys), "width": max(xs) - min(xs),
+                                "height": max(ys) - min(ys)},
+                    }
+                    words.append(word); line_words.append(word)
+                if not line_words:
+                    continue
+                line_id = f"vision-line-{len(lines) + 1:03d}"
+                for word in line_words:
+                    word["line_id"] = line_id
+                left = min(word["box"]["x"] for word in line_words)
+                top = min(word["box"]["y"] for word in line_words)
+                right = max(word["box"]["x"] + word["box"]["width"] for word in line_words)
+                bottom = max(word["box"]["y"] + word["box"]["height"] for word in line_words)
+                lines.append({"id": line_id, "text": " ".join(word["text"] for word in line_words),
+                              "box": {"x": left, "y": top, "width": right-left, "height": bottom-top},
+                              "word_ids": [word["id"] for word in line_words]})
+    words, lines = _select_regions(words, lines, width=width, height=height)
+    return {"schema": "villagelens.reader.v1", "stage": 2, "reader": "cloud_ocr",
+            "latency_ms": round((time.monotonic()-started)*1000), "image_size": {"width": width, "height": height},
+            "words": words, "lines": lines, "text": response.full_text_annotation.text}
+
+
+def _openai_output_text(response: dict[str, Any]) -> str:
+    for item in response.get("output", []):
+        for content in item.get("content", []):
+            if content.get("type") == "output_text":
+                return str(content.get("text", ""))
+    raise RuntimeError("OPENAI_READER_INVALID_RESPONSE")
+
+
+def _openai_reader(data: bytes, media_type: str, width: int, height: int) -> dict[str, Any]:
+    api_key = os.environ.get("OPENAI_API_KEY", "").strip()
+    if not api_key:
+        raise RuntimeError("OPENAI_READER_NOT_CONFIGURED")
+    started = time.monotonic()
+    schema = {"type": "object", "additionalProperties": False, "required": ["words", "lines", "summary_kn"],
+              "properties": {
+                  "words": {"type": "array", "items": {"type": "object", "additionalProperties": False,
+                      "required": ["text", "box"], "properties": {"text": {"type": "string"},
+                      "box": {"type": "array", "items": {"type": "number"}, "minItems": 4, "maxItems": 4}}}},
+                  "lines": {"type": "array", "items": {"type": "string"}}, "summary_kn": {"type": "string"}}}
+    encoded = base64.b64encode(data).decode("ascii")
+    payload = {"model": OPENAI_MODEL, "store": False, "reasoning": {"effort": "low"},
+               "input": [{"role": "user", "content": [
+                   {"type": "input_text", "text": "Read every clearly visible Kannada or English word exactly. Return words in reading order. For each word, box is [left,top,width,height] normalized from 0 to 1000. Do not guess unclear text. Also return lines and a short, simple Kannada explanation."},
+                   {"type": "input_image", "image_url": f"data:{media_type};base64,{encoded}", "detail": "high"}]}],
+               "text": {"format": {"type": "json_schema", "name": "villagelens_reading", "strict": True, "schema": schema}}}
+    response = requests.post("https://api.openai.com/v1/responses", json=payload,
+                             headers={"Authorization": f"Bearer {api_key}"}, timeout=75)
+    if response.status_code != 200:
+        app.logger.warning("OpenAI reader failed with HTTP %s", response.status_code)
+        raise RuntimeError("OPENAI_READER_FAILED")
+    parsed = json.loads(_openai_output_text(response.json()))
+    words: list[dict[str, Any]] = []
+    for candidate in parsed.get("words", []):
+        box = candidate.get("box", [])
+        if len(box) != 4 or not str(candidate.get("text", "")).strip():
+            continue
+        x, y, w, h = [max(0.0, min(1000.0, float(value))) for value in box]
+        if w <= 0 or h <= 0 or x+w > 1020 or y+h > 1020:
+            continue
+        words.append({"id": f"openai-word-{len(words)+1:04d}", "text": candidate["text"].strip(),
+                      "box": {"x": round(x*width/1000), "y": round(y*height/1000),
+                              "width": round(w*width/1000), "height": round(h*height/1000)}})
+    lines = [{"id": f"openai-line-{index+1:03d}", "text": text, "word_ids": []}
+             for index, text in enumerate(parsed.get("lines", [])) if str(text).strip()]
+    return {"schema": "villagelens.reader.v1", "stage": 3, "reader": "vision_language",
+            "model": OPENAI_MODEL, "latency_ms": round((time.monotonic()-started)*1000),
+            "image_size": {"width": width, "height": height}, "words": words, "lines": lines,
+            "text": "\n".join(line["text"] for line in lines), "summary_kn": parsed.get("summary_kn", "")}
+
+
 def _storage_bucket() -> Any:
     if not CAPTURE_BUCKET:
         return None
@@ -325,6 +426,15 @@ def _store_capture(data: bytes, media_type: str, result: dict[str, Any]) -> bool
         content_type="application/json; charset=utf-8",
     )
     return True
+
+
+def _store_reader_evidence(capture_id: str, stage: int, result: dict[str, Any]) -> None:
+    if not _valid_capture_id(capture_id) or (bucket := _storage_bucket()) is None:
+        return
+    bucket.blob(f"captures/{capture_id}/stage-{stage}.json").upload_from_string(
+        json.dumps(result, ensure_ascii=False, separators=(",", ":")),
+        content_type="application/json; charset=utf-8",
+    )
 
 
 def _valid_capture_id(capture_id: str) -> bool:
@@ -412,7 +522,8 @@ def capture() -> tuple[Response, int]:
     except RuntimeError as exc:
         return jsonify(error=str(exc)), 503
 
-    capture_id = uuid.uuid4().hex
+    requested_id = request.headers.get("X-VillageLens-Capture-ID", "")
+    capture_id = requested_id if _valid_capture_id(requested_id) else uuid.uuid4().hex
     result = {
         "schema": "villagelens.capture.v1", "capture_id": capture_id,
         "captured_at": datetime.now(timezone.utc).isoformat(), "label": "Captured page",
@@ -431,6 +542,32 @@ def capture() -> tuple[Response, int]:
     except Exception:
         app.logger.exception("Capture could not be retained")
     return jsonify(result), 200
+
+
+@app.post("/api/read/<int:stage>")
+def cloud_read(stage: int) -> tuple[Response, int]:
+    if stage not in {2, 3}:
+        return jsonify(error="READER_NOT_FOUND"), 404
+    media_type = (request.content_type or "").split(";", 1)[0].lower()
+    if media_type not in ALLOWED_MEDIA_TYPES:
+        return jsonify(error="CAPTURE_MEDIA_TYPE_UNSUPPORTED"), 415
+    data = request.get_data(cache=False)
+    if not data:
+        return jsonify(error="CAPTURE_EMPTY"), 400
+    try:
+        image, _ = _normalized_image(data)
+        normalized = io.BytesIO()
+        image.save(normalized, format="PNG", optimize=True)
+        payload = (_vision_reader(normalized.getvalue(), image.width, image.height) if stage == 2
+                   else _openai_reader(normalized.getvalue(), "image/png", image.width, image.height))
+        _store_reader_evidence(request.headers.get("X-VillageLens-Capture-ID", ""), stage, payload)
+        return jsonify(payload), 200
+    except ValueError as exc:
+        return jsonify(error=str(exc)), 400
+    except Exception as exc:
+        error = str(exc) if isinstance(exc, RuntimeError) else f"STAGE_{stage}_UNAVAILABLE"
+        app.logger.exception("Reader stage %s failed", stage)
+        return jsonify(error=error), 503
 
 
 if __name__ == "__main__":
