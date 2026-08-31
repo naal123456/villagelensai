@@ -287,6 +287,33 @@ def _select_regions(
     return [word for word in words if word.get("line_id") in allowed], chosen
 
 
+def _geometry_lines(words: list[dict[str, Any]], prefix: str) -> list[dict[str, Any]]:
+    rows: list[list[dict[str, Any]]] = []
+    for word in sorted(words, key=lambda item: (item["box"]["y"], item["box"]["x"])):
+        box = word["box"]
+        center = box["y"] + box["height"] / 2
+        row = next((candidate for candidate in rows if abs(center - sum(
+            item["box"]["y"] + item["box"]["height"] / 2 for item in candidate
+        ) / len(candidate)) <= max(box["height"], max(item["box"]["height"] for item in candidate)) * .65), None)
+        if row is None:
+            row = []
+            rows.append(row)
+        row.append(word)
+    lines: list[dict[str, Any]] = []
+    for row in sorted(rows, key=lambda items: min(item["box"]["y"] for item in items)):
+        row.sort(key=lambda item: item["box"]["x"])
+        line_id = f"{prefix}-line-{len(lines)+1:03d}"
+        for word in row:
+            word["line_id"] = line_id
+        left=min(word["box"]["x"] for word in row); top=min(word["box"]["y"] for word in row)
+        right=max(word["box"]["x"]+word["box"]["width"] for word in row)
+        bottom=max(word["box"]["y"]+word["box"]["height"] for word in row)
+        lines.append({"id": line_id, "text": " ".join(word["text"] for word in row),
+                      "box": {"x": left, "y": top, "width": right-left, "height": bottom-top},
+                      "word_ids": [word["id"] for word in row]})
+    return lines
+
+
 def _tesseract(image_path: Path) -> tuple[list[dict[str, Any]], list[dict[str, Any]], int]:
     started = time.monotonic()
     try:
@@ -395,8 +422,11 @@ def _openai_reader(data: bytes, media_type: str, width: int, height: int) -> dic
         words.append({"id": f"openai-word-{len(words)+1:04d}", "text": candidate["text"].strip(),
                       "box": {"x": round(x*width/1000), "y": round(y*height/1000),
                               "width": round(w*width/1000), "height": round(h*height/1000)}})
-    lines = [{"id": f"openai-line-{index+1:03d}", "text": text, "word_ids": []}
-             for index, text in enumerate(parsed.get("lines", [])) if str(text).strip()]
+    lines = _geometry_lines(words, "openai")
+    model_lines = [str(text).strip() for text in parsed.get("lines", []) if str(text).strip()]
+    if len(model_lines) == len(lines):
+        for line, text in zip(lines, model_lines):
+            line["text"] = text
     return {"schema": "villagelens.reader.v1", "stage": 3, "reader": "vision_language",
             "model": OPENAI_MODEL, "latency_ms": round((time.monotonic()-started)*1000),
             "image_size": {"width": width, "height": height}, "words": words, "lines": lines,
