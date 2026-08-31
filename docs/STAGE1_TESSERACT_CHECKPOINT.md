@@ -59,8 +59,7 @@ mixed illustration/stylized-title case and the returned text contains errors.
   `sha256:1c4765f824f38e859e210f693d78c28319650e54ea024c9f93e93dd996eaac70`.
 - Cloud Run service: `vlens-a`, region `us-central1`, revision
   `vlens-a-00004-4h8`.
-- Temporary tester URL:
-  `https://vlens-a-816984866085.us-central1.run.app/a/`.
+- Tester URL: `https://villagelensai.com`.
 - `GET /health`: HTTP 200 with `access_gate: enabled`.
 - Unauthenticated `GET /a/`: HTTP 302 to `/access`.
 - Unauthenticated `POST /api/capture`: HTTP 401.
@@ -90,8 +89,10 @@ alias.
 - `villagelensai.com` ownership is verified under `nnagarajayya@gmail.com`.
 - Cloud Run domain mapping `villagelensai.com` -> `vlens-a` is created in
   `us-central1`; all returned A/AAAA records resolve from Cloudflare's
-  authoritative DNS and public Google/Cloudflare resolvers. Managed certificate
-  issuance remains pending.
+  authoritative DNS and public Google/Cloudflare resolvers.
+- Managed certificate conditions `Ready` and `CertificateProvisioned` are true.
+- Final-domain access-code/cookie validation passes; the generated Cloud Run URL
+  is disabled and returns HTTP 404.
 - Runtime identity: `villagelens-runtime@villagelensai.iam.gserviceaccount.com`,
   with accessor permission only on `villagelens-access-code` and
   `villagelens-session-secret`.

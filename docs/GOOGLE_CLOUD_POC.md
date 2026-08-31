@@ -1,9 +1,8 @@
 # Google Cloud POC architecture
 
 Date: 2026-08-30
-Status: project and billing active; access-gated stage-one implementation
-deployed and fixture-validated; custom-domain mapping created and managed
-certificate provisioning pending
+Status: project and billing active; access-gated stage-one implementation live
+and validated at `https://villagelensai.com`; generated Cloud Run URL disabled
 
 ## Objective
 
@@ -109,7 +108,8 @@ Free allowances reduce expected POC cost but do not guarantee a zero bill.
 3. Create a dedicated OpenAI API project with a low budget; enter its key
    directly into Secret Manager rather than chat or repository files.
 4. `villagelensai.com` is verified, mapped to `vlens-a`, and delegated through
-   DNS-only Google A/AAAA records in Cloudflare. Certificate issuance is pending.
+   DNS-only Google A/AAAA records in Cloudflare. The managed certificate is
+   provisioned and the generated Cloud Run URL is disabled.
 5. Provide non-personal labels for the two test devices.
 
 ## Implementation order

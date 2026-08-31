@@ -3,8 +3,8 @@
 VillageLensAI is a phone-oriented guided-reading proof of concept for Kannada and
 English text in book pages, signs, billboards, and phone screens.
 
-Status: stage-one Tesseract API deployed on Cloud Run; custom-domain and
-access-code rollout in progress.
+Status: access-gated stage-one Tesseract API live at
+`https://villagelensai.com`.
 
 ## Intended experience
 
@@ -33,8 +33,8 @@ docs/                 architecture, operations, and evaluation records
 .github/workflows/    tests and controlled deployments
 ```
 
-The tester route is `web/a/index.html`, ultimately published as
-`https://<project-domain>/a`.
+The tester route is `web/a/index.html`, published at
+`https://villagelensai.com/a/` after access-code entry.
 
 See [the Google Cloud POC architecture](docs/GOOGLE_CLOUD_POC.md).
 
