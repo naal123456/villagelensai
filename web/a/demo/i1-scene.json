@@ -1,0 +1,1605 @@
+{
+  "schema": "smart-glasses.guided-reading-scene.v1",
+  "source": {
+    "path": "evaluation/images/iphone-test/i1.jpeg",
+    "sha256": "66be7350b0daa0971e35c38d4e1628396fbbc0a8733b8ffa617717780a74f3cb",
+    "display_image": "../../images/iphone-test/i1.jpeg"
+  },
+  "image_size": {
+    "width": 3024,
+    "height": 4032
+  },
+  "surface_type": "planar",
+  "objects": [
+    {
+      "object_id": "surface-001",
+      "kind": "surface",
+      "parent_id": null,
+      "reading_order": null,
+      "box": {
+        "x": 0,
+        "y": 0,
+        "width": 3024,
+        "height": 4032
+      },
+      "recognition": null
+    },
+    {
+      "object_id": "line-001",
+      "kind": "line_or_sentence_candidate",
+      "parent_id": "surface-001",
+      "reading_order": 1,
+      "box": {
+        "x": 710,
+        "y": 402,
+        "width": 147,
+        "height": 49
+      },
+      "recognition": {
+        "text_candidate": "5:07",
+        "status": "unverified_ocr_candidate"
+      },
+      "detector_group": {
+        "block": 1,
+        "paragraph": 1,
+        "line": 1
+      }
+    },
+    {
+      "object_id": "word-001",
+      "kind": "word",
+      "parent_id": "line-001",
+      "reading_order": 1,
+      "box": {
+        "x": 710,
+        "y": 402,
+        "width": 147,
+        "height": 49
+      },
+      "recognition": {
+        "text_candidate": "5:07",
+        "confidence": 94.408417,
+        "status": "unverified_ocr_candidate",
+        "reading_eligible": true
+      }
+    },
+    {
+      "object_id": "line-002",
+      "kind": "line_or_sentence_candidate",
+      "parent_id": "surface-001",
+      "reading_order": 2,
+      "box": {
+        "x": 1027,
+        "y": 556,
+        "width": 534,
+        "height": 177
+      },
+      "recognition": {
+        "text_candidate": "......",
+        "status": "contains_low_confidence_ocr_candidates"
+      },
+      "detector_group": {
+        "block": 2,
+        "paragraph": 1,
+        "line": 1
+      }
+    },
+    {
+      "object_id": "word-002",
+      "kind": "punctuation",
+      "parent_id": "line-002",
+      "reading_order": 2,
+      "box": {
+        "x": 1027,
+        "y": 556,
+        "width": 534,
+        "height": 177
+      },
+      "recognition": {
+        "text_candidate": "......",
+        "confidence": 18.3776,
+        "status": "low_confidence_ocr_candidate",
+        "reading_eligible": false
+      }
+    },
+    {
+      "object_id": "line-003",
+      "kind": "line_or_sentence_candidate",
+      "parent_id": "surface-001",
+      "reading_order": 3,
+      "box": {
+        "x": 603,
+        "y": 743,
+        "width": 568,
+        "height": 206
+      },
+      "recognition": {
+        "text_candidate": "17 ೫2857",
+        "status": "unverified_ocr_candidate"
+      },
+      "detector_group": {
+        "block": 3,
+        "paragraph": 1,
+        "line": 1
+      }
+    },
+    {
+      "object_id": "word-003",
+      "kind": "word",
+      "parent_id": "line-003",
+      "reading_order": 3,
+      "box": {
+        "x": 603,
+        "y": 743,
+        "width": 189,
+        "height": 206
+      },
+      "recognition": {
+        "text_candidate": "17",
+        "confidence": 50.328552,
+        "status": "unverified_ocr_candidate",
+        "reading_eligible": true
+      }
+    },
+    {
+      "object_id": "word-004",
+      "kind": "word",
+      "parent_id": "line-003",
+      "reading_order": 4,
+      "box": {
+        "x": 831,
+        "y": 797,
+        "width": 340,
+        "height": 152
+      },
+      "recognition": {
+        "text_candidate": "೫2857",
+        "confidence": 71.450912,
+        "status": "unverified_ocr_candidate",
+        "reading_eligible": true
+      }
+    },
+    {
+      "object_id": "line-004",
+      "kind": "line_or_sentence_candidate",
+      "parent_id": "surface-001",
+      "reading_order": 4,
+      "box": {
+        "x": 2098,
+        "y": 857,
+        "width": 122,
+        "height": 79
+      },
+      "recognition": {
+        "text_candidate": "ಹೋತ",
+        "status": "unverified_ocr_candidate"
+      },
+      "detector_group": {
+        "block": 4,
+        "paragraph": 1,
+        "line": 1
+      }
+    },
+    {
+      "object_id": "word-005",
+      "kind": "word",
+      "parent_id": "line-004",
+      "reading_order": 5,
+      "box": {
+        "x": 2098,
+        "y": 857,
+        "width": 122,
+        "height": 79
+      },
+      "recognition": {
+        "text_candidate": "ಹೋತ",
+        "confidence": 55.965446,
+        "status": "unverified_ocr_candidate",
+        "reading_eligible": true
+      }
+    },
+    {
+      "object_id": "line-005",
+      "kind": "line_or_sentence_candidate",
+      "parent_id": "surface-001",
+      "reading_order": 5,
+      "box": {
+        "x": 552,
+        "y": 858,
+        "width": 1244,
+        "height": 253
+      },
+      "recognition": {
+        "text_candidate": "' ೫0/2/0868 1270/287 .",
+        "status": "contains_low_confidence_ocr_candidates"
+      },
+      "detector_group": {
+        "block": 5,
+        "paragraph": 1,
+        "line": 1
+      }
+    },
+    {
+      "object_id": "word-006",
+      "kind": "punctuation",
+      "parent_id": "line-005",
+      "reading_order": 6,
+      "box": {
+        "x": 552,
+        "y": 858,
+        "width": 36,
+        "height": 253
+      },
+      "recognition": {
+        "text_candidate": "'",
+        "confidence": 0.0,
+        "status": "low_confidence_ocr_candidate",
+        "reading_eligible": false
+      }
+    },
+    {
+      "object_id": "word-007",
+      "kind": "word",
+      "parent_id": "line-005",
+      "reading_order": 7,
+      "box": {
+        "x": 657,
+        "y": 858,
+        "width": 486,
+        "height": 253
+      },
+      "recognition": {
+        "text_candidate": "೫0/2/0868",
+        "confidence": 51.222111,
+        "status": "unverified_ocr_candidate",
+        "reading_eligible": true
+      }
+    },
+    {
+      "object_id": "word-008",
+      "kind": "word",
+      "parent_id": "line-005",
+      "reading_order": 8,
+      "box": {
+        "x": 1205,
+        "y": 858,
+        "width": 486,
+        "height": 253
+      },
+      "recognition": {
+        "text_candidate": "1270/287",
+        "confidence": 1.535702,
+        "status": "low_confidence_ocr_candidate",
+        "reading_eligible": false
+      }
+    },
+    {
+      "object_id": "word-009",
+      "kind": "punctuation",
+      "parent_id": "line-005",
+      "reading_order": 9,
+      "box": {
+        "x": 1732,
+        "y": 858,
+        "width": 64,
+        "height": 253
+      },
+      "recognition": {
+        "text_candidate": ".",
+        "confidence": 0.0,
+        "status": "low_confidence_ocr_candidate",
+        "reading_eligible": false
+      }
+    },
+    {
+      "object_id": "line-006",
+      "kind": "line_or_sentence_candidate",
+      "parent_id": "surface-001",
+      "reading_order": 6,
+      "box": {
+        "x": 2099,
+        "y": 883,
+        "width": 121,
+        "height": 110
+      },
+      "recognition": {
+        "text_candidate": "4",
+        "status": "unverified_ocr_candidate"
+      },
+      "detector_group": {
+        "block": 6,
+        "paragraph": 1,
+        "line": 1
+      }
+    },
+    {
+      "object_id": "word-010",
+      "kind": "word",
+      "parent_id": "line-006",
+      "reading_order": 10,
+      "box": {
+        "x": 2099,
+        "y": 883,
+        "width": 121,
+        "height": 110
+      },
+      "recognition": {
+        "text_candidate": "4",
+        "confidence": 58.704067,
+        "status": "unverified_ocr_candidate",
+        "reading_eligible": true
+      }
+    },
+    {
+      "object_id": "line-007",
+      "kind": "line_or_sentence_candidate",
+      "parent_id": "surface-001",
+      "reading_order": 7,
+      "box": {
+        "x": 552,
+        "y": 1010,
+        "width": 1222,
+        "height": 211
+      },
+      "recognition": {
+        "text_candidate": "| ೫೦೫೭5 ಹ 770108 ೨೦೦೫",
+        "status": "contains_low_confidence_ocr_candidates"
+      },
+      "detector_group": {
+        "block": 7,
+        "paragraph": 1,
+        "line": 1
+      }
+    },
+    {
+      "object_id": "word-011",
+      "kind": "punctuation",
+      "parent_id": "line-007",
+      "reading_order": 11,
+      "box": {
+        "x": 552,
+        "y": 1035,
+        "width": 9,
+        "height": 46
+      },
+      "recognition": {
+        "text_candidate": "|",
+        "confidence": 59.505238,
+        "status": "unverified_ocr_candidate",
+        "reading_eligible": true
+      }
+    },
+    {
+      "object_id": "word-012",
+      "kind": "word",
+      "parent_id": "line-007",
+      "reading_order": 12,
+      "box": {
+        "x": 649,
+        "y": 1010,
+        "width": 247,
+        "height": 130
+      },
+      "recognition": {
+        "text_candidate": "೫೦೫೭5",
+        "confidence": 78.497711,
+        "status": "unverified_ocr_candidate",
+        "reading_eligible": true
+      }
+    },
+    {
+      "object_id": "word-013",
+      "kind": "word",
+      "parent_id": "line-007",
+      "reading_order": 13,
+      "box": {
+        "x": 948,
+        "y": 1010,
+        "width": 36,
+        "height": 211
+      },
+      "recognition": {
+        "text_candidate": "ಹ",
+        "confidence": 83.970207,
+        "status": "unverified_ocr_candidate",
+        "reading_eligible": true
+      }
+    },
+    {
+      "object_id": "word-014",
+      "kind": "word",
+      "parent_id": "line-007",
+      "reading_order": 14,
+      "box": {
+        "x": 946,
+        "y": 1010,
+        "width": 828,
+        "height": 211
+      },
+      "recognition": {
+        "text_candidate": "770108",
+        "confidence": 59.979393,
+        "status": "unverified_ocr_candidate",
+        "reading_eligible": true
+      }
+    },
+    {
+      "object_id": "word-015",
+      "kind": "word",
+      "parent_id": "line-007",
+      "reading_order": 15,
+      "box": {
+        "x": 1458,
+        "y": 1010,
+        "width": 212,
+        "height": 211
+      },
+      "recognition": {
+        "text_candidate": "೨೦೦೫",
+        "confidence": 49.723873,
+        "status": "low_confidence_ocr_candidate",
+        "reading_eligible": false
+      }
+    },
+    {
+      "object_id": "line-008",
+      "kind": "line_or_sentence_candidate",
+      "parent_id": "surface-001",
+      "reading_order": 8,
+      "box": {
+        "x": 990,
+        "y": 1136,
+        "width": 1033,
+        "height": 168
+      },
+      "recognition": {
+        "text_candidate": "ಬಾ ಬ ್ಸ್‌",
+        "status": "contains_low_confidence_ocr_candidates"
+      },
+      "detector_group": {
+        "block": 8,
+        "paragraph": 1,
+        "line": 1
+      }
+    },
+    {
+      "object_id": "word-016",
+      "kind": "word",
+      "parent_id": "line-008",
+      "reading_order": 16,
+      "box": {
+        "x": 990,
+        "y": 1136,
+        "width": 294,
+        "height": 168
+      },
+      "recognition": {
+        "text_candidate": "ಬಾ",
+        "confidence": 20.588684,
+        "status": "low_confidence_ocr_candidate",
+        "reading_eligible": false
+      }
+    },
+    {
+      "object_id": "word-017",
+      "kind": "word",
+      "parent_id": "line-008",
+      "reading_order": 17,
+      "box": {
+        "x": 1466,
+        "y": 1136,
+        "width": 224,
+        "height": 168
+      },
+      "recognition": {
+        "text_candidate": "ಬ",
+        "confidence": 10.804224,
+        "status": "low_confidence_ocr_candidate",
+        "reading_eligible": false
+      }
+    },
+    {
+      "object_id": "word-018",
+      "kind": "word",
+      "parent_id": "line-008",
+      "reading_order": 18,
+      "box": {
+        "x": 1844,
+        "y": 1136,
+        "width": 179,
+        "height": 168
+      },
+      "recognition": {
+        "text_candidate": "್ಸ್‌",
+        "confidence": 0.0,
+        "status": "low_confidence_ocr_candidate",
+        "reading_eligible": false
+      }
+    },
+    {
+      "object_id": "line-009",
+      "kind": "line_or_sentence_candidate",
+      "parent_id": "surface-001",
+      "reading_order": 9,
+      "box": {
+        "x": 1221,
+        "y": 1237,
+        "width": 458,
+        "height": 110
+      },
+      "recognition": {
+        "text_candidate": "ಕನ್ನಡ ವರ್ಣಮಾಲೆಗಳು",
+        "status": "contains_low_confidence_ocr_candidates"
+      },
+      "detector_group": {
+        "block": 9,
+        "paragraph": 1,
+        "line": 1
+      }
+    },
+    {
+      "object_id": "word-019",
+      "kind": "word",
+      "parent_id": "line-009",
+      "reading_order": 19,
+      "box": {
+        "x": 1221,
+        "y": 1237,
+        "width": 145,
+        "height": 110
+      },
+      "recognition": {
+        "text_candidate": "ಕನ್ನಡ",
+        "confidence": 17.948475,
+        "status": "low_confidence_ocr_candidate",
+        "reading_eligible": false
+      }
+    },
+    {
+      "object_id": "word-020",
+      "kind": "word",
+      "parent_id": "line-009",
+      "reading_order": 20,
+      "box": {
+        "x": 1394,
+        "y": 1237,
+        "width": 285,
+        "height": 110
+      },
+      "recognition": {
+        "text_candidate": "ವರ್ಣಮಾಲೆಗಳು",
+        "confidence": 35.037445,
+        "status": "low_confidence_ocr_candidate",
+        "reading_eligible": false
+      }
+    },
+    {
+      "object_id": "line-010",
+      "kind": "line_or_sentence_candidate",
+      "parent_id": "surface-001",
+      "reading_order": 10,
+      "box": {
+        "x": 653,
+        "y": 1399,
+        "width": 293,
+        "height": 325
+      },
+      "recognition": {
+        "text_candidate": "ಆ",
+        "status": "contains_low_confidence_ocr_candidates"
+      },
+      "detector_group": {
+        "block": 10,
+        "paragraph": 1,
+        "line": 1
+      }
+    },
+    {
+      "object_id": "word-021",
+      "kind": "word",
+      "parent_id": "line-010",
+      "reading_order": 21,
+      "box": {
+        "x": 653,
+        "y": 1399,
+        "width": 293,
+        "height": 325
+      },
+      "recognition": {
+        "text_candidate": "ಆ",
+        "confidence": 4.018459,
+        "status": "low_confidence_ocr_candidate",
+        "reading_eligible": false
+      }
+    },
+    {
+      "object_id": "line-011",
+      "kind": "line_or_sentence_candidate",
+      "parent_id": "surface-001",
+      "reading_order": 11,
+      "box": {
+        "x": 1919,
+        "y": 1424,
+        "width": 309,
+        "height": 403
+      },
+      "recognition": {
+        "text_candidate": "ಅ",
+        "status": "unverified_ocr_candidate"
+      },
+      "detector_group": {
+        "block": 11,
+        "paragraph": 1,
+        "line": 1
+      }
+    },
+    {
+      "object_id": "word-022",
+      "kind": "word",
+      "parent_id": "line-011",
+      "reading_order": 22,
+      "box": {
+        "x": 1919,
+        "y": 1424,
+        "width": 309,
+        "height": 403
+      },
+      "recognition": {
+        "text_candidate": "ಅ",
+        "confidence": 96.062927,
+        "status": "unverified_ocr_candidate",
+        "reading_eligible": true
+      }
+    },
+    {
+      "object_id": "line-012",
+      "kind": "line_or_sentence_candidate",
+      "parent_id": "surface-001",
+      "reading_order": 12,
+      "box": {
+        "x": 1035,
+        "y": 1460,
+        "width": 135,
+        "height": 72
+      },
+      "recognition": {
+        "text_candidate": "ಆನೆ.",
+        "status": "unverified_ocr_candidate"
+      },
+      "detector_group": {
+        "block": 12,
+        "paragraph": 1,
+        "line": 1
+      }
+    },
+    {
+      "object_id": "word-023",
+      "kind": "word",
+      "parent_id": "line-012",
+      "reading_order": 23,
+      "box": {
+        "x": 1035,
+        "y": 1460,
+        "width": 135,
+        "height": 72
+      },
+      "recognition": {
+        "text_candidate": "ಆನೆ.",
+        "confidence": 75.994576,
+        "status": "unverified_ocr_candidate",
+        "reading_eligible": true
+      }
+    },
+    {
+      "object_id": "line-013",
+      "kind": "line_or_sentence_candidate",
+      "parent_id": "surface-001",
+      "reading_order": 13,
+      "box": {
+        "x": 1916,
+        "y": 1627,
+        "width": 305,
+        "height": 343
+      },
+      "recognition": {
+        "text_candidate": "ಆಮ್ಮ",
+        "status": "contains_low_confidence_ocr_candidates"
+      },
+      "detector_group": {
+        "block": 13,
+        "paragraph": 1,
+        "line": 1
+      }
+    },
+    {
+      "object_id": "word-024",
+      "kind": "word",
+      "parent_id": "line-013",
+      "reading_order": 24,
+      "box": {
+        "x": 1916,
+        "y": 1627,
+        "width": 305,
+        "height": 343
+      },
+      "recognition": {
+        "text_candidate": "ಆಮ್ಮ",
+        "confidence": 24.199543,
+        "status": "low_confidence_ocr_candidate",
+        "reading_eligible": false
+      }
+    },
+    {
+      "object_id": "line-014",
+      "kind": "line_or_sentence_candidate",
+      "parent_id": "surface-001",
+      "reading_order": 14,
+      "box": {
+        "x": 1880,
+        "y": 1962,
+        "width": 399,
+        "height": 233
+      },
+      "recognition": {
+        "text_candidate": "ಯ208,",
+        "status": "contains_low_confidence_ocr_candidates"
+      },
+      "detector_group": {
+        "block": 14,
+        "paragraph": 1,
+        "line": 1
+      }
+    },
+    {
+      "object_id": "word-025",
+      "kind": "word",
+      "parent_id": "line-014",
+      "reading_order": 25,
+      "box": {
+        "x": 1880,
+        "y": 1962,
+        "width": 399,
+        "height": 233
+      },
+      "recognition": {
+        "text_candidate": "ಯ208,",
+        "confidence": 0.0,
+        "status": "low_confidence_ocr_candidate",
+        "reading_eligible": false
+      }
+    },
+    {
+      "object_id": "line-015",
+      "kind": "line_or_sentence_candidate",
+      "parent_id": "surface-001",
+      "reading_order": 15,
+      "box": {
+        "x": 1982,
+        "y": 2116,
+        "width": 261,
+        "height": 125
+      },
+      "recognition": {
+        "text_candidate": "40%].",
+        "status": "contains_low_confidence_ocr_candidates"
+      },
+      "detector_group": {
+        "block": 15,
+        "paragraph": 1,
+        "line": 1
+      }
+    },
+    {
+      "object_id": "word-026",
+      "kind": "word",
+      "parent_id": "line-015",
+      "reading_order": 26,
+      "box": {
+        "x": 1982,
+        "y": 2116,
+        "width": 261,
+        "height": 125
+      },
+      "recognition": {
+        "text_candidate": "40%].",
+        "confidence": 33.997974,
+        "status": "low_confidence_ocr_candidate",
+        "reading_eligible": false
+      }
+    },
+    {
+      "object_id": "line-016",
+      "kind": "line_or_sentence_candidate",
+      "parent_id": "surface-001",
+      "reading_order": 16,
+      "box": {
+        "x": 1860,
+        "y": 2439,
+        "width": 400,
+        "height": 646
+      },
+      "recognition": {
+        "text_candidate": "ಸ್ರ",
+        "status": "contains_low_confidence_ocr_candidates"
+      },
+      "detector_group": {
+        "block": 16,
+        "paragraph": 1,
+        "line": 1
+      }
+    },
+    {
+      "object_id": "word-027",
+      "kind": "word",
+      "parent_id": "line-016",
+      "reading_order": 27,
+      "box": {
+        "x": 1860,
+        "y": 2439,
+        "width": 400,
+        "height": 646
+      },
+      "recognition": {
+        "text_candidate": "ಸ್ರ",
+        "confidence": 31.848103,
+        "status": "low_confidence_ocr_candidate",
+        "reading_eligible": false
+      }
+    },
+    {
+      "object_id": "line-017",
+      "kind": "line_or_sentence_candidate",
+      "parent_id": "surface-001",
+      "reading_order": 17,
+      "box": {
+        "x": 807,
+        "y": 2599,
+        "width": 219,
+        "height": 168
+      },
+      "recognition": {
+        "text_candidate": "ಹ",
+        "status": "contains_low_confidence_ocr_candidates"
+      },
+      "detector_group": {
+        "block": 17,
+        "paragraph": 1,
+        "line": 1
+      }
+    },
+    {
+      "object_id": "word-028",
+      "kind": "word",
+      "parent_id": "line-017",
+      "reading_order": 28,
+      "box": {
+        "x": 807,
+        "y": 2599,
+        "width": 219,
+        "height": 168
+      },
+      "recognition": {
+        "text_candidate": "ಹ",
+        "confidence": 0.0,
+        "status": "low_confidence_ocr_candidate",
+        "reading_eligible": false
+      }
+    },
+    {
+      "object_id": "line-018",
+      "kind": "line_or_sentence_candidate",
+      "parent_id": "surface-001",
+      "reading_order": 18,
+      "box": {
+        "x": 1784,
+        "y": 2739,
+        "width": 218,
+        "height": 226
+      },
+      "recognition": {
+        "text_candidate": "ಛತ್ರಿ",
+        "status": "unverified_ocr_candidate"
+      },
+      "detector_group": {
+        "block": 18,
+        "paragraph": 1,
+        "line": 1
+      }
+    },
+    {
+      "object_id": "word-029",
+      "kind": "word",
+      "parent_id": "line-018",
+      "reading_order": 29,
+      "box": {
+        "x": 1784,
+        "y": 2739,
+        "width": 218,
+        "height": 226
+      },
+      "recognition": {
+        "text_candidate": "ಛತ್ರಿ",
+        "confidence": 76.3172,
+        "status": "unverified_ocr_candidate",
+        "reading_eligible": true
+      }
+    },
+    {
+      "object_id": "line-019",
+      "kind": "line_or_sentence_candidate",
+      "parent_id": "surface-001",
+      "reading_order": 19,
+      "box": {
+        "x": 1323,
+        "y": 2800,
+        "width": 245,
+        "height": 145
+      },
+      "recognition": {
+        "text_candidate": "ಉ೫ಹೀಾಹಿ]",
+        "status": "contains_low_confidence_ocr_candidates"
+      },
+      "detector_group": {
+        "block": 19,
+        "paragraph": 1,
+        "line": 1
+      }
+    },
+    {
+      "object_id": "word-030",
+      "kind": "word",
+      "parent_id": "line-019",
+      "reading_order": 30,
+      "box": {
+        "x": 1323,
+        "y": 2800,
+        "width": 245,
+        "height": 145
+      },
+      "recognition": {
+        "text_candidate": "ಉ೫ಹೀಾಹಿ]",
+        "confidence": 0.0,
+        "status": "low_confidence_ocr_candidate",
+        "reading_eligible": false
+      }
+    },
+    {
+      "object_id": "line-020",
+      "kind": "line_or_sentence_candidate",
+      "parent_id": "surface-001",
+      "reading_order": 20,
+      "box": {
+        "x": 1259,
+        "y": 2886,
+        "width": 325,
+        "height": 191
+      },
+      "recognition": {
+        "text_candidate": "ಯಗ",
+        "status": "unverified_ocr_candidate"
+      },
+      "detector_group": {
+        "block": 20,
+        "paragraph": 1,
+        "line": 1
+      }
+    },
+    {
+      "object_id": "word-031",
+      "kind": "word",
+      "parent_id": "line-020",
+      "reading_order": 31,
+      "box": {
+        "x": 1259,
+        "y": 2886,
+        "width": 325,
+        "height": 191
+      },
+      "recognition": {
+        "text_candidate": "ಯಗ",
+        "confidence": 57.164364,
+        "status": "unverified_ocr_candidate",
+        "reading_eligible": true
+      }
+    },
+    {
+      "object_id": "line-021",
+      "kind": "line_or_sentence_candidate",
+      "parent_id": "surface-001",
+      "reading_order": 21,
+      "box": {
+        "x": 736,
+        "y": 3275,
+        "width": 272,
+        "height": 166
+      },
+      "recognition": {
+        "text_candidate": "502೧9",
+        "status": "contains_low_confidence_ocr_candidates"
+      },
+      "detector_group": {
+        "block": 21,
+        "paragraph": 1,
+        "line": 1
+      }
+    },
+    {
+      "object_id": "word-032",
+      "kind": "word",
+      "parent_id": "line-021",
+      "reading_order": 32,
+      "box": {
+        "x": 736,
+        "y": 3275,
+        "width": 272,
+        "height": 166
+      },
+      "recognition": {
+        "text_candidate": "502೧9",
+        "confidence": 27.811798,
+        "status": "low_confidence_ocr_candidate",
+        "reading_eligible": false
+      }
+    },
+    {
+      "object_id": "line-022",
+      "kind": "line_or_sentence_candidate",
+      "parent_id": "surface-001",
+      "reading_order": 22,
+      "box": {
+        "x": 1777,
+        "y": 3330,
+        "width": 224,
+        "height": 152
+      },
+      "recognition": {
+        "text_candidate": "5%",
+        "status": "unverified_ocr_candidate"
+      },
+      "detector_group": {
+        "block": 22,
+        "paragraph": 1,
+        "line": 1
+      }
+    },
+    {
+      "object_id": "word-033",
+      "kind": "word",
+      "parent_id": "line-022",
+      "reading_order": 33,
+      "box": {
+        "x": 1777,
+        "y": 3330,
+        "width": 224,
+        "height": 152
+      },
+      "recognition": {
+        "text_candidate": "5%",
+        "confidence": 59.066578,
+        "status": "unverified_ocr_candidate",
+        "reading_eligible": true
+      }
+    },
+    {
+      "object_id": "line-023",
+      "kind": "line_or_sentence_candidate",
+      "parent_id": "surface-001",
+      "reading_order": 23,
+      "box": {
+        "x": 469,
+        "y": 3579,
+        "width": 779,
+        "height": 246
+      },
+      "recognition": {
+        "text_candidate": "ಡುಗ: ಪುಕ॥'",
+        "status": "contains_low_confidence_ocr_candidates"
+      },
+      "detector_group": {
+        "block": 23,
+        "paragraph": 1,
+        "line": 1
+      }
+    },
+    {
+      "object_id": "word-034",
+      "kind": "word",
+      "parent_id": "line-023",
+      "reading_order": 34,
+      "box": {
+        "x": 469,
+        "y": 3579,
+        "width": 410,
+        "height": 246
+      },
+      "recognition": {
+        "text_candidate": "ಡುಗ:",
+        "confidence": 7.701321,
+        "status": "low_confidence_ocr_candidate",
+        "reading_eligible": false
+      }
+    },
+    {
+      "object_id": "word-035",
+      "kind": "word",
+      "parent_id": "line-023",
+      "reading_order": 35,
+      "box": {
+        "x": 920,
+        "y": 3579,
+        "width": 328,
+        "height": 246
+      },
+      "recognition": {
+        "text_candidate": "ಪುಕ॥'",
+        "confidence": 0.0,
+        "status": "low_confidence_ocr_candidate",
+        "reading_eligible": false
+      }
+    },
+    {
+      "object_id": "line-024",
+      "kind": "line_or_sentence_candidate",
+      "parent_id": "surface-001",
+      "reading_order": 24,
+      "box": {
+        "x": 689,
+        "y": 3751,
+        "width": 330,
+        "height": 180
+      },
+      "recognition": {
+        "text_candidate": "ಸಜ",
+        "status": "contains_low_confidence_ocr_candidates"
+      },
+      "detector_group": {
+        "block": 24,
+        "paragraph": 1,
+        "line": 1
+      }
+    },
+    {
+      "object_id": "word-036",
+      "kind": "word",
+      "parent_id": "line-024",
+      "reading_order": 36,
+      "box": {
+        "x": 689,
+        "y": 3751,
+        "width": 330,
+        "height": 180
+      },
+      "recognition": {
+        "text_candidate": "ಸಜ",
+        "confidence": 33.861462,
+        "status": "low_confidence_ocr_candidate",
+        "reading_eligible": false
+      }
+    },
+    {
+      "object_id": "line-025",
+      "kind": "line_or_sentence_candidate",
+      "parent_id": "surface-001",
+      "reading_order": 25,
+      "box": {
+        "x": 1813,
+        "y": 3808,
+        "width": 429,
+        "height": 147
+      },
+      "recognition": {
+        "text_candidate": "4104475",
+        "status": "contains_low_confidence_ocr_candidates"
+      },
+      "detector_group": {
+        "block": 25,
+        "paragraph": 1,
+        "line": 1
+      }
+    },
+    {
+      "object_id": "word-037",
+      "kind": "word",
+      "parent_id": "line-025",
+      "reading_order": 37,
+      "box": {
+        "x": 1813,
+        "y": 3808,
+        "width": 429,
+        "height": 147
+      },
+      "recognition": {
+        "text_candidate": "4104475",
+        "confidence": 4.203577,
+        "status": "low_confidence_ocr_candidate",
+        "reading_eligible": false
+      }
+    },
+    {
+      "object_id": "line-026",
+      "kind": "line_or_sentence_candidate",
+      "parent_id": "surface-001",
+      "reading_order": 26,
+      "box": {
+        "x": 1702,
+        "y": 3873,
+        "width": 577,
+        "height": 159
+      },
+      "recognition": {
+        "text_candidate": "೪೬೪ರ ಶಿ೮ವಟ",
+        "status": "contains_low_confidence_ocr_candidates"
+      },
+      "detector_group": {
+        "block": 26,
+        "paragraph": 1,
+        "line": 1
+      }
+    },
+    {
+      "object_id": "word-038",
+      "kind": "word",
+      "parent_id": "line-026",
+      "reading_order": 38,
+      "box": {
+        "x": 1702,
+        "y": 3873,
+        "width": 318,
+        "height": 159
+      },
+      "recognition": {
+        "text_candidate": "೪೬೪ರ",
+        "confidence": 48.66404,
+        "status": "low_confidence_ocr_candidate",
+        "reading_eligible": false
+      }
+    },
+    {
+      "object_id": "word-039",
+      "kind": "word",
+      "parent_id": "line-026",
+      "reading_order": 39,
+      "box": {
+        "x": 2073,
+        "y": 3873,
+        "width": 206,
+        "height": 157
+      },
+      "recognition": {
+        "text_candidate": "ಶಿ೮ವಟ",
+        "confidence": 23.735748,
+        "status": "low_confidence_ocr_candidate",
+        "reading_eligible": false
+      }
+    }
+  ],
+  "reading_sequence": [
+    "word-001",
+    "word-003",
+    "word-004",
+    "word-005",
+    "word-007",
+    "word-010",
+    "word-012",
+    "word-013",
+    "word-014",
+    "word-022",
+    "word-023",
+    "word-029",
+    "word-031",
+    "word-033"
+  ],
+  "candidate_sequence": [
+    "word-001",
+    "word-003",
+    "word-004",
+    "word-005",
+    "word-007",
+    "word-008",
+    "word-010",
+    "word-012",
+    "word-013",
+    "word-014",
+    "word-015",
+    "word-016",
+    "word-017",
+    "word-018",
+    "word-019",
+    "word-020",
+    "word-021",
+    "word-022",
+    "word-023",
+    "word-024",
+    "word-025",
+    "word-026",
+    "word-027",
+    "word-028",
+    "word-029",
+    "word-030",
+    "word-031",
+    "word-032",
+    "word-033",
+    "word-034",
+    "word-035",
+    "word-036",
+    "word-037",
+    "word-038",
+    "word-039"
+  ],
+  "visual_objects": [],
+  "semantics": {
+    "ocr_text_is_ground_truth": false,
+    "line_objects_are_confirmed_sentences": false,
+    "visual_object_detection_status": "deferred"
+  },
+  "detector": {
+    "geometry": "prepared-image text lines mapped to source",
+    "reader": "tesseract",
+    "language": "kan",
+    "psm": 8,
+    "traineddata_path": "third_party/tessdata/kan.traineddata",
+    "traineddata_sha256": "bd31e6b6ae93271e3bcf5383d306d8eefbb91542937cd6d735a5930c970e61d8",
+    "line_attempts": [
+      {
+        "line_id": "L01",
+        "reading_order": 1,
+        "crop_path": "evaluation/images/prepared/i1-66be7350b0da/line-01-original.png",
+        "candidate_count": 1,
+        "stderr": "",
+        "mixed_scale_refinement": false,
+        "sparse_psm": null,
+        "sparse_stderr": ""
+      },
+      {
+        "line_id": "L02",
+        "reading_order": 2,
+        "crop_path": "evaluation/images/prepared/i1-66be7350b0da/line-02-original.png",
+        "candidate_count": 1,
+        "stderr": "",
+        "mixed_scale_refinement": false,
+        "sparse_psm": null,
+        "sparse_stderr": ""
+      },
+      {
+        "line_id": "L03",
+        "reading_order": 3,
+        "crop_path": "evaluation/images/prepared/i1-66be7350b0da/line-03-original.png",
+        "candidate_count": 2,
+        "stderr": "",
+        "mixed_scale_refinement": false,
+        "sparse_psm": null,
+        "sparse_stderr": ""
+      },
+      {
+        "line_id": "L04",
+        "reading_order": 4,
+        "crop_path": "evaluation/images/prepared/i1-66be7350b0da/line-04-original.png",
+        "candidate_count": 1,
+        "stderr": "",
+        "mixed_scale_refinement": false,
+        "sparse_psm": null,
+        "sparse_stderr": ""
+      },
+      {
+        "line_id": "L05",
+        "reading_order": 5,
+        "crop_path": "evaluation/images/prepared/i1-66be7350b0da/line-05-original.png",
+        "candidate_count": 4,
+        "stderr": "",
+        "mixed_scale_refinement": false,
+        "sparse_psm": null,
+        "sparse_stderr": ""
+      },
+      {
+        "line_id": "L06",
+        "reading_order": 6,
+        "crop_path": "evaluation/images/prepared/i1-66be7350b0da/line-06-original.png",
+        "candidate_count": 1,
+        "stderr": "",
+        "mixed_scale_refinement": false,
+        "sparse_psm": null,
+        "sparse_stderr": ""
+      },
+      {
+        "line_id": "L07",
+        "reading_order": 7,
+        "crop_path": "evaluation/images/prepared/i1-66be7350b0da/line-07-original.png",
+        "candidate_count": 5,
+        "stderr": "",
+        "mixed_scale_refinement": false,
+        "sparse_psm": null,
+        "sparse_stderr": ""
+      },
+      {
+        "line_id": "L08",
+        "reading_order": 8,
+        "crop_path": "evaluation/images/prepared/i1-66be7350b0da/line-08-original.png",
+        "candidate_count": 3,
+        "stderr": "",
+        "mixed_scale_refinement": false,
+        "sparse_psm": null,
+        "sparse_stderr": ""
+      },
+      {
+        "line_id": "L09",
+        "reading_order": 9,
+        "crop_path": "evaluation/images/prepared/i1-66be7350b0da/line-09-original.png",
+        "candidate_count": 2,
+        "stderr": "",
+        "mixed_scale_refinement": false,
+        "sparse_psm": null,
+        "sparse_stderr": ""
+      },
+      {
+        "line_id": "L10",
+        "reading_order": 10,
+        "crop_path": "evaluation/images/prepared/i1-66be7350b0da/line-10-original.png",
+        "candidate_count": 1,
+        "stderr": "",
+        "mixed_scale_refinement": false,
+        "sparse_psm": 11,
+        "sparse_stderr": "Estimating resolution as 884\n"
+      },
+      {
+        "line_id": "L11",
+        "reading_order": 11,
+        "crop_path": "evaluation/images/prepared/i1-66be7350b0da/line-11-original.png",
+        "candidate_count": 1,
+        "stderr": "",
+        "mixed_scale_refinement": false,
+        "sparse_psm": null,
+        "sparse_stderr": ""
+      },
+      {
+        "line_id": "L12",
+        "reading_order": 12,
+        "crop_path": "evaluation/images/prepared/i1-66be7350b0da/line-12-original.png",
+        "candidate_count": 1,
+        "stderr": "",
+        "mixed_scale_refinement": false,
+        "sparse_psm": null,
+        "sparse_stderr": ""
+      },
+      {
+        "line_id": "L13",
+        "reading_order": 13,
+        "crop_path": "evaluation/images/prepared/i1-66be7350b0da/line-13-original.png",
+        "candidate_count": 1,
+        "stderr": "",
+        "mixed_scale_refinement": false,
+        "sparse_psm": null,
+        "sparse_stderr": ""
+      },
+      {
+        "line_id": "L14",
+        "reading_order": 14,
+        "crop_path": "evaluation/images/prepared/i1-66be7350b0da/line-14-original.png",
+        "candidate_count": 1,
+        "stderr": "",
+        "mixed_scale_refinement": false,
+        "sparse_psm": 11,
+        "sparse_stderr": "Estimating resolution as 950\n"
+      },
+      {
+        "line_id": "L15",
+        "reading_order": 15,
+        "crop_path": "evaluation/images/prepared/i1-66be7350b0da/line-15-original.png",
+        "candidate_count": 1,
+        "stderr": "",
+        "mixed_scale_refinement": false,
+        "sparse_psm": null,
+        "sparse_stderr": ""
+      },
+      {
+        "line_id": "L16",
+        "reading_order": 16,
+        "crop_path": "evaluation/images/prepared/i1-66be7350b0da/line-16-original.png",
+        "candidate_count": 1,
+        "stderr": "",
+        "mixed_scale_refinement": false,
+        "sparse_psm": null,
+        "sparse_stderr": ""
+      },
+      {
+        "line_id": "L17",
+        "reading_order": 17,
+        "crop_path": "evaluation/images/prepared/i1-66be7350b0da/line-17-original.png",
+        "candidate_count": 1,
+        "stderr": "",
+        "mixed_scale_refinement": false,
+        "sparse_psm": null,
+        "sparse_stderr": ""
+      },
+      {
+        "line_id": "L18",
+        "reading_order": 18,
+        "crop_path": "evaluation/images/prepared/i1-66be7350b0da/line-18-original.png",
+        "candidate_count": 1,
+        "stderr": "",
+        "mixed_scale_refinement": false,
+        "sparse_psm": null,
+        "sparse_stderr": ""
+      },
+      {
+        "line_id": "L19",
+        "reading_order": 19,
+        "crop_path": "evaluation/images/prepared/i1-66be7350b0da/line-19-original.png",
+        "candidate_count": 1,
+        "stderr": "",
+        "mixed_scale_refinement": false,
+        "sparse_psm": 11,
+        "sparse_stderr": "Estimating resolution as 719\n"
+      },
+      {
+        "line_id": "L20",
+        "reading_order": 20,
+        "crop_path": "evaluation/images/prepared/i1-66be7350b0da/line-20-original.png",
+        "candidate_count": 1,
+        "stderr": "",
+        "mixed_scale_refinement": false,
+        "sparse_psm": null,
+        "sparse_stderr": ""
+      },
+      {
+        "line_id": "L21",
+        "reading_order": 21,
+        "crop_path": "evaluation/images/prepared/i1-66be7350b0da/line-21-original.png",
+        "candidate_count": 1,
+        "stderr": "",
+        "mixed_scale_refinement": false,
+        "sparse_psm": null,
+        "sparse_stderr": ""
+      },
+      {
+        "line_id": "L22",
+        "reading_order": 22,
+        "crop_path": "evaluation/images/prepared/i1-66be7350b0da/line-22-original.png",
+        "candidate_count": 1,
+        "stderr": "",
+        "mixed_scale_refinement": false,
+        "sparse_psm": null,
+        "sparse_stderr": ""
+      },
+      {
+        "line_id": "L23",
+        "reading_order": 23,
+        "crop_path": "evaluation/images/prepared/i1-66be7350b0da/line-23-original.png",
+        "candidate_count": 2,
+        "stderr": "",
+        "mixed_scale_refinement": false,
+        "sparse_psm": null,
+        "sparse_stderr": ""
+      },
+      {
+        "line_id": "L24",
+        "reading_order": 24,
+        "crop_path": "evaluation/images/prepared/i1-66be7350b0da/line-24-original.png",
+        "candidate_count": 1,
+        "stderr": "",
+        "mixed_scale_refinement": false,
+        "sparse_psm": null,
+        "sparse_stderr": ""
+      },
+      {
+        "line_id": "L25",
+        "reading_order": 25,
+        "crop_path": "evaluation/images/prepared/i1-66be7350b0da/line-25-original.png",
+        "candidate_count": 1,
+        "stderr": "",
+        "mixed_scale_refinement": false,
+        "sparse_psm": 11,
+        "sparse_stderr": "Estimating resolution as 419\n"
+      },
+      {
+        "line_id": "L26",
+        "reading_order": 26,
+        "crop_path": "evaluation/images/prepared/i1-66be7350b0da/line-26-original.png",
+        "candidate_count": 2,
+        "stderr": "",
+        "mixed_scale_refinement": false,
+        "sparse_psm": null,
+        "sparse_stderr": ""
+      }
+    ]
+  }
+}

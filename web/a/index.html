@@ -9,126 +9,229 @@
     :root { color-scheme: dark; font-family: system-ui, sans-serif; }
     * { box-sizing: border-box; }
     body { margin: 0; min-height: 100vh; background: #101418; color: #f5f7fa; }
-    main { width: min(100%, 780px); margin: auto; padding: 12px; text-align: center; }
-    .toolbar { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; position: sticky;
-      top: 0; z-index: 3; padding: 8px 0; background: rgba(16,20,24,.94); }
-    button { min-height: 52px; border: 2px solid #52606d; border-radius: 12px;
-      background: #26323b; color: white; font-size: 1.35rem; }
+    main { width: min(100%, 780px); margin: auto; padding: 8px 10px 18px; text-align: center; }
+    .controls { position: sticky; top: 0; z-index: 4; padding: 5px 0 4px; background: rgba(16,20,24,.96); }
+    .toolbar { display: grid; grid-template-columns: repeat(4, 1fr); gap: 7px; margin-bottom: 7px; }
+    button { min-height: 48px; border: 2px solid #52606d; border-radius: 12px; background: #26323b;
+      color: white; font-size: 1.3rem; touch-action: manipulation; }
+    button.active { border-color: #62d7ff; background: #174b5f; }
     button:focus-visible { outline: 4px solid #65d6ff; outline-offset: 2px; }
-    .quality { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin: 8px 0; }
-    .bar { height: 16px; border: 1px solid #64717d; border-radius: 5px; background: #46515b; }
-    #bar-1.ready { background: #e5bc27; border-color: #ffe071; }
-    #bar-2.ready { background: #9adfae; } #bar-3.ready { background: #4ebd78; }
-    #bar-4.ready { background: #168447; box-shadow: 0 0 8px #3fbd70; }
-    #timer { min-height: 1.5em; color: #c7d1da; font-variant-numeric: tabular-nums; }
-    .stage { position: relative; display: none; max-width: 100%; margin: auto; background: #222; }
-    #preview { display: block; max-width: 100%; max-height: 68vh; object-fit: contain; }
+    .quality { display: grid; grid-template-columns: 1fr 1fr 1fr auto; gap: 6px; align-items: center; }
+    .bar { height: 14px; border: 1px solid #64717d; border-radius: 5px; background: #46515b; }
+    #quality-1.ready { background: #e5bc27; border-color: #ffe071; }
+    #quality-2.ready { background: #9adfae; } #quality-3.ready { background: #168447; box-shadow: 0 0 7px #3fbd70; }
+    #quality-timer { min-width: 2.6em; color: #c7d1da; font-variant-numeric: tabular-nums; font-size: .85rem; }
+    .gallery { display: grid; grid-template-columns: 42px 1fr 42px; align-items: center; gap: 4px; margin-top: 7px; }
+    .gallery > button { min-height: 42px; padding: 0; }
+    #position { color: #c7d1da; font-size: .9rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .stage { position: relative; display: none; max-width: 100%; margin: 4px auto 0; background: #222; touch-action: pan-y; }
+    #source-image { display: block; max-width: 100%; max-height: 67vh; object-fit: contain; user-select: none; -webkit-user-drag: none; }
     #overlay { position: absolute; inset: 0; width: 100%; height: 100%; }
     .hit { fill: transparent; stroke: none; }
-    .underline { stroke: #49c7ff; stroke-width: 2; vector-effect: non-scaling-stroke; pointer-events: none; }
+    .underline { stroke: #43caff; stroke-width: 2; vector-effect: non-scaling-stroke; pointer-events: none; }
     .underline.active { stroke: #fff36a; stroke-width: 6; }
-    #status, #current { min-height: 2em; line-height: 1.5; }
-    #current { font-size: clamp(1.4rem, 5vw, 2.6rem); }
-    .note { color: #9fb3c8; font-size: .85rem; }
+    .playing .underline:not(.active) { opacity: 0; }
+    #status, #current { min-height: 1.7em; line-height: 1.4; margin: 7px 0; }
+    #current { font-size: clamp(1.3rem, 5vw, 2.35rem); }
+    .note { color: #9fb3c8; font-size: .8rem; margin: 6px 0; }
+    @media (hover:hover) { button:hover::after { content: attr(data-tip); position: absolute; transform: translate(-75%, 40px);
+      background: #000; padding: 5px 8px; border-radius: 6px; font-size: .75rem; white-space: nowrap; z-index: 10; } }
   </style>
 </head>
 <body>
   <main>
-    <nav class="toolbar" aria-label="Reading controls">
-      <button id="camera" aria-label="Take a picture" title="Take a picture">📷</button>
-      <button id="stop" aria-label="Stop sound" title="Stop sound">■</button>
-    </nav>
-    <input id="camera-input" type="file" accept="image/jpeg,image/png,image/webp" capture="environment" hidden>
-    <div class="quality" aria-label="Reading quality">
-      <span class="bar" id="bar-1"></span><span class="bar" id="bar-2"></span>
-      <span class="bar" id="bar-3"></span><span class="bar" id="bar-4"></span>
+    <section class="controls" aria-label="Reading controls">
+      <nav class="toolbar" aria-label="Touch reading">
+        <button id="mode-word" class="active" aria-label="Touch a word" data-tip="Touch a word">☝️</button>
+        <button id="mode-sentence" aria-label="Touch a sentence" data-tip="Touch a sentence">☝️➖</button>
+        <button id="mode-meaning" aria-label="Touch for meaning" data-tip="Meaning">💡</button>
+        <button id="camera" aria-label="Take a picture" data-tip="Take a picture">📷</button>
+      </nav>
+      <nav class="toolbar" aria-label="Continuous reading">
+        <button id="play-words" aria-label="Read words continuously" data-tip="Read words">▶️ ಅ</button>
+        <button id="play-sentences" aria-label="Read sentences continuously" data-tip="Read sentences">▶️ ➖</button>
+        <button id="play-meanings" aria-label="Explain sentences continuously" data-tip="Explain sentences">▶️ 💡</button>
+        <button id="play-whole" aria-label="Explain the whole page" data-tip="Explain whole page">📖 💡</button>
+      </nav>
+      <div class="quality" aria-label="Reading confidence">
+        <span class="bar" id="quality-1"></span><span class="bar" id="quality-2"></span>
+        <span class="bar" id="quality-3"></span><span id="quality-timer">—</span>
+      </div>
+    </section>
+    <div class="gallery" aria-label="Saved pages">
+      <button id="previous" aria-label="Previous page" data-tip="Previous page">‹</button>
+      <div id="position" aria-live="polite">Loading I2…</div>
+      <button id="next" aria-label="Next page" data-tip="Next page">›</button>
     </div>
-    <div id="timer" aria-live="polite">waiting</div>
-    <p id="status" aria-live="polite">ಚಿತ್ರ ತೆಗೆಯಲು ಕ್ಯಾಮೆರಾ ಗುರುತನ್ನು ಒತ್ತಿ.</p>
+    <input id="camera-input" type="file" accept="image/jpeg,image/png,image/webp" capture="environment" hidden>
+    <p id="status" aria-live="polite">ಚಿತ್ರವನ್ನು ಸಿದ್ಧಪಡಿಸುತ್ತಿದೆ…</p>
     <div class="stage" id="stage">
-      <img id="preview" alt="Captured page">
+      <img id="source-image" alt="Page to read">
       <svg id="overlay" aria-label="Readable words"></svg>
     </div>
     <div id="current" lang="kn"></div>
-    <p class="note">AI-assisted reading may make mistakes.</p>
+    <button id="stop" aria-label="Stop reading" data-tip="Stop reading">■</button>
+    <p class="note">AI-assisted reading may make mistakes. Swipe the page to see saved tests.</p>
   </main>
   <script>
-    const input = document.getElementById('camera-input');
-    const preview = document.getElementById('preview');
-    const overlay = document.getElementById('overlay');
-    const stage = document.getElementById('stage');
-    const status = document.getElementById('status');
-    const current = document.getElementById('current');
-    const timer = document.getElementById('timer');
-    let timerId = 0, started = 0;
+    const $ = id => document.getElementById(id);
+    const input=$('camera-input'), image=$('source-image'), overlay=$('overlay'), stage=$('stage');
+    const status=$('status'), current=$('current'), position=$('position'), timer=$('quality-timer');
+    let gallery=[], galleryIndex=0, result=null, mode='word', timerId=0, started=0;
+    let playbackGeneration=0, speechGeneration=0, pointerStart=null, suppressTap=false;
 
-    function reset() {
+    function setMode(next) {
+      mode=next;
+      ['word','sentence','meaning'].forEach(name => $('mode-'+name).classList.toggle('active', name===mode));
+    }
+    function stop() {
+      playbackGeneration++; speechGeneration++;
       if ('speechSynthesis' in window) speechSynthesis.cancel();
-      overlay.textContent = ''; current.textContent = '';
-      for (let level = 1; level <= 4; level++) document.getElementById(`bar-${level}`).classList.remove('ready');
+      stage.classList.remove('playing');
+      document.querySelectorAll('.underline').forEach(node => node.classList.remove('active'));
+    }
+    function resetQuality() {
+      for (let n=1;n<=3;n++) $('quality-'+n).classList.remove('ready');
+      clearInterval(timerId); timer.textContent='—';
     }
     function beginTimer() {
-      started = Date.now(); clearInterval(timerId); timer.textContent = '0s';
-      timerId = setInterval(() => timer.textContent = `${Math.floor((Date.now() - started) / 1000)}s`, 1000);
+      started=Date.now(); clearInterval(timerId); timer.textContent='0s';
+      timerId=setInterval(()=>timer.textContent=`${Math.floor((Date.now()-started)/1000)}s`,1000);
     }
-    function endTimer() {
-      clearInterval(timerId); timer.textContent = `${Math.round((Date.now() - started) / 1000)}s`;
+    function endTimer() { clearInterval(timerId); timer.textContent=`${Math.round((Date.now()-started)/1000)}s`; }
+    function normalizedSpeech(text) {
+      return String(text||'').replace(/\bSmt\.?\s*/gi,'Shrimati ').replace(/\bSri\.?\s*/gi,'Shri ')
+        .replace(/\bProf\.?\s*/gi,'Professor ').replace(/\bDr\.?\s*/gi,'Doctor ')
+        .replace(/ಪ್ರೊ\.?/g,'ಪ್ರೊಫೆಸರ್ ').replace(/ಡಾ\.?/g,'ಡಾಕ್ಟರ್ ');
     }
     function speak(text) {
-      if (!text || !('speechSynthesis' in window)) return;
-      speechSynthesis.cancel();
-      const speech = new SpeechSynthesisUtterance(text);
-      speech.lang = (text.match(/[\u0c80-\u0cff]/g) || []).length ? 'kn-IN' : 'en-IN';
-      speech.rate = .72; speechSynthesis.speak(speech);
+      stopSpeechOnly();
+      if (!text || !('speechSynthesis' in window)) return Promise.resolve(false);
+      const generation=speechGeneration, utterance=new SpeechSynthesisUtterance(normalizedSpeech(text));
+      utterance.lang=(text.match(/[\u0c80-\u0cff]/g)||[]).length?'kn-IN':'en-IN'; utterance.rate=.7;
+      return new Promise(resolve => {
+        utterance.onend=()=>resolve(generation===speechGeneration);
+        utterance.onerror=()=>resolve(false); speechSynthesis.speak(utterance);
+      });
     }
-    function selectWord(word) {
-      document.querySelectorAll('.underline').forEach(
-        node => node.classList.toggle('active', node.dataset.id === word.id),
-      );
-      current.textContent = word.text; speak(word.text);
+    function stopSpeechOnly() { speechGeneration++; if ('speechSynthesis' in window) speechSynthesis.cancel(); }
+    function lineForWord(word) { return (result.lines||[]).find(line=>line.id===word.line_id); }
+    function activate(id,text) {
+      document.querySelectorAll('.underline').forEach(node=>node.classList.toggle('active',node.dataset.id===id));
+      current.textContent=text||'';
+    }
+    function explainUnavailable() {
+      stop(); current.textContent='Meaning will be available when the cloud reader is connected.';
+      status.textContent='Meaning is not available in this first reading stage yet.';
+    }
+    async function selectWord(word) {
+      if (mode==='meaning') return explainUnavailable();
+      const target=mode==='sentence' ? lineForWord(word) : word;
+      if (!target) return; activate(target.id,target.text); await speak(target.text);
+    }
+    function addUnderline(target,box) {
+      const line=document.createElementNS('http://www.w3.org/2000/svg','line');
+      const y=box.y+box.height+Math.max(2,Math.round(box.height*.05));
+      line.setAttribute('x1',box.x); line.setAttribute('x2',box.x+box.width); line.setAttribute('y1',y); line.setAttribute('y2',y);
+      line.setAttribute('class','underline'); line.dataset.id=target.id; overlay.appendChild(line);
     }
     function render(value) {
-      overlay.textContent = '';
-      overlay.setAttribute('viewBox', `0 0 ${value.image_size.width} ${value.image_size.height}`);
-      for (const word of value.words || []) {
-        const hit = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-        for (const key of ['x', 'y', 'width', 'height']) hit.setAttribute(key, word.box[key]);
-        hit.setAttribute('class', 'hit'); hit.dataset.id = word.id;
-        hit.addEventListener('click', () => selectWord(word)); overlay.appendChild(hit);
-        const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-        const y = word.box.y + word.box.height + Math.max(2, Math.round(word.box.height * .06));
-        line.setAttribute('x1', word.box.x); line.setAttribute('x2', word.box.x + word.box.width);
-        line.setAttribute('y1', y); line.setAttribute('y2', y); line.setAttribute('class', 'underline');
-        line.dataset.id = word.id; overlay.appendChild(line);
+      result=value; overlay.textContent=''; current.textContent='';
+      overlay.setAttribute('viewBox',`0 0 ${value.image_size.width} ${value.image_size.height}`);
+      for (const word of value.words||[]) {
+        const hit=document.createElementNS('http://www.w3.org/2000/svg','rect');
+        for (const key of ['x','y','width','height']) hit.setAttribute(key,word.box[key]);
+        hit.setAttribute('class','hit'); hit.dataset.id=word.id;
+        hit.addEventListener('click',()=>{ if (!suppressTap) selectWord(word); }); overlay.appendChild(hit);
+        addUnderline(word,word.box);
       }
-      document.getElementById('bar-1').classList.add('ready');
-      status.textContent = value.words.length
-        ? 'ಓದಲು ಪದವನ್ನು ಸ್ಪರ್ಶಿಸಿ.' : 'ಪಠ್ಯ ಸಿಗಲಿಲ್ಲ. ಮತ್ತೊಮ್ಮೆ ಚಿತ್ರ ತೆಗೆಯಿರಿ.';
+      $('quality-1').classList.add('ready');
+      status.textContent=(value.words||[]).length?'ಪದ ಅಥವಾ ಸಾಲನ್ನು ಸ್ಪರ್ಶಿಸಿ.':'ಪಠ್ಯ ಸಿಗಲಿಲ್ಲ. ಮತ್ತೊಂದು ಚಿತ್ರ ಪ್ರಯತ್ನಿಸಿ.';
+    }
+    function sceneToResult(scene) {
+      if (scene.schema==='smart-glasses.word-annotation.v1') {
+        const words=(scene.words||[]).map(word=>{
+          const xs=word.polygon.map(point=>point[0]),ys=word.polygon.map(point=>point[1]);
+          return {id:word.word_id,line_id:`gold-line-${word.line}`,text:word.text,
+            box:{x:Math.min(...xs),y:Math.min(...ys),width:Math.max(...xs)-Math.min(...xs),height:Math.max(...ys)-Math.min(...ys)}};
+        });
+        const lines=[];
+        for (const word of words) {
+          let line=lines.find(item=>item.id===word.line_id);
+          if (!line) { line={id:word.line_id,text:'',word_ids:[],box:{...word.box}}; lines.push(line); }
+          line.text=(line.text+' '+word.text).trim(); line.word_ids.push(word.id);
+          const right=Math.max(line.box.x+line.box.width,word.box.x+word.box.width);
+          const bottom=Math.max(line.box.y+line.box.height,word.box.y+word.box.height);
+          line.box.x=Math.min(line.box.x,word.box.x); line.box.y=Math.min(line.box.y,word.box.y);
+          line.box.width=right-line.box.x; line.box.height=bottom-line.box.y;
+        }
+        return {schema:'villagelens.capture.v1',image_size:{width:scene.reference.width,height:scene.reference.height},words,lines,retained:true};
+      }
+      const objects=scene.objects||[], lines=objects.filter(o=>o.kind==='line_or_sentence_candidate').map(o=>({
+        id:o.object_id, box:o.box, text:(o.recognition||{}).text_candidate||'', word_ids:[],
+      }));
+      const words=objects.filter(o=>o.kind==='word').map(o=>({
+        id:o.object_id, line_id:o.parent_id, box:o.box, text:(o.recognition||{}).text_candidate||'',
+      }));
+      for (const word of words) { const line=lines.find(item=>item.id===word.line_id); if (line) line.word_ids.push(word.id); }
+      return {schema:'villagelens.capture.v1',image_size:scene.image_size,words,lines,retained:true};
+    }
+    async function loadItem(item) {
+      if (item.result) return item.result;
+      if (!item.cached) {
+        const response=await fetch(item.result_url); if (response.status===401) location.href='/access';
+        if (!response.ok) throw new Error('RESULT_FAILED');
+        const value=await response.json(); item.cached=item.kind==='demo'?sceneToResult(value):value;
+      }
+      return item.cached;
+    }
+    async function showGallery(index) {
+      if (!gallery.length) return;
+      stop(); galleryIndex=(index+gallery.length)%gallery.length; const item=gallery[galleryIndex];
+      position.textContent=`${item.label}  ${galleryIndex+1}/${gallery.length}`; status.textContent='ಚಿತ್ರವನ್ನು ಸಿದ್ಧಪಡಿಸುತ್ತಿದೆ…';
+      image.src=item.image_url; stage.style.display='inline-block'; resetQuality();
+      try { render(await loadItem(item)); }
+      catch (_) { status.textContent='ಈ ಉಳಿಸಿದ ಚಿತ್ರವನ್ನು ಓದಲು ಆಗಲಿಲ್ಲ.'; }
+    }
+    async function loadGallery() {
+      try {
+        const response=await fetch('/api/gallery'); if (response.status===401) return location.href='/access';
+        if (!response.ok) throw new Error('GALLERY_FAILED'); gallery=(await response.json()).items||[]; await showGallery(0);
+      } catch (_) { status.textContent='ಉಳಿಸಿದ ಚಿತ್ರಗಳನ್ನು ತೆರೆಯಲು ಆಗಲಿಲ್ಲ.'; }
+    }
+    async function play(items) {
+      stop(); const generation=playbackGeneration; stage.classList.add('playing');
+      for (const item of items) {
+        if (generation!==playbackGeneration) break; activate(item.id,item.text);
+        if (!await speak(item.text) || generation!==playbackGeneration) break;
+      }
+      if (generation===playbackGeneration) { stage.classList.remove('playing'); document.querySelectorAll('.underline').forEach(n=>n.classList.remove('active')); }
     }
     async function useCapture(file) {
-      if (!file) return;
-      reset(); beginTimer(); status.textContent = 'ಚಿತ್ರವನ್ನು ಓದುತ್ತಿದೆ…';
-      const objectUrl = URL.createObjectURL(file);
-      preview.onload = () => URL.revokeObjectURL(objectUrl);
-      preview.src = objectUrl; stage.style.display = 'inline-block';
+      if (!file) return; stop(); resetQuality(); beginTimer(); status.textContent='ಚಿತ್ರವನ್ನು ಓದುತ್ತಿದೆ…';
+      const objectUrl=URL.createObjectURL(file); image.src=objectUrl; stage.style.display='inline-block';
       try {
-        const response = await fetch('/api/capture', {
-          method: 'POST', headers: { 'Content-Type': file.type }, body: file,
-        });
-        const value = await response.json();
-        if (!response.ok) throw new Error(value.error || 'CAPTURE_FAILED');
-        render(value);
-      } catch (error) {
-        status.textContent = 'ಈ ಚಿತ್ರವನ್ನು ಓದಲು ಆಗಲಿಲ್ಲ. ಮತ್ತೊಮ್ಮೆ ಪ್ರಯತ್ನಿಸಿ.';
-      } finally {
-        endTimer(); input.value = '';
-      }
+        const response=await fetch('/api/capture',{method:'POST',headers:{'Content-Type':file.type||'image/jpeg'},body:file});
+        if (response.status===401) return location.href='/access'; const value=await response.json();
+        if (!response.ok) throw new Error(value.error||'CAPTURE_FAILED');
+        const item={id:value.capture_id,label:'Captured page',kind:'capture',image_url:value.retained?value.image_url:objectUrl,result:value};
+        gallery.splice(Math.min(2,gallery.length),0,item); await showGallery(gallery.indexOf(item)); render(value);
+        if (!value.retained) status.textContent+=' This test could not be saved.';
+      } catch (_) { status.textContent='ಈ ಚಿತ್ರವನ್ನು ಓದಲು ಆಗಲಿಲ್ಲ. ಮತ್ತೊಮ್ಮೆ ಪ್ರಯತ್ನಿಸಿ.'; }
+      finally { endTimer(); input.value=''; if (image.src!==objectUrl) URL.revokeObjectURL(objectUrl); }
     }
-    document.getElementById('camera').addEventListener('click', () => input.click());
-    document.getElementById('stop').addEventListener('click', () => {
-      if ('speechSynthesis' in window) speechSynthesis.cancel();
+    $('mode-word').onclick=()=>setMode('word'); $('mode-sentence').onclick=()=>setMode('sentence');
+    $('mode-meaning').onclick=()=>setMode('meaning'); $('camera').onclick=()=>input.click();
+    $('play-words').onclick=()=>result&&play(result.words||[]); $('play-sentences').onclick=()=>result&&play(result.lines||[]);
+    $('play-meanings').onclick=explainUnavailable; $('play-whole').onclick=explainUnavailable; $('stop').onclick=stop;
+    $('previous').onclick=()=>showGallery(galleryIndex-1); $('next').onclick=()=>showGallery(galleryIndex+1);
+    input.onchange=()=>useCapture(input.files&&input.files[0]);
+    stage.addEventListener('pointerdown',event=>{ pointerStart={x:event.clientX,y:event.clientY}; suppressTap=false; });
+    stage.addEventListener('pointerup',event=>{
+      if (!pointerStart) return; const dx=event.clientX-pointerStart.x,dy=event.clientY-pointerStart.y; pointerStart=null;
+      if (Math.abs(dx)>45&&Math.abs(dx)>Math.abs(dy)) { suppressTap=true; showGallery(galleryIndex+(dx<0?1:-1)); setTimeout(()=>suppressTap=false,250); }
     });
-    input.addEventListener('change', () => useCapture(input.files && input.files[0]));
+    loadGallery();
   </script>
 </body>
 </html>

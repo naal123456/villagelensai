@@ -1,0 +1,547 @@
+{
+  "schema": "smart-glasses.guided-reading-scene.v1",
+  "source": {
+    "path": "evaluation/images/iphone-test/i2.jpeg",
+    "sha256": "e54c466b1713a6dd156c89d800c0f6d1726c7c83b9daffe83c081b57e54f7fd9",
+    "display_image": "../../images/iphone-test/i2.jpeg"
+  },
+  "image_size": {
+    "width": 3024,
+    "height": 4032
+  },
+  "surface_type": "auto",
+  "objects": [
+    {
+      "object_id": "surface-001",
+      "kind": "surface",
+      "parent_id": null,
+      "reading_order": null,
+      "box": {
+        "x": 0,
+        "y": 0,
+        "width": 3024,
+        "height": 4032
+      },
+      "recognition": null
+    },
+    {
+      "object_id": "line-001",
+      "kind": "line_or_sentence_candidate",
+      "parent_id": "surface-001",
+      "reading_order": 1,
+      "box": {
+        "x": 1543,
+        "y": 264,
+        "width": 848,
+        "height": 418
+      },
+      "recognition": {
+        "text_candidate": "೮.೫0",
+        "status": "contains_low_confidence_ocr_candidates"
+      },
+      "detector_group": {
+        "block": 1,
+        "paragraph": 1,
+        "line": 1
+      }
+    },
+    {
+      "object_id": "word-001",
+      "kind": "word",
+      "parent_id": "line-001",
+      "reading_order": 1,
+      "box": {
+        "x": 1543,
+        "y": 264,
+        "width": 848,
+        "height": 418
+      },
+      "recognition": {
+        "text_candidate": "೮.೫0",
+        "confidence": 9.038076,
+        "status": "low_confidence_ocr_candidate",
+        "reading_eligible": false
+      }
+    },
+    {
+      "object_id": "line-002",
+      "kind": "line_or_sentence_candidate",
+      "parent_id": "surface-001",
+      "reading_order": 2,
+      "box": {
+        "x": 1824,
+        "y": 551,
+        "width": 203,
+        "height": 211
+      },
+      "recognition": {
+        "text_candidate": "ಸ್ಮ",
+        "status": "contains_low_confidence_ocr_candidates"
+      },
+      "detector_group": {
+        "block": 2,
+        "paragraph": 1,
+        "line": 1
+      }
+    },
+    {
+      "object_id": "word-002",
+      "kind": "word",
+      "parent_id": "line-002",
+      "reading_order": 2,
+      "box": {
+        "x": 1824,
+        "y": 551,
+        "width": 203,
+        "height": 211
+      },
+      "recognition": {
+        "text_candidate": "ಸ್ಮ",
+        "confidence": 25.177994,
+        "status": "low_confidence_ocr_candidate",
+        "reading_eligible": false
+      }
+    },
+    {
+      "object_id": "line-003",
+      "kind": "line_or_sentence_candidate",
+      "parent_id": "surface-001",
+      "reading_order": 3,
+      "box": {
+        "x": 1284,
+        "y": 1201,
+        "width": 1531,
+        "height": 422
+      },
+      "recognition": {
+        "text_candidate": "ಪ್ರೊ ಲಕ್ಷ್ಮಣ್‌ ತೆಲಗಾವಿ",
+        "status": "contains_low_confidence_ocr_candidates"
+      },
+      "detector_group": {
+        "block": 3,
+        "paragraph": 1,
+        "line": 1
+      }
+    },
+    {
+      "object_id": "word-003",
+      "kind": "word",
+      "parent_id": "line-003",
+      "reading_order": 3,
+      "box": {
+        "x": 1284,
+        "y": 1201,
+        "width": 317,
+        "height": 422
+      },
+      "recognition": {
+        "text_candidate": "ಪ್ರೊ",
+        "confidence": 67.954956,
+        "status": "unverified_ocr_candidate",
+        "reading_eligible": true
+      }
+    },
+    {
+      "object_id": "word-004",
+      "kind": "word",
+      "parent_id": "line-003",
+      "reading_order": 4,
+      "box": {
+        "x": 1670,
+        "y": 1206,
+        "width": 458,
+        "height": 417
+      },
+      "recognition": {
+        "text_candidate": "ಲಕ್ಷ್ಮಣ್‌",
+        "confidence": 72.77533,
+        "status": "unverified_ocr_candidate",
+        "reading_eligible": true
+      }
+    },
+    {
+      "object_id": "word-005",
+      "kind": "word",
+      "parent_id": "line-003",
+      "reading_order": 5,
+      "box": {
+        "x": 2198,
+        "y": 1201,
+        "width": 617,
+        "height": 422
+      },
+      "recognition": {
+        "text_candidate": "ತೆಲಗಾವಿ",
+        "confidence": 28.185482,
+        "status": "low_confidence_ocr_candidate",
+        "reading_eligible": false
+      }
+    },
+    {
+      "object_id": "line-004",
+      "kind": "line_or_sentence_candidate",
+      "parent_id": "surface-001",
+      "reading_order": 4,
+      "box": {
+        "x": 567,
+        "y": 1499,
+        "width": 2309,
+        "height": 867
+      },
+      "recognition": {
+        "text_candidate": "[unresolved title region] ಸಚಿತ್ರ",
+        "status": "contains_low_confidence_ocr_candidates"
+      },
+      "detector_group": {
+        "block": 4,
+        "paragraph": 1,
+        "line": 1
+      }
+    },
+    {
+      "object_id": "word-006",
+      "kind": "word",
+      "parent_id": "line-004",
+      "reading_order": 6,
+      "box": {
+        "x": 567,
+        "y": 1499,
+        "width": 2309,
+        "height": 713
+      },
+      "recognition": {
+        "text_candidate": "[unresolved title region]",
+        "confidence": 0.0,
+        "status": "low_confidence_ocr_candidate",
+        "reading_eligible": false
+      }
+    },
+    {
+      "object_id": "word-007",
+      "kind": "word",
+      "parent_id": "line-004",
+      "reading_order": 7,
+      "box": {
+        "x": 634,
+        "y": 2212,
+        "width": 231,
+        "height": 154
+      },
+      "recognition": {
+        "text_candidate": "ಸಚಿತ್ರ",
+        "confidence": 50.192341,
+        "status": "unverified_ocr_candidate",
+        "reading_eligible": true
+      }
+    },
+    {
+      "object_id": "line-005",
+      "kind": "line_or_sentence_candidate",
+      "parent_id": "surface-001",
+      "reading_order": 5,
+      "box": {
+        "x": 1823,
+        "y": 2004,
+        "width": 787,
+        "height": 852
+      },
+      "recognition": {
+        "text_candidate": "ಇ",
+        "status": "contains_low_confidence_ocr_candidates"
+      },
+      "detector_group": {
+        "block": 5,
+        "paragraph": 1,
+        "line": 1
+      }
+    },
+    {
+      "object_id": "word-008",
+      "kind": "word",
+      "parent_id": "line-005",
+      "reading_order": 8,
+      "box": {
+        "x": 1823,
+        "y": 2004,
+        "width": 787,
+        "height": 852
+      },
+      "recognition": {
+        "text_candidate": "ಇ",
+        "confidence": 48.699486,
+        "status": "low_confidence_ocr_candidate",
+        "reading_eligible": false
+      }
+    },
+    {
+      "object_id": "line-006",
+      "kind": "line_or_sentence_candidate",
+      "parent_id": "surface-001",
+      "reading_order": 6,
+      "box": {
+        "x": 568,
+        "y": 2122,
+        "width": 362,
+        "height": 276
+      },
+      "recognition": {
+        "text_candidate": "ಸೂತ್ರ",
+        "status": "contains_low_confidence_ocr_candidates"
+      },
+      "detector_group": {
+        "block": 6,
+        "paragraph": 1,
+        "line": 1
+      }
+    },
+    {
+      "object_id": "word-009",
+      "kind": "word",
+      "parent_id": "line-006",
+      "reading_order": 9,
+      "box": {
+        "x": 568,
+        "y": 2122,
+        "width": 362,
+        "height": 276
+      },
+      "recognition": {
+        "text_candidate": "ಸೂತ್ರ",
+        "confidence": 0.0,
+        "status": "low_confidence_ocr_candidate",
+        "reading_eligible": false
+      }
+    },
+    {
+      "object_id": "line-007",
+      "kind": "line_or_sentence_candidate",
+      "parent_id": "surface-001",
+      "reading_order": 7,
+      "box": {
+        "x": 932,
+        "y": 2197,
+        "width": 965,
+        "height": 241
+      },
+      "recognition": {
+        "text_candidate": "ಪ್ರವಾಸಿ ಮಾರ್ಗದರ್ಶಿ .",
+        "status": "unverified_ocr_candidate"
+      },
+      "detector_group": {
+        "block": 7,
+        "paragraph": 1,
+        "line": 1
+      }
+    },
+    {
+      "object_id": "word-010",
+      "kind": "word",
+      "parent_id": "line-007",
+      "reading_order": 10,
+      "box": {
+        "x": 932,
+        "y": 2197,
+        "width": 293,
+        "height": 241
+      },
+      "recognition": {
+        "text_candidate": "ಪ್ರವಾಸಿ",
+        "confidence": 96.828156,
+        "status": "unverified_ocr_candidate",
+        "reading_eligible": true
+      }
+    },
+    {
+      "object_id": "word-011",
+      "kind": "word",
+      "parent_id": "line-007",
+      "reading_order": 11,
+      "box": {
+        "x": 1293,
+        "y": 2197,
+        "width": 503,
+        "height": 241
+      },
+      "recognition": {
+        "text_candidate": "ಮಾರ್ಗದರ್ಶಿ",
+        "confidence": 85.051147,
+        "status": "unverified_ocr_candidate",
+        "reading_eligible": true
+      }
+    },
+    {
+      "object_id": "word-012",
+      "kind": "punctuation",
+      "parent_id": "line-007",
+      "reading_order": 12,
+      "box": {
+        "x": 1836,
+        "y": 2197,
+        "width": 61,
+        "height": 214
+      },
+      "recognition": {
+        "text_candidate": ".",
+        "confidence": 72.92099,
+        "status": "unverified_ocr_candidate",
+        "reading_eligible": true
+      }
+    },
+    {
+      "object_id": "line-008",
+      "kind": "line_or_sentence_candidate",
+      "parent_id": "surface-001",
+      "reading_order": 8,
+      "box": {
+        "x": 382,
+        "y": 3996,
+        "width": 145,
+        "height": 36
+      },
+      "recognition": {
+        "text_candidate": "ಸರಣ",
+        "status": "contains_low_confidence_ocr_candidates"
+      },
+      "detector_group": {
+        "block": 8,
+        "paragraph": 1,
+        "line": 1
+      }
+    },
+    {
+      "object_id": "word-013",
+      "kind": "word",
+      "parent_id": "line-008",
+      "reading_order": 13,
+      "box": {
+        "x": 382,
+        "y": 3996,
+        "width": 145,
+        "height": 36
+      },
+      "recognition": {
+        "text_candidate": "ಸರಣ",
+        "confidence": 7.786436,
+        "status": "low_confidence_ocr_candidate",
+        "reading_eligible": false
+      }
+    }
+  ],
+  "reading_sequence": [
+    "word-003",
+    "word-004",
+    "word-007",
+    "word-010",
+    "word-011"
+  ],
+  "candidate_sequence": [
+    "word-001",
+    "word-002",
+    "word-003",
+    "word-004",
+    "word-005",
+    "word-006",
+    "word-007",
+    "word-008",
+    "word-009",
+    "word-010",
+    "word-011",
+    "word-013"
+  ],
+  "visual_objects": [],
+  "semantics": {
+    "ocr_text_is_ground_truth": false,
+    "line_objects_are_confirmed_sentences": false,
+    "visual_object_detection_status": "deferred"
+  },
+  "detector": {
+    "geometry": "prepared-image text lines mapped to source",
+    "reader": "tesseract",
+    "language": "kan",
+    "psm": 8,
+    "traineddata_path": "third_party/tessdata/kan.traineddata",
+    "traineddata_sha256": "bd31e6b6ae93271e3bcf5383d306d8eefbb91542937cd6d735a5930c970e61d8",
+    "line_attempts": [
+      {
+        "line_id": "L01",
+        "reading_order": 1,
+        "crop_path": "evaluation/images/prepared/i2-e54c466b1713/line-01-original.png",
+        "candidate_count": 1,
+        "stderr": "",
+        "mixed_scale_refinement": false,
+        "sparse_psm": 11,
+        "sparse_stderr": "Estimating resolution as 2344\nDetected 12 diacritics\n"
+      },
+      {
+        "line_id": "L02",
+        "reading_order": 2,
+        "crop_path": "evaluation/images/prepared/i2-e54c466b1713/line-02-original.png",
+        "candidate_count": 1,
+        "stderr": "",
+        "mixed_scale_refinement": false,
+        "sparse_psm": null,
+        "sparse_stderr": ""
+      },
+      {
+        "line_id": "L03",
+        "reading_order": 3,
+        "crop_path": "evaluation/images/prepared/i2-e54c466b1713/line-03-original.png",
+        "candidate_count": 3,
+        "stderr": "",
+        "mixed_scale_refinement": false,
+        "sparse_psm": null,
+        "sparse_stderr": ""
+      },
+      {
+        "line_id": "L04",
+        "reading_order": 4,
+        "crop_path": "evaluation/images/prepared/i2-e54c466b1713/line-04-original.png",
+        "candidate_count": 4,
+        "stderr": "",
+        "mixed_scale_refinement": true,
+        "sparse_psm": 11,
+        "sparse_stderr": "Estimating resolution as 302\n"
+      },
+      {
+        "line_id": "L05",
+        "reading_order": 5,
+        "crop_path": "evaluation/images/prepared/i2-e54c466b1713/line-05-original.png",
+        "candidate_count": 1,
+        "stderr": "",
+        "mixed_scale_refinement": false,
+        "sparse_psm": null,
+        "sparse_stderr": ""
+      },
+      {
+        "line_id": "L06",
+        "reading_order": 6,
+        "crop_path": "evaluation/images/prepared/i2-e54c466b1713/line-06-original.png",
+        "candidate_count": 1,
+        "stderr": "",
+        "mixed_scale_refinement": false,
+        "sparse_psm": 11,
+        "sparse_stderr": "Estimating resolution as 313\nDetected 9 diacritics\n"
+      },
+      {
+        "line_id": "L07",
+        "reading_order": 7,
+        "crop_path": "evaluation/images/prepared/i2-e54c466b1713/line-07-original.png",
+        "candidate_count": 3,
+        "stderr": "",
+        "mixed_scale_refinement": false,
+        "sparse_psm": null,
+        "sparse_stderr": ""
+      },
+      {
+        "line_id": "L08",
+        "reading_order": 8,
+        "crop_path": "evaluation/images/prepared/i2-e54c466b1713/line-08-original.png",
+        "candidate_count": 1,
+        "stderr": "",
+        "mixed_scale_refinement": false,
+        "sparse_psm": 11,
+        "sparse_stderr": "Estimating resolution as 344\n"
+      }
+    ]
+  }
+}

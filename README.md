@@ -13,12 +13,14 @@ photograph, and can touch or continuously play recognized words, sentences, and
 Kannada explanations. Processing improves in the background without exposing
 OCR engines or model names.
 
-## Quality stages
+## Quality indicators
 
 1. Yellow: repository-local Tesseract `kan+eng` is ready.
 2. Light green: fast OpenAI whole-image refinement is accepted.
 3. Green: careful OpenAI whole-image refinement is accepted.
-4. Dark green: deterministic multi-reader consensus is accepted.
+
+The current phone strip displays these three stages. A future dark-green fourth
+stage is reserved for deterministic multi-reader consensus.
 
 The colors are processing/evidence stages, not calibrated accuracy percentages.
 
@@ -40,11 +42,13 @@ See [the Google Cloud POC architecture](docs/GOOGLE_CLOUD_POC.md).
 
 ## Current boundary
 
-The `/a` client invokes a phone camera, sends one bounded still image to the
-same-origin API, and renders the returned word geometry as touchable underlines.
-Only the genuine Tesseract yellow stage is enabled. The API is stateless and
-reports that it did not retain the source image. OpenAI, Google Vision, feedback
-persistence, device enrollment, and the remaining quality stages are still
+The `/a` client opens with I2, makes I1 available by swiping, invokes a phone
+camera, sends one bounded still image to the same-origin API, and renders the
+returned word geometry as touchable underlines. Captures and their stage-one
+results are retained in the private `villagelensai-captures` Cloud Storage
+bucket and returned in the authenticated gallery, newest first after I2 and I1.
+Only the genuine Tesseract yellow stage is enabled. OpenAI, Google Vision,
+feedback persistence, device enrollment, and later quality stages remain
 disabled.
 
 The deployed tester page and capture API are protected by a server-side access

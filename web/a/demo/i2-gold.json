@@ -1,0 +1,82 @@
+{
+  "schema": "smart-glasses.word-annotation.v1",
+  "annotation_id": "I2-BOOK-COVER-WORDS-20260821",
+  "status": "reviewed-independent-qualification",
+  "scope": "eight words in the three verified Kannada cover lines; yellow circular text excluded",
+  "reference": {
+    "filename": "i2.jpeg",
+    "path": "evaluation/images/iphone-test/i2.jpeg",
+    "sha256": "e54c466b1713a6dd156c89d800c0f6d1726c7c83b9daffe83c081b57e54f7fd9",
+    "width": 3024,
+    "height": 4032
+  },
+  "verification_basis": [
+    "exact three-line transcription locked in IPHONE-VERIFIED-20260819 before candidate-selector development",
+    "direct visual review of the sharp i2 source pixels",
+    "word polygons reviewed independently of Mentra OCR output"
+  ],
+  "independence": {
+    "split_group": "BOOK-COVER-01",
+    "development_split_group": "BOOK-SPREAD-01",
+    "physical_surface_independent": true,
+    "overlapping_vocabulary_with_development_seed": ["ಸಚಿತ್ರ", "ಮಾರ್ಗದರ್ಶಿ"]
+  },
+  "words": [
+    {
+      "word_id": "COV-W001",
+      "line": 1,
+      "order": 1,
+      "text": "ಪ್ರೊ.",
+      "polygon": [[1245, 1265], [1655, 1265], [1655, 1535], [1245, 1535]]
+    },
+    {
+      "word_id": "COV-W002",
+      "line": 1,
+      "order": 2,
+      "text": "ಲಕ್ಷ್ಮಣ್",
+      "polygon": [[1645, 1275], [2160, 1275], [2160, 1540], [1645, 1540]]
+    },
+    {
+      "word_id": "COV-W003",
+      "line": 1,
+      "order": 3,
+      "text": "ತೆಲಗಾವಿ",
+      "polygon": [[2180, 1270], [2730, 1270], [2730, 1525], [2180, 1525]]
+    },
+    {
+      "word_id": "COV-W004",
+      "line": 2,
+      "order": 1,
+      "text": "ಚಿತ್ರದುರ್ಗಕ್ಕೆ",
+      "polygon": [[565, 1705], [2720, 1705], [2720, 2240], [565, 2240]]
+    },
+    {
+      "word_id": "COV-W005",
+      "line": 2,
+      "order": 2,
+      "text": "ಬನ್ನಿ",
+      "polygon": [[1890, 2180], [2575, 2180], [2575, 2690], [1890, 2690]]
+    },
+    {
+      "word_id": "COV-W006",
+      "line": 3,
+      "order": 1,
+      "text": "ಸಚಿತ್ರ",
+      "polygon": [[620, 2240], [970, 2240], [970, 2465], [620, 2465]]
+    },
+    {
+      "word_id": "COV-W007",
+      "line": 3,
+      "order": 2,
+      "text": "ಪ್ರವಾಸಿ",
+      "polygon": [[975, 2240], [1365, 2240], [1365, 2465], [975, 2465]]
+    },
+    {
+      "word_id": "COV-W008",
+      "line": 3,
+      "order": 3,
+      "text": "ಮಾರ್ಗದರ್ಶಿ",
+      "polygon": [[1365, 2230], [1900, 2230], [1900, 2470], [1365, 2470]]
+    }
+  ]
+}

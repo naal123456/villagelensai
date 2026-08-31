@@ -4,12 +4,15 @@ import csv
 import hashlib
 import hmac
 import io
+import json
 import os
+import re
 import subprocess
 import tempfile
 import time
 import uuid
 from collections import defaultdict
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -19,6 +22,7 @@ from PIL import Image, ImageOps, UnidentifiedImageError
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 WEB_ROOT = REPOSITORY_ROOT / "web"
+DEMO_ROOT = WEB_ROOT / "a" / "demo"
 TESSDATA_DIRECTORY = Path(
     os.environ.get("VILLAGELENS_TESSDATA_DIR", REPOSITORY_ROOT / "models" / "tessdata")
 )
@@ -26,11 +30,15 @@ MAX_CAPTURE_BYTES = int(os.environ.get("VILLAGELENS_MAX_CAPTURE_BYTES", 15 * 102
 MAX_IMAGE_PIXELS = int(os.environ.get("VILLAGELENS_MAX_IMAGE_PIXELS", 25_000_000))
 MAX_IMAGE_EDGE = int(os.environ.get("VILLAGELENS_MAX_IMAGE_EDGE", 4096))
 ALLOWED_MEDIA_TYPES = {"image/jpeg", "image/png", "image/webp"}
+CAPTURE_BUCKET = os.environ.get("VILLAGELENS_CAPTURE_BUCKET", "")
 ACCESS_COOKIE_NAME = "villagelens_access"
 ACCESS_COOKIE_TTL_SECONDS = 30 * 24 * 60 * 60
 MODEL_SHA256 = {
     "kan": "bd31e6b6ae93271e3bcf5383d306d8eefbb91542937cd6d735a5930c970e61d8",
     "eng": "7d4322bd2a7749724879683fc3912cb542f19906c83bcc1a52132556427170b2",
+}
+DEMO_ASSETS = {
+    "i1.jpeg", "i1-scene.json", "i2.jpeg", "i2-scene.json", "i2-gold.json",
 }
 
 Image.MAX_IMAGE_PIXELS = MAX_IMAGE_PIXELS
@@ -167,6 +175,13 @@ def tester_page() -> Response:
     return send_from_directory(WEB_ROOT / "a", "index.html")
 
 
+@app.get("/a/demo/<path:filename>")
+def demo_asset(filename: str) -> Response | tuple[Response, int]:
+    if filename not in DEMO_ASSETS:
+        return jsonify(error="DEMO_ASSET_NOT_FOUND"), 404
+    return send_from_directory(DEMO_ROOT, filename)
+
+
 @app.get("/health")
 @app.get("/healthz")
 def health() -> tuple[Response, int]:
@@ -287,6 +302,95 @@ def _tesseract(image_path: Path) -> tuple[list[dict[str, Any]], list[dict[str, A
     return words, lines, round((time.monotonic() - started) * 1000)
 
 
+def _storage_bucket() -> Any:
+    if not CAPTURE_BUCKET:
+        return None
+    from google.cloud import storage
+
+    return storage.Client().bucket(CAPTURE_BUCKET)
+
+
+def _store_capture(data: bytes, media_type: str, result: dict[str, Any]) -> bool:
+    bucket = _storage_bucket()
+    if bucket is None:
+        return False
+    capture_id = result["capture_id"]
+    image_name = f"captures/{capture_id}/source"
+    stored = dict(result)
+    stored["retained"] = True
+    stored["image_url"] = f"/api/captures/{capture_id}/image"
+    bucket.blob(image_name).upload_from_string(data, content_type=media_type)
+    bucket.blob(f"captures/{capture_id}/result.json").upload_from_string(
+        json.dumps(stored, ensure_ascii=False, separators=(",", ":")),
+        content_type="application/json; charset=utf-8",
+    )
+    return True
+
+
+def _valid_capture_id(capture_id: str) -> bool:
+    return bool(re.fullmatch(r"[0-9a-f]{32}", capture_id))
+
+
+@app.get("/api/gallery")
+def gallery() -> tuple[Response, int]:
+    items: list[dict[str, Any]] = [
+        {
+            "id": "demo-i2", "label": "I2", "kind": "demo",
+            "image_url": "/a/demo/i2.jpeg", "result_url": "/a/demo/i2-gold.json",
+        },
+        {
+            "id": "demo-i1", "label": "I1", "kind": "demo",
+            "image_url": "/a/demo/i1.jpeg", "result_url": "/a/demo/i1-scene.json",
+        },
+    ]
+    try:
+        bucket = _storage_bucket()
+        if bucket is not None:
+            stored: list[dict[str, Any]] = []
+            for blob in bucket.list_blobs(prefix="captures/"):
+                if not blob.name.endswith("/result.json"):
+                    continue
+                value = json.loads(blob.download_as_text(encoding="utf-8"))
+                capture_id = value.get("capture_id", "")
+                if not _valid_capture_id(capture_id):
+                    continue
+                stored.append({
+                    "id": capture_id,
+                    "label": value.get("label") or "Captured page",
+                    "kind": "capture",
+                    "captured_at": value.get("captured_at"),
+                    "image_url": f"/api/captures/{capture_id}/image",
+                    "result": value,
+                })
+            stored.sort(key=lambda item: item.get("captured_at") or "", reverse=True)
+            items.extend(stored[:20])
+    except Exception:
+        app.logger.exception("Capture gallery is temporarily unavailable")
+    return jsonify(schema="villagelens.gallery.v1", items=items), 200
+
+
+@app.get("/api/captures/<capture_id>/image")
+def captured_image(capture_id: str) -> Response | tuple[Response, int]:
+    if not _valid_capture_id(capture_id):
+        return jsonify(error="CAPTURE_NOT_FOUND"), 404
+    try:
+        bucket = _storage_bucket()
+        if bucket is None:
+            raise FileNotFoundError
+        blob = bucket.blob(f"captures/{capture_id}/source")
+        if not blob.exists():
+            raise FileNotFoundError
+        response = make_response(blob.download_as_bytes())
+        response.headers["Content-Type"] = blob.content_type or "application/octet-stream"
+        response.headers["Cache-Control"] = "private, max-age=3600"
+        return response
+    except FileNotFoundError:
+        return jsonify(error="CAPTURE_NOT_FOUND"), 404
+    except Exception:
+        app.logger.exception("Stored capture could not be read")
+        return jsonify(error="CAPTURE_STORAGE_UNAVAILABLE"), 503
+
+
 @app.post("/api/capture")
 def capture() -> tuple[Response, int]:
     media_type = (request.content_type or "").split(";", 1)[0].lower()
@@ -308,8 +412,10 @@ def capture() -> tuple[Response, int]:
     except RuntimeError as exc:
         return jsonify(error=str(exc)), 503
 
-    return jsonify({
-        "schema": "villagelens.capture.v1", "capture_id": uuid.uuid4().hex,
+    capture_id = uuid.uuid4().hex
+    result = {
+        "schema": "villagelens.capture.v1", "capture_id": capture_id,
+        "captured_at": datetime.now(timezone.utc).isoformat(), "label": "Captured page",
         "source_sha256": source_sha256,
         "image_size": {"width": image.width, "height": image.height},
         "image_normalized": normalized, "stage": 1, "stage_state": "initial_reading",
@@ -318,7 +424,13 @@ def capture() -> tuple[Response, int]:
             "model_sha256": MODEL_SHA256, "latency_ms": latency_ms,
         },
         "words": words, "lines": lines, "retained": False,
-    }), 200
+        "image_url": f"/api/captures/{capture_id}/image",
+    }
+    try:
+        result["retained"] = _store_capture(data, media_type, result)
+    except Exception:
+        app.logger.exception("Capture could not be retained")
+    return jsonify(result), 200
 
 
 if __name__ == "__main__":

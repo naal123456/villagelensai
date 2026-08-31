@@ -23,8 +23,8 @@ iPhone Safari
        -> OpenAI careful whole-image reading
        -> deterministic word/line alignment and consensus
        -> browser or Google kn-IN speech
-       -> Firestore feedback/result metadata
-       -> optional short-lived capture storage
+       -> private Cloud Storage capture/result gallery
+       -> future Firestore feedback/result metadata
 ```
 
 GitHub Actions tests and deploys revisions. It does not process interactive
@@ -83,9 +83,12 @@ For each capture, retain structured evidence:
 - word/sentence/page feedback and optional reviewer correction;
 - provider usage needed to measure cost per page.
 
-Firestore stores results and feedback. Source images remain ephemeral by default.
-Selected evaluation captures may enter a dedicated bucket only with controlled
-retention and a short lifecycle.
+Controlled POC captures and their stage-one results are retained in the private
+`villagelensai-captures` bucket so swipe-based testing survives deployments.
+Public access prevention and uniform bucket-level access are enabled; only the
+Cloud Run runtime identity receives object access. No automatic deletion policy
+is active while these evaluation inputs are being collected. Firestore remains
+the planned store for later user feedback and correction metadata.
 
 ## Cost and credential controls
 

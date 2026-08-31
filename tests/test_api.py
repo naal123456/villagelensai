@@ -43,6 +43,33 @@ class ApiTests(unittest.TestCase):
         self.addCleanup(response.close)
         self.assertEqual(response.status_code, 200)
         self.assertIn(b"VillageLensAI", response.data)
+        self.assertIn(b'id="mode-word"', response.data)
+        self.assertIn(b'id="play-sentences"', response.data)
+        self.assertIn(b"Swipe the page", response.data)
+
+    def test_demo_assets_are_served(self) -> None:
+        image = self.client.get("/a/demo/i2.jpeg")
+        scene = self.client.get("/a/demo/i1-scene.json")
+        gold = self.client.get("/a/demo/i2-gold.json")
+        self.addCleanup(image.close)
+        self.addCleanup(scene.close)
+        self.addCleanup(gold.close)
+        self.assertEqual(image.status_code, 200)
+        self.assertEqual(image.content_type, "image/jpeg")
+        self.assertEqual(scene.status_code, 200)
+        self.assertEqual(scene.get_json()["image_size"], {"width": 3024, "height": 4032})
+        self.assertEqual(gold.get_json()["status"], "reviewed-independent-qualification")
+
+    def test_unknown_demo_asset_is_rejected(self) -> None:
+        response = self.client.get("/a/demo/unknown.jpeg")
+        self.assertEqual(response.status_code, 404)
+
+    def test_gallery_starts_with_i2_then_i1(self) -> None:
+        response = self.client.get("/api/gallery")
+        self.assertEqual(response.status_code, 200)
+        items = response.get_json()["items"]
+        self.assertEqual([item["id"] for item in items[:2]], ["demo-i2", "demo-i1"])
+        self.assertEqual(items[0]["result_url"], "/a/demo/i2-gold.json")
 
     def test_health_reports_pinned_models(self) -> None:
         response = self.client.get("/health")
@@ -80,8 +107,11 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 415)
         self.assertEqual(response.get_json()["error"], "CAPTURE_MEDIA_TYPE_UNSUPPORTED")
 
+    @patch("api.app._store_capture", return_value=False)
     @patch("api.app.subprocess.run")
-    def test_capture_returns_stage_one_geometry_without_retention(self, run: object) -> None:
+    def test_capture_returns_stage_one_geometry_without_retention(
+        self, run: object, store: object,
+    ) -> None:
         run.return_value = subprocess.CompletedProcess([], 0, stdout=TSV, stderr="")
         response = self.client.post(
             "/api/capture", data=image_bytes(), content_type="image/jpeg",
