@@ -16,11 +16,12 @@ OCR engines or model names.
 ## Quality indicators
 
 1. Yellow: repository-local Tesseract `kan+eng` is ready.
-2. Light green: fast OpenAI whole-image refinement is accepted.
-3. Green: careful OpenAI whole-image refinement is accepted.
+2. Light green: Google Vision document OCR is ready.
+3. Green: the current vision-language reading is ready.
+4. Dark green: a future validated consensus across high-quality readers is ready.
 
-The current phone strip displays these three stages. A future dark-green fourth
-stage is reserved for deterministic multi-reader consensus.
+The phone strip displays all four stages. The fourth remains gray until the
+multi-reader consensus work is implemented and validated.
 
 The colors are processing/evidence stages, not calibrated accuracy percentages.
 
@@ -47,11 +48,15 @@ camera, sends one bounded still image to the same-origin API, and renders the
 returned word geometry as touchable underlines. Captures and their stage-one
 results are retained in the private `villagelensai-captures` Cloud Storage
 bucket and returned in the authenticated gallery, newest first after I2 and I1.
-The browser starts Tesseract, Google Vision document OCR, and the OpenAI image
-reader independently. Yellow appears for Tesseract, light green for Vision, and
-dark green for OpenAI; the elapsed clock runs until enabled readers finish or
-time out. The OpenAI stage remains gray when its server-side API secret is not
-configured. Feedback persistence and device enrollment remain future work.
+For a new photograph, the browser starts Tesseract, Google Vision document OCR,
+and the OpenAI image reader independently. Saved-page navigation makes no new
+cloud-reader requests. Yellow appears for Tesseract, light green for Vision, and
+green for the current OpenAI reader; dark green remains reserved for validated
+multi-reader consensus. The elapsed clock runs until enabled readers finish or
+fail. Successful results are reused for saved images, while recent failures use
+a short cooldown to avoid repeated paid calls. The OpenAI stage remains gray
+when its server-side API secret is not configured. Feedback persistence and
+device enrollment remain future work.
 
 The deployed tester page and capture API are protected by a server-side access
 code. The code and cookie-signing secret live in Google Secret Manager and are

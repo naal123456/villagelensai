@@ -35,11 +35,13 @@ photographs.
 All readers start independently and as concurrently as quotas permit.
 
 - **Stage 1, yellow:** Tesseract text and geometry make the image touchable.
-- **Stage 2, light green:** fast OpenAI transcription passes schema and spatial
+- **Stage 2, light green:** Google Vision document OCR passes schema and spatial
   validation and improves or confirms the displayed reading.
-- **Stage 3, green:** careful OpenAI transcription passes the same validation.
+- **Stage 3, green:** the current fast vision-language reading passes the same
+  validation and can add a simple meaning.
 - **Stage 4, dark green:** deterministic fusion finds stronger evidence across
-  Tesseract, Google Vision, and OpenAI results.
+  Tesseract, Google Vision, high-quality vision-language readers, and future
+  validated readers such as Claude.
 
 Stage 4 does not advance merely because providers completed. On unresolved
 disagreement, it remains incomplete and the best earlier result remains active.

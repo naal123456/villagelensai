@@ -487,21 +487,41 @@ def gallery() -> tuple[Response, int]:
         bucket = _storage_bucket()
         if bucket is not None:
             stored: list[dict[str, Any]] = []
-            for blob in bucket.list_blobs(prefix="captures/"):
+            blobs = list(bucket.list_blobs(prefix="captures/"))
+            evidence = {
+                (parts[1], int(match.group(1))): blob
+                for blob in blobs
+                if len(parts := blob.name.split("/")) == 3
+                and (match := re.fullmatch(r"stage-([23])\.json", parts[2]))
+                and _valid_capture_id(parts[1])
+            }
+            for blob in blobs:
                 if not blob.name.endswith("/result.json"):
                     continue
                 value = json.loads(blob.download_as_text(encoding="utf-8"))
                 capture_id = value.get("capture_id", "")
                 if not _valid_capture_id(capture_id):
                     continue
-                stored.append({
+                item = {
                     "id": capture_id,
                     "label": value.get("label") or "Captured page",
                     "kind": "capture",
                     "captured_at": value.get("captured_at"),
                     "image_url": f"/api/captures/{capture_id}/image",
                     "result": value,
-                })
+                }
+                for stage in (2, 3):
+                    if evidence_blob := evidence.get((capture_id, stage)):
+                        try:
+                            item[f"stage{stage}"] = json.loads(
+                                evidence_blob.download_as_text(encoding="utf-8")
+                            )
+                        except (TypeError, ValueError, json.JSONDecodeError):
+                            app.logger.warning(
+                                "Ignoring invalid stage %s evidence for capture %s",
+                                stage, capture_id,
+                            )
+                stored.append(item)
             stored.sort(key=lambda item: item.get("captured_at") or "", reverse=True)
             items.extend(stored[:20])
     except Exception:
@@ -544,7 +564,7 @@ def capture() -> tuple[Response, int]:
         image, normalized = _normalized_image(data)
         with tempfile.TemporaryDirectory(prefix="villagelens-capture-") as temporary:
             image_path = Path(temporary) / "normalized.png"
-            image.save(image_path, format="PNG", optimize=True)
+            image.save(image_path, format="PNG")
             words, lines, latency_ms = _tesseract(image_path)
             words, lines = _select_regions(words, lines, width=image.width, height=image.height)
     except ValueError as exc:
@@ -584,10 +604,12 @@ def cloud_read(stage: int) -> tuple[Response, int]:
     data = request.get_data(cache=False)
     if not data:
         return jsonify(error="CAPTURE_EMPTY"), 400
+    if stage == 3 and not os.environ.get("OPENAI_API_KEY", "").strip():
+        return jsonify(error="OPENAI_READER_NOT_CONFIGURED"), 503
     try:
         image, _ = _normalized_image(data)
         normalized = io.BytesIO()
-        image.save(normalized, format="PNG", optimize=True)
+        image.save(normalized, format="PNG")
         payload = (_vision_reader(normalized.getvalue(), image.width, image.height) if stage == 2
                    else _openai_reader(normalized.getvalue(), "image/png", image.width, image.height))
         _store_reader_evidence(request.headers.get("X-VillageLens-Capture-ID", ""), stage, payload)

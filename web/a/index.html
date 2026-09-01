@@ -16,15 +16,18 @@
       color: white; font-size: 1.3rem; touch-action: manipulation; }
     button.active { border-color: #62d7ff; background: #174b5f; }
     button:focus-visible { outline: 4px solid #65d6ff; outline-offset: 2px; }
-    .quality { display: grid; grid-template-columns: 1fr 1fr 1fr auto; gap: 6px; align-items: center; }
+    .quality { display: grid; grid-template-columns: repeat(4, 1fr) auto; gap: 6px; align-items: center; }
     .bar { height: 14px; border: 1px solid #64717d; border-radius: 5px; background: #46515b; }
     #quality-1.ready { background: #e5bc27; border-color: #ffe071; }
-    #quality-2.ready { background: #9adfae; } #quality-3.ready { background: #168447; box-shadow: 0 0 7px #3fbd70; }
+    #quality-2.ready { background: #9adfae; } #quality-3.ready { background: #39ad68; }
+    #quality-4.ready { background: #087238; box-shadow: 0 0 7px #3fbd70; }
+    .bar.failed { border-color: #9b7048; background: #5c4c3e; }
     #quality-timer { min-width: 2.6em; color: #c7d1da; font-variant-numeric: tabular-nums; font-size: .85rem; }
     .gallery { display: grid; grid-template-columns: 42px 1fr 42px; align-items: center; gap: 4px; margin-top: 7px; }
     .gallery > button { min-height: 42px; padding: 0; }
     #position { color: #c7d1da; font-size: .9rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .stage { position: relative; display: none; max-width: 100%; margin: 4px auto 0; background: #222; touch-action: pan-y; }
+    .stage.loading #source-image { opacity: .28; }
     #source-image { display: block; max-width: 100%; max-height: 67vh; object-fit: contain; user-select: none; -webkit-user-drag: none; }
     #overlay { position: absolute; inset: 0; width: 100%; height: 100%; }
     .hit { fill: transparent; stroke: none; }
@@ -55,7 +58,8 @@
       </nav>
       <div class="quality" aria-label="Reading confidence">
         <span class="bar" id="quality-1"></span><span class="bar" id="quality-2"></span>
-        <span class="bar" id="quality-3"></span><span id="quality-timer">—</span>
+        <span class="bar" id="quality-3"></span><span class="bar" id="quality-4"></span>
+        <span id="quality-timer">—</span>
       </div>
     </section>
     <div class="gallery" aria-label="Saved pages">
@@ -77,7 +81,8 @@
     const $ = id => document.getElementById(id);
     const input=$('camera-input'), image=$('source-image'), overlay=$('overlay'), stage=$('stage');
     const status=$('status'), current=$('current'), position=$('position'), timer=$('quality-timer');
-    let gallery=[], galleryIndex=0, result=null, mode='word', timerId=0, started=0;
+    let gallery=[], galleryIndex=0, result=null, mode='word', timerId=0, started=0, timerOwner=null;
+    let navigationGeneration=0;
     let playbackGeneration=0, speechGeneration=0, pointerStart=null, suppressTap=false;
 
     function setMode(next) {
@@ -91,14 +96,55 @@
       document.querySelectorAll('.underline').forEach(node => node.classList.remove('active'));
     }
     function resetQuality() {
-      for (let n=1;n<=3;n++) $('quality-'+n).classList.remove('ready');
-      clearInterval(timerId); timer.textContent='—';
+      for (let n=1;n<=4;n++) $('quality-'+n).classList.remove('ready','failed');
+      clearInterval(timerId); timerOwner=null; timer.textContent='—';
     }
-    function beginTimer() {
-      started=Date.now(); clearInterval(timerId); timer.textContent='0s';
+    function beginTimer(owner,originalStart=Date.now()) {
+      timerOwner=owner;
+      started=originalStart; clearInterval(timerId); timer.textContent=`${Math.floor((Date.now()-started)/1000)}s`;
       timerId=setInterval(()=>timer.textContent=`${Math.floor((Date.now()-started)/1000)}s`,1000);
     }
-    function endTimer() { clearInterval(timerId); timer.textContent=`${Math.round((Date.now()-started)/1000)}s`; }
+    function endTimer(owner) {
+      if (timerOwner!==owner) return;
+      clearInterval(timerId); timerId=0; timer.textContent=`${Math.round((Date.now()-started)/1000)}s`; timerOwner=null;
+    }
+    function cacheKey(item,stageNumber) { return `villagelens.reader.v1:${item.id}:${stageNumber}`; }
+    function failureKey(item,stageNumber) { return `villagelens.reader.failure.v1:${item.id}:${stageNumber}`; }
+    function readCachedStage(item,stageNumber) {
+      if (item[`stage${stageNumber}`]) return item[`stage${stageNumber}`];
+      try { return JSON.parse(localStorage.getItem(cacheKey(item,stageNumber))||'null'); } catch (_) { return null; }
+    }
+    function saveCachedStage(item,stageNumber,value) {
+      item[`stage${stageNumber}`]=value;
+      try {
+        localStorage.setItem(cacheKey(item,stageNumber),JSON.stringify(value));
+        localStorage.removeItem(failureKey(item,stageNumber));
+      } catch (_) {}
+    }
+    function coolingDown(item,stageNumber) {
+      try { return Date.now()-Number(localStorage.getItem(failureKey(item,stageNumber))||0)<5*60*1000; }
+      catch (_) { return false; }
+    }
+    function saveFailure(item,stageNumber) {
+      try { localStorage.setItem(failureKey(item,stageNumber),String(Date.now())); } catch (_) {}
+    }
+    function applyReaderResult(item,stageNumber,value) {
+      saveCachedStage(item,stageNumber,value);
+      if (stageNumber===2&&item.id!=='demo-i2'&&(value.words||[]).length) {
+        item.result=value; if (item.summary_kn) item.result.summary_kn=item.summary_kn;
+      }
+      if (stageNumber===3) {
+        item.summary_kn=value.summary_kn||''; if (item.result) item.result.summary_kn=item.summary_kn;
+        if (item.id!=='demo-i2'&&(value.words||[]).length) {
+          item.result=value; item.result.summary_kn=item.summary_kn;
+        }
+      }
+      if (gallery[galleryIndex]===item) {
+        $('quality-'+stageNumber).classList.add('ready');
+        if ((value.words||[]).length&&item.id!=='demo-i2') render(item.result,false);
+        if (stageNumber===3&&value.summary_kn) status.textContent='ಓದುವಿಕೆ ಮತ್ತು ಅರ್ಥ ಸಿದ್ಧವಾಗಿದೆ.';
+      }
+    }
     function normalizedSpeech(text) {
       return String(text||'').replace(/\bSmt\.?\s*/gi,'Shrimati ').replace(/\bSri\.?\s*/gi,'Shri ')
         .replace(/\bProf\.?\s*/gi,'Professor ').replace(/\bDr\.?\s*/gi,'Doctor ')
@@ -188,16 +234,23 @@
     }
     async function showGallery(index) {
       if (!gallery.length) return;
-      stop(); galleryIndex=(index+gallery.length)%gallery.length; const item=gallery[galleryIndex];
+      stop(); const navigation=++navigationGeneration;
+      galleryIndex=(index+gallery.length)%gallery.length; const item=gallery[galleryIndex];
       position.textContent=`${item.label}  ${galleryIndex+1}/${gallery.length}`; status.textContent='ಚಿತ್ರವನ್ನು ಸಿದ್ಧಪಡಿಸುತ್ತಿದೆ…';
-      image.src=item.image_url; stage.style.display='inline-block'; resetQuality();
+      current.textContent=''; overlay.textContent=''; stage.style.display='inline-block'; stage.classList.add('loading'); resetQuality();
+      image.onload=()=>{ if (navigation===navigationGeneration) stage.classList.remove('loading'); };
+      image.onerror=()=>{ if (navigation===navigationGeneration) status.textContent='ಚಿತ್ರವನ್ನು ತೆರೆಯಲು ಆಗಲಿಲ್ಲ.'; };
+      image.src=item.image_url;
       try {
-        render(await loadItem(item));
-        if (item.stage2) $('quality-2').classList.add('ready');
-        if (item.stage3) $('quality-3').classList.add('ready');
-        startCloudReaders(item);
+        const loaded=await loadItem(item); if (navigation!==navigationGeneration) return;
+        render(loaded);
+        for (const stageNumber of [2,3]) {
+          const cached=readCachedStage(item,stageNumber);
+          if (cached) applyReaderResult(item,stageNumber,cached);
+        }
+        timer.textContent=[2,3].some(stageNumber=>readCachedStage(item,stageNumber))?'saved':'local';
       }
-      catch (_) { status.textContent='ಈ ಉಳಿಸಿದ ಚಿತ್ರವನ್ನು ಓದಲು ಆಗಲಿಲ್ಲ.'; }
+      catch (_) { if (navigation===navigationGeneration) status.textContent='ಈ ಉಳಿಸಿದ ಚಿತ್ರವನ್ನು ಓದಲು ಆಗಲಿಲ್ಲ.'; }
     }
     async function loadGallery() {
       try {
@@ -221,39 +274,42 @@
         const response=await fetch(`/api/read/${stageNumber}`,{method:'POST',headers:{'Content-Type':blob.type||'image/jpeg','X-VillageLens-Capture-ID':captureId},body:blob});
         if (response.status===401) return location.href='/access';
         const value=await response.json(); if (!response.ok) throw new Error(value.error||'READER_FAILED');
-        $('quality-'+stageNumber).classList.add('ready'); item[`stage${stageNumber}`]=value;
-        if (stageNumber===2&&item.id!=='demo-i2'&&(value.words||[]).length) {
-          item.result=value; if (item.summary_kn) item.result.summary_kn=item.summary_kn;
-          if (gallery[galleryIndex]===item) render(value,false);
-        }
-        if (stageNumber===3) {
-          item.summary_kn=value.summary_kn||''; if (item.result) item.result.summary_kn=item.summary_kn;
-          if (item.id!=='demo-i2'&&(value.words||[]).length) {
-            item.result=value; item.result.summary_kn=item.summary_kn;
-            if (gallery[galleryIndex]===item) render(value,false);
-          }
-          if (gallery[galleryIndex]===item&&value.summary_kn) status.textContent='ಓದುವಿಕೆ ಮತ್ತು ಅರ್ಥ ಸಿದ್ಧವಾಗಿದೆ.';
-        }
-        return true;
-      } catch (_) { return false; }
+        applyReaderResult(item,stageNumber,value);
+        return {ok:true};
+      } catch (error) { saveFailure(item,stageNumber); return {ok:false,error:error.message||'READER_FAILED'}; }
     }
     async function startCloudReaders(item,blob) {
-      if (item.cloudStarted) return; item.cloudStarted=true; beginTimer();
+      const missing=[2,3].filter(stageNumber=>!readCachedStage(item,stageNumber));
+      const cooling=missing.filter(stageNumber=>coolingDown(item,stageNumber));
+      cooling.forEach(stageNumber=>$('quality-'+stageNumber).classList.add('failed'));
+      const requested=missing.filter(stageNumber=>!cooling.includes(stageNumber));
+      if (!missing.length) { timer.textContent='saved'; return; }
+      if (!requested.length) { timer.textContent='—'; status.textContent='ಮೊದಲ ಓದುವಿಕೆ ಸಿದ್ಧವಾಗಿದೆ. Cloud reading is cooling down.'; return; }
+      if (item.cloudPromise) { beginTimer(item,item.cloudStartedAt); await item.cloudPromise; return; }
+      item.cloudStartedAt=Date.now(); beginTimer(item,item.cloudStartedAt);
+      item.cloudPromise=(async()=>{
       try {
         if (!blob) { const response=await fetch(item.image_url); if (!response.ok) throw new Error('IMAGE_FAILED'); blob=await response.blob(); }
         const captureId=/^[0-9a-f]{32}$/.test(item.id)?item.id:'';
-        const outcomes=await Promise.all([callReader(2,blob,captureId,item),callReader(3,blob,captureId,item)]);
-        if (gallery[galleryIndex]===item) status.textContent=outcomes.filter(Boolean).length
-          ? `${1+outcomes.filter(Boolean).length}/3 reading stages ready.` : 'ಮೊದಲ ಓದುವಿಕೆ ಸಿದ್ಧವಾಗಿದೆ.';
-      } finally { endTimer(); }
+        const outcomes=await Promise.all(requested.map(stageNumber=>callReader(stageNumber,blob,captureId,item)));
+        if (gallery[galleryIndex]===item) {
+          outcomes.forEach((outcome,index)=>{ if (!outcome.ok) $('quality-'+requested[index]).classList.add('failed'); });
+          const ready=[2,3].filter(stageNumber=>readCachedStage(item,stageNumber)).length;
+          status.textContent=ready ? `${1+ready}/4 reading stages ready.` : 'ಮೊದಲ ಓದುವಿಕೆ ಸಿದ್ಧವಾಗಿದೆ. Cloud reading is busy; try again later.';
+        }
+      } catch (_) {
+        if (gallery[galleryIndex]===item) status.textContent='ಮೊದಲ ಓದುವಿಕೆ ಸಿದ್ಧವಾಗಿದೆ. Slow connection; cloud reading was not completed.';
+      } finally { endTimer(item); }
+      })();
+      await item.cloudPromise;
     }
     async function useCapture(file) {
-      if (!file) return; stop(); resetQuality(); beginTimer(); status.textContent='ಚಿತ್ರವನ್ನು ಓದುತ್ತಿದೆ…';
+      if (!file) return; stop(); const navigation=++navigationGeneration; resetQuality(); status.textContent='ಚಿತ್ರವನ್ನು ಓದುತ್ತಿದೆ…';
       const captureId=newCaptureId();
       const objectUrl=URL.createObjectURL(file); image.src=objectUrl; stage.style.display='inline-block';
-      const item={id:captureId,label:'Captured page',kind:'capture',image_url:objectUrl,result:null,cloudStarted:true};
+      const item={id:captureId,label:'Captured page',kind:'capture',image_url:objectUrl,result:null};
       gallery.splice(Math.min(2,gallery.length),0,item); galleryIndex=gallery.indexOf(item); position.textContent=`Captured page  ${galleryIndex+1}/${gallery.length}`;
-      const cloudPromise=Promise.all([callReader(2,file,captureId,item),callReader(3,file,captureId,item)]);
+      const cloudPromise=startCloudReaders(item,file);
       try {
         const response=await fetch('/api/capture',{method:'POST',headers:{'Content-Type':file.type||'image/jpeg','X-VillageLens-Capture-ID':captureId},body:file});
         if (response.status===401) return location.href='/access'; const value=await response.json();
@@ -261,10 +317,14 @@
         item.id=value.capture_id; item.image_url=value.retained?value.image_url:objectUrl;
         if (!item.result||!item.stage2) item.result=value;
         if (item.summary_kn) item.result.summary_kn=item.summary_kn;
-        render(item.result);
-        if (!value.retained) status.textContent+=' This test could not be saved.';
-      } catch (_) { status.textContent='ಈ ಚಿತ್ರವನ್ನು ಓದಲು ಆಗಲಿಲ್ಲ. ಮತ್ತೊಮ್ಮೆ ಪ್ರಯತ್ನಿಸಿ.'; }
-      finally { await cloudPromise; endTimer(); input.value=''; if (image.src!==objectUrl) URL.revokeObjectURL(objectUrl); }
+        if (navigation===navigationGeneration&&gallery[galleryIndex]===item) {
+          render(item.result);
+          if (!value.retained) status.textContent+=' This test could not be saved.';
+        }
+      } catch (_) {
+        if (navigation===navigationGeneration) status.textContent='ಈ ಚಿತ್ರವನ್ನು ಓದಲು ಆಗಲಿಲ್ಲ. ಮತ್ತೊಮ್ಮೆ ಪ್ರಯತ್ನಿಸಿ.';
+      }
+      finally { await cloudPromise; input.value=''; if (image.src!==objectUrl) URL.revokeObjectURL(objectUrl); }
     }
     $('mode-word').onclick=()=>setMode('word'); $('mode-sentence').onclick=()=>setMode('sentence');
     $('mode-meaning').onclick=()=>setMode('meaning'); $('camera').onclick=()=>input.click();

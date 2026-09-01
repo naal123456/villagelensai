@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import io
+import json
 import subprocess
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from PIL import Image
 
@@ -45,6 +46,10 @@ class ApiTests(unittest.TestCase):
         self.assertIn(b"VillageLensAI", response.data)
         self.assertIn(b'id="mode-word"', response.data)
         self.assertIn(b'id="play-sentences"', response.data)
+        self.assertIn(b'id="quality-4"', response.data)
+        self.assertIn(b'navigationGeneration', response.data)
+        self.assertIn(b'localStorage.setItem', response.data)
+        self.assertIn(b"?'saved':'local'", response.data)
         self.assertIn(b"Swipe the page", response.data)
         self.assertIn("ಅ ಆ ಇ".encode(), response.data)
 
@@ -71,6 +76,24 @@ class ApiTests(unittest.TestCase):
         items = response.get_json()["items"]
         self.assertEqual([item["id"] for item in items[:2]], ["demo-i2", "demo-i1"])
         self.assertEqual(items[0]["result_url"], "/a/demo/i2-gold.json")
+
+    @patch("api.app._storage_bucket")
+    def test_gallery_reuses_stored_cloud_evidence(self, storage_bucket: object) -> None:
+        capture_id = "a" * 32
+        result_blob = MagicMock(name="result_blob")
+        result_blob.name = f"captures/{capture_id}/result.json"
+        result_blob.download_as_text.return_value = json.dumps({
+            "capture_id": capture_id, "captured_at": "2026-08-30T00:00:00+00:00",
+            "label": "Captured page", "words": [], "lines": [],
+        })
+        stage_blob = MagicMock(name="stage_blob")
+        stage_blob.name = f"captures/{capture_id}/stage-2.json"
+        stage_blob.download_as_text.return_value = json.dumps({"stage": 2, "words": []})
+        storage_bucket.return_value.list_blobs.return_value = [result_blob, stage_blob]
+
+        items = self.client.get("/api/gallery").get_json()["items"]
+
+        self.assertEqual(items[2]["stage2"], {"stage": 2, "words": []})
 
     def test_health_reports_pinned_models(self) -> None:
         response = self.client.get("/health")
@@ -146,6 +169,16 @@ class ApiTests(unittest.TestCase):
     def test_unknown_reader_stage_is_rejected(self) -> None:
         response = self.client.post("/api/read/4", data=image_bytes(), content_type="image/jpeg")
         self.assertEqual(response.status_code, 404)
+
+    @patch("api.app._normalized_image")
+    def test_unconfigured_stage_three_fails_before_image_work(self, normalize: object) -> None:
+        with patch.dict("os.environ", {"OPENAI_API_KEY": ""}):
+            response = self.client.post(
+                "/api/read/3", data=image_bytes(), content_type="image/jpeg",
+            )
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.get_json()["error"], "OPENAI_READER_NOT_CONFIGURED")
+        normalize.assert_not_called()
 
 
 if __name__ == "__main__":
