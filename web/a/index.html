@@ -135,13 +135,10 @@
       }
       if (stageNumber===3) {
         item.summary_kn=value.summary_kn||''; if (item.result) item.result.summary_kn=item.summary_kn;
-        if (item.id!=='demo-i2'&&(value.words||[]).length) {
-          item.result=value; item.result.summary_kn=item.summary_kn;
-        }
       }
       if (gallery[galleryIndex]===item) {
         $('quality-'+stageNumber).classList.add('ready');
-        if ((value.words||[]).length&&item.id!=='demo-i2') render(item.result,false);
+        if (stageNumber===2&&(value.words||[]).length&&item.id!=='demo-i2') render(item.result,false);
         if (stageNumber===3&&value.summary_kn) status.textContent='ಓದುವಿಕೆ ಮತ್ತು ಅರ್ಥ ಸಿದ್ಧವಾಗಿದೆ.';
       }
     }

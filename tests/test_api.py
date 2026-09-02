@@ -50,6 +50,10 @@ class ApiTests(unittest.TestCase):
         self.assertIn(b'navigationGeneration', response.data)
         self.assertIn(b'localStorage.setItem', response.data)
         self.assertIn(b"?'saved':'local'", response.data)
+        stage_three = response.data.split(b"if (stageNumber===3)", 1)[1].split(
+            b"if (gallery[galleryIndex]===item)", 1,
+        )[0]
+        self.assertNotIn(b"item.result=value", stage_three)
         self.assertIn(b"Swipe the page", response.data)
         self.assertIn("ಅ ಆ ಇ".encode(), response.data)
 
