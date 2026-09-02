@@ -1,7 +1,7 @@
 # Latest capture mixed-script checkpoint
 
 Date: 2026-09-02
-Status: diagnostic complete; display-order correction locally validated
+Status: diagnostic complete; display-order correction deployed and verified
 
 ## Scope
 
@@ -56,5 +56,18 @@ The client now follows this bounded contract:
 
 - Focused API/browser-contract tests: 13/13 passed after the correction.
 - Embedded JavaScript syntax, Python compilation, and `git diff --check`: passed.
+- Source commit: `ff19439` (`Preserve stable geometry across reader stages`).
+- Cloud Build: `39343c38-234f-4d70-b129-53ae2be4d58f`, successful.
+- Deployed image digest:
+  `sha256:50c0f3eae45c241ea8f54061e93508c7413c4b38ff494b1b7bb6d8545e3a9836`.
+- Cloud Run revision `vlens-a-ff19439` serves 100% of traffic in
+  `us-central1`; minimum instances remain zero, maximum instances one,
+  concurrency four, and timeout 90 seconds.
+- The protected access POST returned 303, `/a/` returned 200, and
+  `/api/gallery` returned 200.
+- The authenticated live HTML SHA-256 exactly matched the tested local HTML
+  (`0435f02ab8b63e0ace837271faad5beccfabd72d0a18209c81c7f29dfc1171f0`),
+  and its stage contract check passed.
+- No paid OCR or language-model request was made during deployment validation.
 
-No deployment is claimed by this checkpoint.
+Rollback revision: `vlens-a-45b3f50`.
