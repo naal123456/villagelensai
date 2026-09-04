@@ -84,6 +84,21 @@
     let gallery=[], galleryIndex=0, result=null, mode='word', timerId=0, started=0, timerOwner=null;
     let navigationGeneration=0;
     let playbackGeneration=0, speechGeneration=0, pointerStart=null, suppressTap=false;
+    const testerId=configureTesterId();
+
+    function configureTesterId() {
+      const key='villagelens.tester.v1';
+      const requested=(new URLSearchParams(location.search).get('tester')||'').toLowerCase();
+      if (/^a[1-9][0-9]{0,2}$/.test(requested)) {
+        try { localStorage.setItem(key,requested); } catch (_) {}
+        return requested;
+      }
+      try { const saved=localStorage.getItem(key)||''; return /^a[1-9][0-9]{0,2}$/.test(saved)?saved:''; }
+      catch (_) { return ''; }
+    }
+    function testerHeaders(headers={}) {
+      return testerId ? {...headers,'X-VillageLens-Tester-ID':testerId} : headers;
+    }
 
     function setMode(next) {
       mode=next;
@@ -134,7 +149,8 @@
         item.result=value; if (item.summary_kn) item.result.summary_kn=item.summary_kn;
       }
       if (stageNumber===3) {
-        item.summary_kn=value.summary_kn||''; if (item.result) item.result.summary_kn=item.summary_kn;
+        item.summary_kn=value.summary_kn||''; item.translations=value.translations||[];
+        if (item.result) { item.result.summary_kn=item.summary_kn; item.result.translations=item.translations; }
       }
       if (gallery[galleryIndex]===item) {
         $('quality-'+stageNumber).classList.add('ready');
@@ -147,15 +163,38 @@
         .replace(/\bProf\.?\s*/gi,'Professor ').replace(/\bDr\.?\s*/gi,'Doctor ')
         .replace(/ಪ್ರೊ\.?/g,'ಪ್ರೊಫೆಸರ್ ').replace(/ಡಾ\.?/g,'ಡಾಕ್ಟರ್ ');
     }
-    function speak(text) {
+    function speechSegments(text) {
+      const chunks=normalizedSpeech(text).match(/[\u0c80-\u0cff]+|[A-Za-z]+|[^A-Za-z\u0c80-\u0cff]+/g)||[];
+      const segments=[];
+      for (let index=0;index<chunks.length;index++) {
+        const chunk=chunks[index];
+        let language=/[\u0c80-\u0cff]/.test(chunk)?'kn-IN':(/[A-Za-z]/.test(chunk)?'en-IN':'');
+        if (!language) {
+          language=segments.length?segments[segments.length-1].language:'';
+          if (!language) {
+            const next=chunks.slice(index+1).find(value=>/[A-Za-z\u0c80-\u0cff]/.test(value))||'';
+            language=/[\u0c80-\u0cff]/.test(next)?'kn-IN':'en-IN';
+          }
+        }
+        if (segments.length&&segments[segments.length-1].language===language) segments[segments.length-1].text+=chunk;
+        else segments.push({text:chunk,language});
+      }
+      return segments.filter(segment=>segment.text.trim());
+    }
+    async function speak(text) {
       stopSpeechOnly();
-      if (!text || !('speechSynthesis' in window)) return Promise.resolve(false);
-      const generation=speechGeneration, utterance=new SpeechSynthesisUtterance(normalizedSpeech(text));
-      utterance.lang=(text.match(/[\u0c80-\u0cff]/g)||[]).length?'kn-IN':'en-IN'; utterance.rate=.7;
-      return new Promise(resolve => {
-        utterance.onend=()=>resolve(generation===speechGeneration);
-        utterance.onerror=()=>resolve(false); speechSynthesis.speak(utterance);
-      });
+      if (!text || !('speechSynthesis' in window)) return false;
+      const generation=speechGeneration;
+      for (const segment of speechSegments(text)) {
+        const completed=await new Promise(resolve => {
+          const utterance=new SpeechSynthesisUtterance(segment.text);
+          utterance.lang=segment.language; utterance.rate=.7;
+          utterance.onend=()=>resolve(generation===speechGeneration);
+          utterance.onerror=()=>resolve(false); speechSynthesis.speak(utterance);
+        });
+        if (!completed||generation!==speechGeneration) return false;
+      }
+      return true;
     }
     function stopSpeechOnly() { speechGeneration++; if ('speechSynthesis' in window) speechSynthesis.cancel(); }
     function lineForWord(word) { return (result.lines||[]).find(line=>line.id===word.line_id); }
@@ -168,8 +207,19 @@
       if (meaning) { current.textContent=meaning; status.textContent='ಪುಟದ ಅರ್ಥ'; speak(meaning); return; }
       current.textContent='Meaning is still being prepared.'; status.textContent='ಅರ್ಥ ಇನ್ನೂ ಸಿದ್ಧವಾಗಿಲ್ಲ.';
     }
+    function translatedWord(word) {
+      if (!word||!/[A-Za-z]/.test(word.text||'')) return '';
+      const normalized=String(word.text).toLocaleLowerCase('en-IN').replace(/[^a-z0-9]+/g,'');
+      const match=(result&&result.translations||[]).find(candidate=>
+        String(candidate.source||'').toLocaleLowerCase('en-IN').replace(/[^a-z0-9]+/g,'')===normalized);
+      return match&&match.translation_kn||'';
+    }
     async function selectWord(word) {
-      if (mode==='meaning') return explainMeaning();
+      if (mode==='meaning') {
+        const translation=translatedWord(word);
+        if (translation) { stop(); activate(word.id,translation); status.textContent='ಪದದ ಕನ್ನಡ ಅರ್ಥ'; await speak(translation); return; }
+        return explainMeaning();
+      }
       const target=mode==='sentence' ? lineForWord(word) : word;
       if (!target) return; activate(target.id,target.text); await speak(target.text);
     }
@@ -233,7 +283,7 @@
       if (!gallery.length) return;
       stop(); const navigation=++navigationGeneration;
       galleryIndex=(index+gallery.length)%gallery.length; const item=gallery[galleryIndex];
-      position.textContent=`${item.label}  ${galleryIndex+1}/${gallery.length}`; status.textContent='ಚಿತ್ರವನ್ನು ಸಿದ್ಧಪಡಿಸುತ್ತಿದೆ…';
+      position.textContent=`${testerId?testerId.toUpperCase()+' · ':''}${item.label}  ${galleryIndex+1}/${gallery.length}`; status.textContent='ಚಿತ್ರವನ್ನು ಸಿದ್ಧಪಡಿಸುತ್ತಿದೆ…';
       current.textContent=''; overlay.textContent=''; stage.style.display='inline-block'; stage.classList.add('loading'); resetQuality();
       image.onload=()=>{ if (navigation===navigationGeneration) stage.classList.remove('loading'); };
       image.onerror=()=>{ if (navigation===navigationGeneration) status.textContent='ಚಿತ್ರವನ್ನು ತೆರೆಯಲು ಆಗಲಿಲ್ಲ.'; };
@@ -251,7 +301,7 @@
     }
     async function loadGallery() {
       try {
-        const response=await fetch('/api/gallery'); if (response.status===401) return location.href='/access';
+        const response=await fetch('/api/gallery',{headers:testerHeaders()}); if (response.status===401) return location.href='/access';
         if (!response.ok) throw new Error('GALLERY_FAILED'); gallery=(await response.json()).items||[]; await showGallery(0);
       } catch (_) { status.textContent='ಉಳಿಸಿದ ಚಿತ್ರಗಳನ್ನು ತೆರೆಯಲು ಆಗಲಿಲ್ಲ.'; }
     }
@@ -268,7 +318,7 @@
     }
     async function callReader(stageNumber,blob,captureId,item) {
       try {
-        const response=await fetch(`/api/read/${stageNumber}`,{method:'POST',headers:{'Content-Type':blob.type||'image/jpeg','X-VillageLens-Capture-ID':captureId},body:blob});
+        const response=await fetch(`/api/read/${stageNumber}`,{method:'POST',headers:testerHeaders({'Content-Type':blob.type||'image/jpeg','X-VillageLens-Capture-ID':captureId}),body:blob});
         if (response.status===401) return location.href='/access';
         const value=await response.json(); if (!response.ok) throw new Error(value.error||'READER_FAILED');
         applyReaderResult(item,stageNumber,value);
@@ -280,10 +330,10 @@
       const cooling=missing.filter(stageNumber=>coolingDown(item,stageNumber));
       cooling.forEach(stageNumber=>$('quality-'+stageNumber).classList.add('failed'));
       const requested=missing.filter(stageNumber=>!cooling.includes(stageNumber));
-      if (!missing.length) { timer.textContent='saved'; return; }
-      if (!requested.length) { timer.textContent='—'; status.textContent='ಮೊದಲ ಓದುವಿಕೆ ಸಿದ್ಧವಾಗಿದೆ. Cloud reading is cooling down.'; return; }
+      if (!missing.length) { endTimer(item); timer.textContent='saved'; return; }
+      if (!requested.length) { endTimer(item); status.textContent='ಮೊದಲ ಓದುವಿಕೆ ಸಿದ್ಧವಾಗಿದೆ. Cloud reading is cooling down.'; return; }
       if (item.cloudPromise) { beginTimer(item,item.cloudStartedAt); await item.cloudPromise; return; }
-      item.cloudStartedAt=Date.now(); beginTimer(item,item.cloudStartedAt);
+      item.cloudStartedAt=item.startedAt||Date.now(); beginTimer(item,item.cloudStartedAt);
       item.cloudPromise=(async()=>{
       try {
         if (!blob) { const response=await fetch(item.image_url); if (!response.ok) throw new Error('IMAGE_FAILED'); blob=await response.blob(); }
@@ -304,11 +354,11 @@
       if (!file) return; stop(); const navigation=++navigationGeneration; resetQuality(); status.textContent='ಚಿತ್ರವನ್ನು ಓದುತ್ತಿದೆ…';
       const captureId=newCaptureId();
       const objectUrl=URL.createObjectURL(file); image.src=objectUrl; stage.style.display='inline-block';
-      const item={id:captureId,label:'Captured page',kind:'capture',image_url:objectUrl,result:null};
-      gallery.splice(Math.min(2,gallery.length),0,item); galleryIndex=gallery.indexOf(item); position.textContent=`Captured page  ${galleryIndex+1}/${gallery.length}`;
-      const cloudPromise=startCloudReaders(item,file);
+      const item={id:captureId,label:'Captured page',kind:'capture',image_url:objectUrl,result:null,startedAt:Date.now()};
+      beginTimer(item,item.startedAt);
+      gallery.splice(Math.min(2,gallery.length),0,item); galleryIndex=gallery.indexOf(item); position.textContent=`${testerId?testerId.toUpperCase()+' · ':''}Captured page  ${galleryIndex+1}/${gallery.length}`;
       try {
-        const response=await fetch('/api/capture',{method:'POST',headers:{'Content-Type':file.type||'image/jpeg','X-VillageLens-Capture-ID':captureId},body:file});
+        const response=await fetch('/api/capture',{method:'POST',headers:testerHeaders({'Content-Type':file.type||'image/jpeg','X-VillageLens-Capture-ID':captureId}),body:file});
         if (response.status===401) return location.href='/access'; const value=await response.json();
         if (!response.ok) throw new Error(value.error||'CAPTURE_FAILED');
         item.id=value.capture_id; item.image_url=value.retained?value.image_url:objectUrl;
@@ -318,10 +368,12 @@
           render(item.result);
           if (!value.retained) status.textContent+=' This test could not be saved.';
         }
+        await startCloudReaders(item,file);
       } catch (_) {
+        endTimer(item); $('quality-1').classList.add('failed');
         if (navigation===navigationGeneration) status.textContent='ಈ ಚಿತ್ರವನ್ನು ಓದಲು ಆಗಲಿಲ್ಲ. ಮತ್ತೊಮ್ಮೆ ಪ್ರಯತ್ನಿಸಿ.';
       }
-      finally { await cloudPromise; input.value=''; if (image.src!==objectUrl) URL.revokeObjectURL(objectUrl); }
+      finally { input.value=''; if (image.src!==objectUrl) URL.revokeObjectURL(objectUrl); }
     }
     $('mode-word').onclick=()=>setMode('word'); $('mode-sentence').onclick=()=>setMode('sentence');
     $('mode-meaning').onclick=()=>setMode('meaning'); $('camera').onclick=()=>input.click();

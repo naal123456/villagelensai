@@ -48,15 +48,18 @@ camera, sends one bounded still image to the same-origin API, and renders the
 returned word geometry as touchable underlines. Captures and their stage-one
 results are retained in the private `villagelensai-captures` Cloud Storage
 bucket and returned in the authenticated gallery, newest first after I2 and I1.
-For a new photograph, the browser starts Tesseract, Google Vision document OCR,
-and the OpenAI image reader independently. Saved-page navigation makes no new
-cloud-reader requests. Yellow appears for Tesseract, light green for Vision, and
+For a new photograph, the browser completes the bounded Tesseract reading first,
+then starts Google Vision document OCR and the OpenAI image reader concurrently.
+Saved-page navigation makes no new cloud-reader requests. Yellow appears for
+Tesseract, light green for Vision, and
 green for the current OpenAI reader; dark green remains reserved for validated
 multi-reader consensus. The elapsed clock runs until enabled readers finish or
 fail. Successful results are reused for saved images, while recent failures use
 a short cooldown to avoid repeated paid calls. The OpenAI stage remains gray
 when its server-side API secret is not configured. Feedback persistence and
-device enrollment remain future work.
+feedback persistence remain future work. Anonymous tester enrollment uses a
+dedicated `?tester=a1`-style link; the choice persists on that phone and filters
+its saved gallery so test cohorts are not mixed.
 
 The deployed tester page and capture API are protected by a server-side access
 code. The code and cookie-signing secret live in Google Secret Manager and are

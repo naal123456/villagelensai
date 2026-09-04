@@ -32,6 +32,8 @@ TESSDATA_DIRECTORY = Path(
 MAX_CAPTURE_BYTES = int(os.environ.get("VILLAGELENS_MAX_CAPTURE_BYTES", 15 * 1024 * 1024))
 MAX_IMAGE_PIXELS = int(os.environ.get("VILLAGELENS_MAX_IMAGE_PIXELS", 25_000_000))
 MAX_IMAGE_EDGE = int(os.environ.get("VILLAGELENS_MAX_IMAGE_EDGE", 4096))
+LOCAL_OCR_MAX_EDGE = int(os.environ.get("VILLAGELENS_LOCAL_OCR_MAX_EDGE", 1600))
+LOCAL_OCR_TIMEOUT_SECONDS = int(os.environ.get("VILLAGELENS_LOCAL_OCR_TIMEOUT_SECONDS", 20))
 ALLOWED_MEDIA_TYPES = {"image/jpeg", "image/png", "image/webp"}
 CAPTURE_BUCKET = os.environ.get("VILLAGELENS_CAPTURE_BUCKET", "")
 OPENAI_MODEL = os.environ.get("VILLAGELENS_OPENAI_MODEL", "gpt-5-mini")
@@ -41,6 +43,7 @@ MODEL_SHA256 = {
     "kan": "bd31e6b6ae93271e3bcf5383d306d8eefbb91542937cd6d735a5930c970e61d8",
     "eng": "7d4322bd2a7749724879683fc3912cb542f19906c83bcc1a52132556427170b2",
 }
+TESTER_ID_PATTERN = re.compile(r"a[1-9][0-9]{0,2}")
 DEMO_ASSETS = {
     "i1.jpeg", "i1-scene.json", "i2.jpeg", "i2-scene.json", "i2-gold.json",
 }
@@ -110,6 +113,11 @@ def _allowed_origins() -> set[str]:
         for value in os.environ.get("VILLAGELENS_ALLOWED_ORIGINS", "").split(",")
         if value.strip()
     }
+
+
+def _tester_id() -> str:
+    candidate = request.headers.get("X-VillageLens-Tester-ID", "").strip().lower()
+    return candidate if TESTER_ID_PATTERN.fullmatch(candidate) else ""
 
 
 @app.after_request
@@ -265,6 +273,22 @@ def _parse_tsv(tsv: str) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     return words, lines
 
 
+def _scale_regions(
+    words: list[dict[str, Any]], lines: list[dict[str, Any]], *,
+    source_width: int, source_height: int, target_width: int, target_height: int,
+) -> None:
+    scale_x = target_width / source_width
+    scale_y = target_height / source_height
+    for region in [*words, *lines]:
+        box = region["box"]
+        box.update(
+            x=round(box["x"] * scale_x),
+            y=round(box["y"] * scale_y),
+            width=max(1, round(box["width"] * scale_x)),
+            height=max(1, round(box["height"] * scale_y)),
+        )
+
+
 def _select_regions(
     words: list[dict[str, Any]], lines: list[dict[str, Any]], *, width: int, height: int,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
@@ -323,7 +347,7 @@ def _tesseract(image_path: Path) -> tuple[list[dict[str, Any]], list[dict[str, A
                 "-l", "kan+eng", "--oem", "1", "--psm", "11",
                 "-c", "tessedit_create_tsv=1",
             ],
-            check=False, capture_output=True, text=True, timeout=60,
+            check=False, capture_output=True, text=True, timeout=LOCAL_OCR_TIMEOUT_SECONDS,
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise RuntimeError("LOCAL_OCR_UNAVAILABLE") from exc
@@ -393,16 +417,22 @@ def _openai_reader(data: bytes, media_type: str, width: int, height: int) -> dic
     if not api_key:
         raise RuntimeError("OPENAI_READER_NOT_CONFIGURED")
     started = time.monotonic()
-    schema = {"type": "object", "additionalProperties": False, "required": ["words", "lines", "summary_kn"],
+    schema = {"type": "object", "additionalProperties": False,
+              "required": ["words", "lines", "translations", "summary_kn"],
               "properties": {
                   "words": {"type": "array", "items": {"type": "object", "additionalProperties": False,
                       "required": ["text", "box"], "properties": {"text": {"type": "string"},
                       "box": {"type": "array", "items": {"type": "number"}, "minItems": 4, "maxItems": 4}}}},
-                  "lines": {"type": "array", "items": {"type": "string"}}, "summary_kn": {"type": "string"}}}
+                  "lines": {"type": "array", "items": {"type": "string"}},
+                  "translations": {"type": "array", "items": {"type": "object",
+                      "additionalProperties": False, "required": ["source", "translation_kn"],
+                      "properties": {"source": {"type": "string"},
+                                     "translation_kn": {"type": "string"}}}},
+                  "summary_kn": {"type": "string"}}}
     encoded = base64.b64encode(data).decode("ascii")
     payload = {"model": OPENAI_MODEL, "store": False, "reasoning": {"effort": "low"},
                "input": [{"role": "user", "content": [
-                   {"type": "input_text", "text": "Read every clearly visible Kannada or English word exactly. Return words in reading order. For each word, box is [left,top,width,height] normalized from 0 to 1000. Do not guess unclear text. Also return lines and a short, simple Kannada explanation."},
+                   {"type": "input_text", "text": "Read every clearly visible Kannada or English word exactly. Return words in reading order. For each word, box is [left,top,width,height] normalized from 0 to 1000. Do not guess unclear text. For each distinct clearly visible English word, return its source spelling exactly and a simple Kannada translation. summary_kn must be a faithful Kannada rendering of the visible content: preserve names, numbers, prices, and existing Kannada; do not infer facts, intent, or context beyond the image; say when text is unclear rather than guessing."},
                    {"type": "input_image", "image_url": f"data:{media_type};base64,{encoded}", "detail": "high"}]}],
                "text": {"format": {"type": "json_schema", "name": "villagelens_reading", "strict": True, "schema": schema}}}
     response = requests.post("https://api.openai.com/v1/responses", json=payload,
@@ -430,7 +460,9 @@ def _openai_reader(data: bytes, media_type: str, width: int, height: int) -> dic
     return {"schema": "villagelens.reader.v1", "stage": 3, "reader": "vision_language",
             "model": OPENAI_MODEL, "latency_ms": round((time.monotonic()-started)*1000),
             "image_size": {"width": width, "height": height}, "words": words, "lines": lines,
-            "text": "\n".join(line["text"] for line in lines), "summary_kn": parsed.get("summary_kn", "")}
+            "text": "\n".join(line["text"] for line in lines),
+            "translations": parsed.get("translations", []),
+            "summary_kn": parsed.get("summary_kn", "")}
 
 
 def _storage_bucket() -> Any:
@@ -495,12 +527,15 @@ def gallery() -> tuple[Response, int]:
                 and (match := re.fullmatch(r"stage-([23])\.json", parts[2]))
                 and _valid_capture_id(parts[1])
             }
+            requested_tester_id = _tester_id()
             for blob in blobs:
                 if not blob.name.endswith("/result.json"):
                     continue
                 value = json.loads(blob.download_as_text(encoding="utf-8"))
                 capture_id = value.get("capture_id", "")
                 if not _valid_capture_id(capture_id):
+                    continue
+                if requested_tester_id and value.get("tester_id") != requested_tester_id:
                     continue
                 item = {
                     "id": capture_id,
@@ -564,8 +599,17 @@ def capture() -> tuple[Response, int]:
         image, normalized = _normalized_image(data)
         with tempfile.TemporaryDirectory(prefix="villagelens-capture-") as temporary:
             image_path = Path(temporary) / "normalized.png"
-            image.save(image_path, format="PNG")
+            ocr_image = image.copy()
+            ocr_image.thumbnail(
+                (LOCAL_OCR_MAX_EDGE, LOCAL_OCR_MAX_EDGE), Image.Resampling.LANCZOS,
+            )
+            ocr_image.save(image_path, format="PNG")
             words, lines, latency_ms = _tesseract(image_path)
+            _scale_regions(
+                words, lines,
+                source_width=ocr_image.width, source_height=ocr_image.height,
+                target_width=image.width, target_height=image.height,
+            )
             words, lines = _select_regions(words, lines, width=image.width, height=image.height)
     except ValueError as exc:
         return jsonify(error=str(exc)), 400
@@ -574,6 +618,7 @@ def capture() -> tuple[Response, int]:
 
     requested_id = request.headers.get("X-VillageLens-Capture-ID", "")
     capture_id = requested_id if _valid_capture_id(requested_id) else uuid.uuid4().hex
+    tester_id = _tester_id()
     result = {
         "schema": "villagelens.capture.v1", "capture_id": capture_id,
         "captured_at": datetime.now(timezone.utc).isoformat(), "label": "Captured page",
@@ -583,7 +628,9 @@ def capture() -> tuple[Response, int]:
         "reader": {
             "kind": "local_ocr", "languages": ["kan", "eng"],
             "model_sha256": MODEL_SHA256, "latency_ms": latency_ms,
+            "input_size": {"width": ocr_image.width, "height": ocr_image.height},
         },
+        "tester_id": tester_id or "unassigned",
         "words": words, "lines": lines, "retained": False,
         "image_url": f"/api/captures/{capture_id}/image",
     }
@@ -612,6 +659,7 @@ def cloud_read(stage: int) -> tuple[Response, int]:
         image.save(normalized, format="PNG")
         payload = (_vision_reader(normalized.getvalue(), image.width, image.height) if stage == 2
                    else _openai_reader(normalized.getvalue(), "image/png", image.width, image.height))
+        payload["tester_id"] = _tester_id() or "unassigned"
         _store_reader_evidence(request.headers.get("X-VillageLens-Capture-ID", ""), stage, payload)
         return jsonify(payload), 200
     except ValueError as exc:

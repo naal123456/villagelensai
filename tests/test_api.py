@@ -18,9 +18,9 @@ TSV = """level\tpage_num\tblock_num\tpar_num\tline_num\tword_num\tleft\ttop\twid
 """
 
 
-def image_bytes() -> bytes:
+def image_bytes(width: int = 320, height: int = 120) -> bytes:
     output = io.BytesIO()
-    Image.new("RGB", (320, 120), "white").save(output, format="JPEG")
+    Image.new("RGB", (width, height), "white").save(output, format="JPEG")
     return output.getvalue()
 
 
@@ -49,11 +49,25 @@ class ApiTests(unittest.TestCase):
         self.assertIn(b'id="quality-4"', response.data)
         self.assertIn(b'navigationGeneration', response.data)
         self.assertIn(b'localStorage.setItem', response.data)
+        self.assertIn(b'X-VillageLens-Tester-ID', response.data)
+        self.assertIn(b'function speechSegments', response.data)
+        self.assertIn(b'function translatedWord', response.data)
         self.assertIn(b"?'saved':'local'", response.data)
         stage_three = response.data.split(b"if (stageNumber===3)", 1)[1].split(
             b"if (gallery[galleryIndex]===item)", 1,
         )[0]
         self.assertNotIn(b"item.result=value", stage_three)
+        self.assertIn(b"item.result.translations=item.translations", stage_three)
+        capture_flow = response.data.split(b"async function useCapture", 1)[1].split(
+            b"$('mode-word').onclick", 1,
+        )[0]
+        self.assertLess(capture_flow.index(b"beginTimer(item,item.startedAt)"), capture_flow.index(
+            b"fetch('/api/capture'",
+        ))
+        self.assertLess(capture_flow.index(b"fetch('/api/capture'"), capture_flow.index(
+            b"await startCloudReaders(item,file)",
+        ))
+        self.assertIn(b"$('quality-1').classList.add('failed')", capture_flow)
         self.assertIn(b"Swipe the page", response.data)
         self.assertIn("ಅ ಆ ಇ".encode(), response.data)
 
@@ -88,16 +102,22 @@ class ApiTests(unittest.TestCase):
         result_blob.name = f"captures/{capture_id}/result.json"
         result_blob.download_as_text.return_value = json.dumps({
             "capture_id": capture_id, "captured_at": "2026-08-30T00:00:00+00:00",
-            "label": "Captured page", "words": [], "lines": [],
+            "label": "Captured page", "tester_id": "a1", "words": [], "lines": [],
         })
         stage_blob = MagicMock(name="stage_blob")
         stage_blob.name = f"captures/{capture_id}/stage-2.json"
         stage_blob.download_as_text.return_value = json.dumps({"stage": 2, "words": []})
         storage_bucket.return_value.list_blobs.return_value = [result_blob, stage_blob]
 
-        items = self.client.get("/api/gallery").get_json()["items"]
+        items = self.client.get(
+            "/api/gallery", headers={"X-VillageLens-Tester-ID": "A1"},
+        ).get_json()["items"]
 
         self.assertEqual(items[2]["stage2"], {"stage": 2, "words": []})
+        other_items = self.client.get(
+            "/api/gallery", headers={"X-VillageLens-Tester-ID": "a2"},
+        ).get_json()["items"]
+        self.assertEqual(len(other_items), 2)
 
     def test_health_reports_pinned_models(self) -> None:
         response = self.client.get("/health")
@@ -143,6 +163,7 @@ class ApiTests(unittest.TestCase):
         run.return_value = subprocess.CompletedProcess([], 0, stdout=TSV, stderr="")
         response = self.client.post(
             "/api/capture", data=image_bytes(), content_type="image/jpeg",
+            headers={"X-VillageLens-Tester-ID": "A2"},
         )
         self.assertEqual(response.status_code, 200)
         value = response.get_json()
@@ -152,7 +173,36 @@ class ApiTests(unittest.TestCase):
             value["words"][0]["box"], {"x": 10, "y": 20, "width": 100, "height": 30},
         )
         self.assertFalse(value["retained"])
+        self.assertEqual(value["tester_id"], "a2")
+        self.assertEqual(value["reader"]["input_size"], {"width": 320, "height": 120})
         self.assertEqual(response.headers["Cache-Control"], "no-store")
+
+    @patch("api.app._store_capture", return_value=False)
+    @patch("api.app.subprocess.run")
+    def test_capture_downscales_local_ocr_and_restores_geometry(
+        self, run: object, store: object,
+    ) -> None:
+        observed: dict[str, tuple[int, int]] = {}
+
+        def inspect_ocr_image(command: list[str], **_: object) -> subprocess.CompletedProcess:
+            with Image.open(command[1]) as image:
+                observed["size"] = image.size
+            return subprocess.CompletedProcess([], 0, stdout=TSV, stderr="")
+
+        run.side_effect = inspect_ocr_image
+        response = self.client.post(
+            "/api/capture", data=image_bytes(2400, 1200), content_type="image/jpeg",
+            headers={"X-VillageLens-Tester-ID": "not-allowed"},
+        )
+        value = response.get_json()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(observed["size"], (1600, 800))
+        self.assertEqual(value["reader"]["input_size"], {"width": 1600, "height": 800})
+        self.assertEqual(
+            value["words"][0]["box"], {"x": 15, "y": 30, "width": 150, "height": 45},
+        )
+        self.assertEqual(value["tester_id"], "unassigned")
 
     @patch("api.app._store_reader_evidence")
     @patch("api.app._vision_reader")
@@ -169,6 +219,41 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.get_json()["stage"], 2)
         store.assert_called_once_with(capture_id, 2, reader.return_value)
+
+    @patch("api.app._store_reader_evidence")
+    @patch("api.app.requests.post")
+    def test_stage_three_returns_word_translations_without_inference(
+        self, provider: object, store: object,
+    ) -> None:
+        provider.return_value.status_code = 200
+        provider.return_value.json.return_value = {"output": [{"content": [{
+            "type": "output_text",
+            "text": json.dumps({
+                "words": [], "lines": [],
+                "translations": [{"source": "book", "translation_kn": "ಪುಸ್ತಕ"}],
+                "summary_kn": "ಪುಸ್ತಕ",
+            }),
+        }]}]}
+        capture_id = "b" * 32
+
+        with patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"}):
+            response = self.client.post(
+                "/api/read/3", data=image_bytes(), content_type="image/jpeg",
+                headers={
+                    "X-VillageLens-Capture-ID": capture_id,
+                    "X-VillageLens-Tester-ID": "A1",
+                },
+            )
+
+        value = response.get_json()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(value["translations"][0]["translation_kn"], "ಪುಸ್ತಕ")
+        self.assertEqual(value["tester_id"], "a1")
+        request_payload = provider.call_args.kwargs["json"]
+        prompt = request_payload["input"][0]["content"][0]["text"]
+        self.assertIn("do not infer", prompt)
+        self.assertIn("translations", request_payload["text"]["format"]["schema"]["required"])
+        store.assert_called_once_with(capture_id, 3, value)
 
     def test_unknown_reader_stage_is_rejected(self) -> None:
         response = self.client.post("/api/read/4", data=image_bytes(), content_type="image/jpeg")
