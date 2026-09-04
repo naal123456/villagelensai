@@ -68,6 +68,10 @@ never sent to GitHub or embedded in browser JavaScript.
 The main domain opens an enrollment form with exactly two fields: an anonymous
 user selector (`A1` through `A10`) and the shared access code. A successful entry
 redirects to that user's reader URL and persists the cohort on the phone.
+For field testers who cannot enter the Latin-script code, an owner can provide a
+per-tester signed WhatsApp link. Its credential stays in the URL fragment, is
+exchanged through a non-logged request body, and is removed from the address bar
+before the assigned reader opens.
 
 Kannada segments use authenticated server-generated `kn-IN` audio, so a tester
 does not need to install a Kannada voice or change phone settings. Unique audio
