@@ -79,7 +79,8 @@ a tapped English word in Kannada without replacing stage-two geometry.
 
 ## Local validation
 
-- Focused tests: 16/16 passed.
+- Focused tests: 17/17 passed, including fresh-phone tester enrollment through
+  the access-code redirect.
 - Python compilation, embedded JavaScript syntax, and `git diff --check`: passed.
 - Representative phone-image stage-one API check: 3/3 returned HTTP 200.
 

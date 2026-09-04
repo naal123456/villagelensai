@@ -169,6 +169,22 @@ class ApiTests(unittest.TestCase):
         self.addCleanup(allowed.close)
         self.assertEqual(allowed.status_code, 200)
 
+    def test_fresh_phone_access_preserves_tester_enrollment(self) -> None:
+        self.enable_access_gate()
+
+        protected = self.client.get("/a/?tester=A10")
+        self.assertEqual(protected.status_code, 302)
+        self.assertEqual(protected.headers["Location"], "/access?tester=a10")
+        invalid = self.client.get("/a/?tester=a11")
+        self.assertEqual(invalid.headers["Location"], "/access")
+        access_page = self.client.get(protected.headers["Location"])
+        self.assertIn(b'name="tester" type="hidden" value="a10"', access_page.data)
+        accepted = self.client.post(
+            "/access", data={"code": "test-code", "tester": "a10"},
+        )
+        self.assertEqual(accepted.status_code, 303)
+        self.assertEqual(accepted.headers["Location"], "/a/?tester=a10")
+
     def test_capture_rejects_non_image(self) -> None:
         response = self.client.post("/api/capture", data=b"hello", content_type="text/plain")
         self.assertEqual(response.status_code, 415)

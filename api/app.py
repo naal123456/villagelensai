@@ -104,7 +104,9 @@ def _require_access() -> Response | tuple[Response, int] | None:
         return None
     if request.path.startswith("/api/"):
         return jsonify(error="ACCESS_REQUIRED"), 401
-    return redirect("/access", code=302)
+    tester_id = request.args.get("tester", "").strip().lower()
+    destination = f"/access?tester={tester_id}" if TESTER_ID_PATTERN.fullmatch(tester_id) else "/access"
+    return redirect(destination, code=302)
 
 
 def _allowed_origins() -> set[str]:
@@ -149,11 +151,15 @@ def access() -> Response:
     if not _access_configured():
         return redirect("/a/", code=302)
     failed = False
+    tester_id = request.values.get("tester", "").strip().lower()
+    if not TESTER_ID_PATTERN.fullmatch(tester_id):
+        tester_id = ""
     if request.method == "POST":
         submitted = request.form.get("code", "").strip()
         expected = _access_code()
         if submitted and hmac.compare_digest(submitted, expected):
-            response = make_response(redirect("/a/", code=303))
+            destination = f"/a/?tester={tester_id}" if tester_id else "/a/"
+            response = make_response(redirect(destination, code=303))
             response.set_cookie(
                 ACCESS_COOKIE_NAME,
                 _access_token(),
@@ -177,6 +183,7 @@ border-radius:12px;font-size:1.4rem}}input{{padding:0 14px;border:2px solid #647
 button{{margin-top:14px;border:0;background:#168447;color:white;font-weight:700}}</style></head>
 <body><main><h1>VillageLensAI</h1><form method="post" action="/access">
 <label for="code">{message}<br><small>Access code</small></label>
+<input name="tester" type="hidden" value="{tester_id}">
 <input id="code" name="code" type="password" autocomplete="one-time-code"
 required autofocus aria-label="Access code"><button type="submit">🔓</button></form></main></body></html>"""
     return make_response(page, 401 if failed else 200)
