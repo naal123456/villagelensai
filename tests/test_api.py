@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 
 from PIL import Image
 
-from api.app import _access_token, app
+from api.app import _access_token, _tester_link_token, app
 
 
 TSV = """level\tpage_num\tblock_num\tpar_num\tline_num\tword_num\tleft\ttop\twidth\theight\tconf\ttext
@@ -222,6 +222,37 @@ class ApiTests(unittest.TestCase):
         allowed = self.client.get("/a/?tester=a1", base_url="https://localhost")
         self.addCleanup(allowed.close)
         self.assertEqual(allowed.status_code, 200)
+
+    def test_signed_tester_link_enrolls_without_password(self) -> None:
+        self.enable_access_gate()
+        with app.test_request_context("/"):
+            token = _tester_link_token("a4")
+
+        response = self.client.post("/access/link", data={"token": token})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["destination"], "/a/?tester=a4")
+        cookies = response.headers.getlist("Set-Cookie")
+        self.assertTrue(any(value.startswith("villagelens_access_v2=") for value in cookies))
+        page = self.client.get("/a/?tester=a4", base_url="https://localhost")
+        self.addCleanup(page.close)
+        self.assertEqual(page.status_code, 200)
+
+    def test_invalid_tester_link_is_rejected(self) -> None:
+        self.enable_access_gate()
+        response = self.client.post("/access/link", data={"token": "a4.not-valid"})
+
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.get_json()["error"], "ACCESS_LINK_INVALID")
+
+    def test_access_page_consumes_link_fragment_without_logging_it(self) -> None:
+        self.enable_access_gate()
+        response = self.client.get("/access")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"location.hash.slice(1)", response.data)
+        self.assertIn(b"fetch('/access/link'", response.data)
+        self.assertIn(b"history.replaceState", response.data)
 
     def test_valid_legacy_cookie_remains_accepted(self) -> None:
         self.enable_access_gate()

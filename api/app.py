@@ -84,6 +84,30 @@ def _access_token() -> str:
     return f"{issued}.{_access_signature(issued)}"
 
 
+def _tester_link_token(tester_id: str) -> str:
+    if not TESTER_ID_PATTERN.fullmatch(tester_id):
+        raise ValueError("TESTER_ID_INVALID")
+    code_hash = hashlib.sha256(_access_code().encode("utf-8")).hexdigest()
+    signature = hmac.new(
+        str(app.config["VILLAGELENS_SESSION_SECRET"]).encode("utf-8"),
+        f"tester-link-v1:{tester_id}:{code_hash}".encode("utf-8"),
+        hashlib.sha256,
+    ).digest()
+    encoded = base64.urlsafe_b64encode(signature).decode("ascii").rstrip("=")
+    return f"{tester_id}.{encoded}"
+
+
+def _tester_from_link(token: str) -> str:
+    tester_id, separator, _ = token.partition(".")
+    if not separator or not TESTER_ID_PATTERN.fullmatch(tester_id):
+        return ""
+    try:
+        expected = _tester_link_token(tester_id)
+    except ValueError:
+        return ""
+    return tester_id if hmac.compare_digest(token, expected) else ""
+
+
 def _has_access() -> bool:
     if not _access_configured():
         return not (
@@ -107,7 +131,7 @@ def _has_access() -> bool:
 
 @app.before_request
 def _require_access() -> Response | tuple[Response, int] | None:
-    if request.path in {"/access", "/health", "/healthz"} or _has_access():
+    if request.path in {"/access", "/access/link", "/health", "/healthz"} or _has_access():
         return None
     if request.path.startswith("/api/"):
         return jsonify(error="ACCESS_REQUIRED"), 401
@@ -134,7 +158,7 @@ def _response_headers(response: Response) -> Response:
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["Referrer-Policy"] = "no-referrer"
     response.headers["Permissions-Policy"] = "camera=(self)"
-    if request.path.startswith("/api/") or request.path == "/access":
+    if request.path.startswith("/api/") or request.path.startswith("/access"):
         response.headers["Cache-Control"] = (
             "private, max-age=604800" if request.path == "/api/speech" and response.status_code == 200
             else "no-store"
@@ -156,6 +180,37 @@ def root() -> Response:
     return redirect("/access" if _access_configured() else "/a/", code=302)
 
 
+def _with_access_cookie(response: Response) -> Response:
+    for legacy_name in LEGACY_ACCESS_COOKIE_NAMES:
+        response.delete_cookie(
+            legacy_name,
+            secure=True,
+            httponly=True,
+            samesite="Lax",
+            path="/",
+        )
+    response.set_cookie(
+        ACCESS_COOKIE_NAME,
+        _access_token(),
+        max_age=ACCESS_COOKIE_TTL_SECONDS,
+        secure=True,
+        httponly=True,
+        samesite="Lax",
+        path="/",
+    )
+    return response
+
+
+@app.post("/access/link")
+def access_link() -> Response | tuple[Response, int]:
+    if not _access_configured():
+        return jsonify(error="ACCESS_NOT_CONFIGURED"), 503
+    tester_id = _tester_from_link(request.form.get("token", "").strip())
+    if not tester_id:
+        return jsonify(error="ACCESS_LINK_INVALID"), 401
+    return _with_access_cookie(jsonify(destination=f"/a/?tester={tester_id}"))
+
+
 @app.route("/access", methods=["GET", "POST"])
 def access() -> Response:
     if not _access_configured():
@@ -169,25 +224,7 @@ def access() -> Response:
         expected = _access_code()
         if tester_id and submitted and hmac.compare_digest(submitted, expected):
             destination = f"/a/?tester={tester_id}"
-            response = make_response(redirect(destination, code=303))
-            for legacy_name in LEGACY_ACCESS_COOKIE_NAMES:
-                response.delete_cookie(
-                    legacy_name,
-                    secure=True,
-                    httponly=True,
-                    samesite="Lax",
-                    path="/",
-                )
-            response.set_cookie(
-                ACCESS_COOKIE_NAME,
-                _access_token(),
-                max_age=ACCESS_COOKIE_TTL_SECONDS,
-                secure=True,
-                httponly=True,
-                samesite="Lax",
-                path="/",
-            )
-            return response
+            return _with_access_cookie(make_response(redirect(destination, code=303)))
         message = (
             "ಬಳಕೆದಾರರನ್ನು ಆಯ್ಕೆಮಾಡಿ. Choose a user."
             if not tester_id else "ಕೋಡ್ ಸರಿಯಾಗಿಲ್ಲ. ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ."
@@ -212,7 +249,24 @@ button{{margin-top:14px;border:0;background:#168447;color:white;font-weight:700}
 <label for="tester">User</label><select id="tester" name="tester" required autofocus>{user_options}</select>
 <label for="code">Code</label>
 <input id="code" name="code" type="password" autocomplete="one-time-code"
-required aria-label="Access code"><button type="submit">🔓</button></form></main></body></html>"""
+required aria-label="Access code"><button type="submit">🔓</button></form>
+<script>(async()=>{{
+  const token=new URLSearchParams(location.hash.slice(1)).get('enroll');
+  if (!token) return;
+  history.replaceState(null,'','/access');
+  const form=document.querySelector('form'),message=document.querySelector('p');
+  form.hidden=true; message.textContent='ತೆರೆಯಲಾಗುತ್ತಿದೆ…';
+  try {{
+    const response=await fetch('/access/link',{{method:'POST',credentials:'same-origin',
+      headers:{{'Content-Type':'application/x-www-form-urlencoded'}},
+      body:new URLSearchParams({{token}})}});
+    const value=await response.json();
+    if (!response.ok) throw new Error('LINK_FAILED');
+    location.replace(value.destination);
+  }} catch (_) {{
+    form.hidden=false; message.textContent='ಲಿಂಕ್ ಕೆಲಸ ಮಾಡಲಿಲ್ಲ. ಮತ್ತೆ ಲಿಂಕ್ ಒತ್ತಿರಿ.';
+  }}
+}})();</script></main></body></html>"""
     return make_response(page, 401 if request.method == "POST" else 200)
 
 
