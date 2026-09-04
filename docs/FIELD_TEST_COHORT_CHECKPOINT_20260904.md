@@ -8,9 +8,11 @@ Status: field evidence reviewed; corrections deployed and verified
 The controlled field roster is limited to `A1` through `A10`. The current
 operator mapping is:
 
-- `A1`: Umesh
-- `A2`: Eeregowda; Samsung SM-M325F confirmed by the owner on 2026-09-04
+- `A1`: Eeregowda; Samsung SM-M325F confirmed by the owner on 2026-09-04
+- `A2`: Umesh
 - `A3` through `A10`: unassigned pending names from the owner
+
+This owner-confirmed mapping supersedes the earlier provisional A1/A2 ordering.
 
 Each phone must enter through its dedicated link once:
 
@@ -30,7 +32,7 @@ dedicated links remain available and preselect the matching user.
 
 The retained September 3 evidence contains three device signatures: Samsung
 SM-M325F, OPPO A5 Pro 5G, and one OPPO Reno8 5G capture. The owner subsequently
-confirmed that the Samsung belongs to Eeregowda (`A2`). The OPPO cohorts remain
+confirmed that the Samsung belongs to Eeregowda (`A1`). The OPPO cohorts remain
 unassigned, and their ownership must not be inferred.
 No photographs or raw OCR/provider responses are copied into this repository.
 
