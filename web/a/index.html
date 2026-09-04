@@ -84,6 +84,8 @@
     let gallery=[], galleryIndex=0, result=null, mode='word', timerId=0, started=0, timerOwner=null;
     let navigationGeneration=0;
     let playbackGeneration=0, speechGeneration=0, pointerStart=null, suppressTap=false;
+    let audioContext=null, activeAudioSource=null;
+    const speechAudioCache=new Map();
     let speechVoices=[];
     const testerId=configureTesterId();
 
@@ -119,6 +121,7 @@
     function stop() {
       playbackGeneration++; speechGeneration++;
       if ('speechSynthesis' in window) speechSynthesis.cancel();
+      if (activeAudioSource) { try { activeAudioSource.stop(); } catch (_) {} activeAudioSource=null; }
       stage.classList.remove('playing');
       document.querySelectorAll('.underline').forEach(node => node.classList.remove('active'));
     }
@@ -193,18 +196,48 @@
       }
       return segments.filter(segment=>segment.text.trim());
     }
+    async function ensureAudioContext() {
+      const AudioContextClass=window.AudioContext||window.webkitAudioContext;
+      if (!AudioContextClass) return null;
+      if (!audioContext) audioContext=new AudioContextClass();
+      if (audioContext.state==='suspended') await audioContext.resume();
+      return audioContext;
+    }
     function showKannadaVoiceError() {
-      status.textContent='ಈ ಫೋನ್‌ನಲ್ಲಿ ಕನ್ನಡ ಧ್ವನಿ ಲಭ್ಯವಿಲ್ಲ. Speech Services ನಲ್ಲಿ Kannada ಧ್ವನಿಯನ್ನು ಸ್ಥಾಪಿಸಿ.';
+      status.textContent='ಕನ್ನಡ ಧ್ವನಿ ತಾತ್ಕಾಲಿಕವಾಗಿ ಲಭ್ಯವಿಲ್ಲ. ಮತ್ತೆ ಸ್ಪರ್ಶಿಸಿ.';
+    }
+    async function playKannada(text,generation) {
+      try {
+        const context=await ensureAudioContext();
+        if (!context||generation!==speechGeneration) return false;
+        let buffer=speechAudioCache.get(text);
+        if (!buffer) {
+          const response=await fetch('/api/speech',{method:'POST',headers:testerHeaders({'Content-Type':'application/json'}),body:JSON.stringify({text})});
+          if (response.status===401) { location.href='/access'; return false; }
+          if (!response.ok) throw new Error('SPEECH_FAILED');
+          buffer=await context.decodeAudioData(await response.arrayBuffer());
+          speechAudioCache.set(text,buffer);
+        }
+        if (generation!==speechGeneration) return false;
+        return await new Promise(resolve=>{
+          const source=context.createBufferSource(); activeAudioSource=source;
+          source.buffer=buffer; source.connect(context.destination);
+          source.onended=()=>{ if (activeAudioSource===source) activeAudioSource=null; resolve(generation===speechGeneration); };
+          source.start();
+        });
+      } catch (_) { if (generation===speechGeneration) showKannadaVoiceError(); return false; }
     }
     async function speak(text) {
       stopSpeechOnly();
-      if (!text || !('speechSynthesis' in window)) return false;
+      if (!text) return false;
       const generation=speechGeneration;
       for (const segment of speechSegments(text)) {
-        const selectedVoice=voiceFor(segment.language);
-        if (segment.language==='kn-IN'&&speechVoices.length&&!selectedVoice) {
-          showKannadaVoiceError(); return false;
+        if (segment.language==='kn-IN') {
+          if (!await playKannada(segment.text,generation)) return false;
+          continue;
         }
+        if (!('speechSynthesis' in window)) return false;
+        const selectedVoice=voiceFor(segment.language);
         const completed=await new Promise(resolve => {
           const utterance=new SpeechSynthesisUtterance(segment.text);
           utterance.lang=segment.language; utterance.rate=.7;
@@ -214,15 +247,16 @@
           speechSynthesis.speak(utterance);
         });
         if (!completed.ok||generation!==speechGeneration) {
-          if (segment.language==='kn-IN'&&generation===speechGeneration) {
-            showKannadaVoiceError();
-          }
           return false;
         }
       }
       return true;
     }
-    function stopSpeechOnly() { speechGeneration++; if ('speechSynthesis' in window) speechSynthesis.cancel(); }
+    function stopSpeechOnly() {
+      speechGeneration++;
+      if ('speechSynthesis' in window) speechSynthesis.cancel();
+      if (activeAudioSource) { try { activeAudioSource.stop(); } catch (_) {} activeAudioSource=null; }
+    }
     function lineForWord(word) { return (result.lines||[]).find(line=>line.id===word.line_id); }
     function activate(id,text) {
       document.querySelectorAll('.underline').forEach(node=>node.classList.toggle('active',node.dataset.id===id));
@@ -407,6 +441,7 @@
     $('play-meanings').onclick=explainMeaning; $('play-whole').onclick=explainMeaning; $('stop').onclick=stop;
     $('previous').onclick=()=>showGallery(galleryIndex-1); $('next').onclick=()=>showGallery(galleryIndex+1);
     input.onchange=()=>useCapture(input.files&&input.files[0]);
+    document.addEventListener('pointerdown',()=>{ ensureAudioContext(); },{passive:true});
     stage.addEventListener('pointerdown',event=>{ pointerStart={x:event.clientX,y:event.clientY}; suppressTap=false; });
     stage.addEventListener('pointerup',event=>{
       if (!pointerStart) return; const dx=event.clientX-pointerStart.x,dy=event.clientY-pointerStart.y; pointerStart=null;

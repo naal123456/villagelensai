@@ -52,7 +52,10 @@ class ApiTests(unittest.TestCase):
         self.assertIn(b'X-VillageLens-Tester-ID', response.data)
         self.assertIn(b'function speechSegments', response.data)
         self.assertIn(b'function voiceFor', response.data)
-        self.assertIn(b'Speech Services', response.data)
+        self.assertIn(b"fetch('/api/speech'", response.data)
+        self.assertIn(b'function playKannada', response.data)
+        self.assertIn(b'speechAudioCache', response.data)
+        self.assertNotIn(b'Speech Services', response.data)
         self.assertIn(b'function translatedWord', response.data)
         self.assertIn(b"?'saved':'local'", response.data)
         stage_three = response.data.split(b"if (stageNumber===3)", 1)[1].split(
@@ -89,6 +92,50 @@ class ApiTests(unittest.TestCase):
     def test_unknown_demo_asset_is_rejected(self) -> None:
         response = self.client.get("/a/demo/unknown.jpeg")
         self.assertEqual(response.status_code, 404)
+
+    @patch("api.app._storage_bucket", return_value=None)
+    @patch("api.app._synthesize_kannada", return_value=b"mp3-audio")
+    def test_kannada_speech_is_synthesized_server_side(
+        self, synthesize: object, storage_bucket: object,
+    ) -> None:
+        response = self.client.post("/api/speech", json={"text": " ಕನ್ನಡ  ಪದ "})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.content_type, "audio/mpeg")
+        self.assertEqual(response.data, b"mp3-audio")
+        self.assertEqual(response.headers["X-VillageLens-Speech-Cache"], "miss")
+        self.assertEqual(response.headers["Cache-Control"], "private, max-age=604800")
+        synthesize.assert_called_once_with("ಕನ್ನಡ ಪದ")
+
+    @patch("api.app._synthesize_kannada")
+    @patch("api.app._storage_bucket")
+    def test_kannada_speech_reuses_private_object_cache(
+        self, storage_bucket: object, synthesize: object,
+    ) -> None:
+        blob = storage_bucket.return_value.blob.return_value
+        blob.exists.return_value = True
+        blob.download_as_bytes.return_value = b"cached-mp3"
+        blob.content_type = "audio/mpeg"
+
+        response = self.client.post("/api/speech", json={"text": "ಕನ್ನಡ"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, b"cached-mp3")
+        self.assertEqual(response.headers["X-VillageLens-Speech-Cache"], "hit")
+        synthesize.assert_not_called()
+        cache_name = storage_bucket.return_value.blob.call_args.args[0]
+        self.assertRegex(cache_name, r"^speech/v1/[0-9a-f]{64}\.mp3$")
+        self.assertNotIn("ಕನ್ನಡ", cache_name)
+
+    def test_kannada_speech_rejects_invalid_text(self) -> None:
+        latin = self.client.post("/api/speech", json={"text": "English only"})
+        empty = self.client.post("/api/speech", json={"text": ""})
+        long_text = self.client.post("/api/speech", json={"text": "ಕ" * 501})
+
+        self.assertEqual(latin.status_code, 400)
+        self.assertEqual(latin.get_json()["error"], "SPEECH_LANGUAGE_UNSUPPORTED")
+        self.assertEqual(empty.get_json()["error"], "SPEECH_TEXT_REQUIRED")
+        self.assertEqual(long_text.get_json()["error"], "SPEECH_TEXT_TOO_LONG")
 
     def test_gallery_starts_with_i2_then_i1(self) -> None:
         response = self.client.get("/api/gallery")

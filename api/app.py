@@ -34,9 +34,11 @@ MAX_IMAGE_PIXELS = int(os.environ.get("VILLAGELENS_MAX_IMAGE_PIXELS", 25_000_000
 MAX_IMAGE_EDGE = int(os.environ.get("VILLAGELENS_MAX_IMAGE_EDGE", 4096))
 LOCAL_OCR_MAX_EDGE = int(os.environ.get("VILLAGELENS_LOCAL_OCR_MAX_EDGE", 1600))
 LOCAL_OCR_TIMEOUT_SECONDS = int(os.environ.get("VILLAGELENS_LOCAL_OCR_TIMEOUT_SECONDS", 20))
+MAX_SPEECH_CHARACTERS = int(os.environ.get("VILLAGELENS_MAX_SPEECH_CHARACTERS", 500))
 ALLOWED_MEDIA_TYPES = {"image/jpeg", "image/png", "image/webp"}
 CAPTURE_BUCKET = os.environ.get("VILLAGELENS_CAPTURE_BUCKET", "")
 OPENAI_MODEL = os.environ.get("VILLAGELENS_OPENAI_MODEL", "gpt-5-mini")
+KANNADA_TTS_VOICE = os.environ.get("VILLAGELENS_KANNADA_TTS_VOICE", "kn-IN-Standard-A")
 ACCESS_COOKIE_NAME = "villagelens_access"
 ACCESS_COOKIE_TTL_SECONDS = 30 * 24 * 60 * 60
 MODEL_SHA256 = {
@@ -128,7 +130,10 @@ def _response_headers(response: Response) -> Response:
     response.headers["Referrer-Policy"] = "no-referrer"
     response.headers["Permissions-Policy"] = "camera=(self)"
     if request.path.startswith("/api/") or request.path == "/access":
-        response.headers["Cache-Control"] = "no-store"
+        response.headers["Cache-Control"] = (
+            "private, max-age=604800" if request.path == "/api/speech" and response.status_code == 200
+            else "no-store"
+        )
         origin = request.headers.get("Origin", "")
         if origin and origin in _allowed_origins():
             response.headers["Access-Control-Allow-Origin"] = origin
@@ -520,6 +525,77 @@ def _store_reader_evidence(capture_id: str, stage: int, result: dict[str, Any]) 
 
 def _valid_capture_id(capture_id: str) -> bool:
     return bool(re.fullmatch(r"[0-9a-f]{32}", capture_id))
+
+
+def _speech_cache_name(text: str) -> str:
+    identity = f"v1\0{KANNADA_TTS_VOICE}\0{text}".encode("utf-8")
+    return f"speech/v1/{hashlib.sha256(identity).hexdigest()}.mp3"
+
+
+def _synthesize_kannada(text: str) -> bytes:
+    from google.cloud import texttospeech
+
+    response = texttospeech.TextToSpeechClient().synthesize_speech(
+        request={
+            "input": texttospeech.SynthesisInput(text=text),
+            "voice": texttospeech.VoiceSelectionParams(
+                language_code="kn-IN", name=KANNADA_TTS_VOICE,
+            ),
+            "audio_config": texttospeech.AudioConfig(
+                audio_encoding=texttospeech.AudioEncoding.MP3,
+                speaking_rate=0.82,
+            ),
+        },
+        timeout=20,
+    )
+    return bytes(response.audio_content)
+
+
+@app.post("/api/speech")
+def speech() -> Response | tuple[Response, int]:
+    payload = request.get_json(silent=True)
+    text = re.sub(r"\s+", " ", str(payload.get("text", ""))).strip() if isinstance(payload, dict) else ""
+    if not text:
+        return jsonify(error="SPEECH_TEXT_REQUIRED"), 400
+    if len(text) > MAX_SPEECH_CHARACTERS:
+        return jsonify(error="SPEECH_TEXT_TOO_LONG"), 400
+    if not re.search(r"[\u0c80-\u0cff]", text):
+        return jsonify(error="SPEECH_LANGUAGE_UNSUPPORTED"), 400
+
+    cache_name = _speech_cache_name(text)
+    bucket = None
+    try:
+        bucket = _storage_bucket()
+        if bucket is not None:
+            blob = bucket.blob(cache_name)
+            if blob.exists():
+                audio = blob.download_as_bytes()
+                response = make_response(audio)
+                response.headers["Content-Type"] = blob.content_type or "audio/mpeg"
+                response.headers["X-VillageLens-Speech-Cache"] = "hit"
+                return response
+    except Exception:
+        app.logger.warning("Kannada speech cache read failed")
+
+    try:
+        audio = _synthesize_kannada(text)
+        if not audio:
+            raise RuntimeError("KANNADA_SPEECH_EMPTY")
+    except Exception:
+        app.logger.exception("Kannada speech synthesis failed")
+        return jsonify(error="KANNADA_SPEECH_UNAVAILABLE"), 503
+
+    if bucket is not None:
+        try:
+            blob = bucket.blob(cache_name)
+            blob.cache_control = "private, max-age=31536000"
+            blob.upload_from_string(audio, content_type="audio/mpeg")
+        except Exception:
+            app.logger.warning("Kannada speech cache write failed")
+    response = make_response(audio)
+    response.headers["Content-Type"] = "audio/mpeg"
+    response.headers["X-VillageLens-Speech-Cache"] = "miss"
+    return response
 
 
 @app.get("/api/gallery")

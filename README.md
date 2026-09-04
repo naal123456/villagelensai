@@ -69,6 +69,8 @@ The main domain opens an enrollment form with exactly two fields: an anonymous
 user selector (`A1` through `A10`) and the shared access code. A successful entry
 redirects to that user's reader URL and persists the cohort on the phone.
 
-The browser explicitly selects matching Kannada and English system voices for
-mixed-script speech. If Android reports a Kannada synthesis failure, the tester
-is told to install the Kannada voice in the phone's Speech Services settings.
+Kannada segments use authenticated server-generated `kn-IN` audio, so a tester
+does not need to install a Kannada voice or change phone settings. Unique audio
+segments are cached in the page and under hashed private Cloud Storage object
+names; repeated taps do not repeatedly invoke synthesis. English segments keep
+using the phone's existing system voice.

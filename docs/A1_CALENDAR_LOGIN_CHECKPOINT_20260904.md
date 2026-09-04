@@ -1,7 +1,7 @@
 # A1 calendar and login checkpoint
 
 Date: 2026-09-04
-Status: diagnosis complete; corrections locally validated; not deployed
+Status: superseded by the server-audio correction; deployment pending
 
 ## Login evidence
 
@@ -33,10 +33,10 @@ Kannada regions occur near the top and 85 in the calendar area. Because English
 audio works on the same phone, the reported missing Kannada reading is a phone
 speech-synthesis failure rather than missing cloud OCR.
 
-The client correction explicitly selects an exact or language-matched system
-voice for each `kn-IN` and `en-IN` speech segment. If Kannada synthesis fails,
-the UI now reports that the Kannada voice must be installed in the phone's
-Speech Services settings instead of silently stopping continuous playback.
+The first client correction selected exact or language-matched system voices,
+but the A1 tester cannot install a missing Kannada voice. That approach has been
+superseded locally: Kannada now uses server-generated audio while English keeps
+using the system voice. The deployment result is recorded separately.
 
 The temporary local image copy will be deleted after validation. No photograph
 or raw provider response is committed to the repository.
