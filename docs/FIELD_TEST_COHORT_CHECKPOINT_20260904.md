@@ -90,17 +90,21 @@ a tapped English word in Kannada without replacing stage-two geometry.
 
 ## Deployment verification
 
-- Source commit: `fed25e1` (`Preserve tester ID through access enrollment`).
-- Cloud Build `a7b6c635-e185-4269-be81-27dd22d2784f`: successful.
+- Source commit: `5070aba` (`Add user selection to access form`).
+- Cloud Build `c0997b52-4bb6-42fd-8a5f-37312fd5aa38`: successful.
 - Deployed image digest:
-  `sha256:4eabe02237a826ff01e02ec99df622c350082e794aeabca66936d6b8bc1251e0`.
-- Cloud Run revision `vlens-a-fed25e1` serves 100% of traffic in
+  `sha256:7c4b03eb1dd214852655a16f02fc159ecbaafb4842c7aba9e0f6cf775144454e`.
+- Cloud Run revision `vlens-a-5070aba` serves 100% of traffic in
   `us-central1`; minimum instances remain zero, maximum instances one,
   concurrency four, and timeout 90 seconds.
 - Protected access returned 303; both A1 and A2 pages returned 200; health
   returned 200 with both local language models present.
 - A fresh unauthenticated A1 link returned 302 to an A1-preserving access page;
   the access POST returned 303 to `/a/?tester=a1`, and that page returned 200.
+- In both fresh and already-authorized sessions, the main domain returned 302
+  to `/access`. The live form contained exactly one A1–A10 User selector and
+  one Code field; A2 returned 303 to `/a/?tester=a2`, while a missing User was
+  rejected with 401.
 - The authenticated live HTML exactly matched the tested local source and its
   orange-first, translation, and A1–A10 contracts were present.
 - The A1 and A2 gallery requests were isolated and currently contain only the
@@ -108,7 +112,7 @@ a tapped English word in Kannada without replacing stage-two geometry.
 - No photograph was uploaded and no paid reader call was made during deployment
   verification.
 
-Immediate rollback revision: `vlens-a-8d4884e`. Pre-field-correction rollback
+Immediate rollback revision: `vlens-a-fed25e1`. Pre-field-correction rollback
 revision: `vlens-a-ff19439`.
 
 On-device Kannada/English speech quality still requires field verification and
