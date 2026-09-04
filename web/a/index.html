@@ -89,11 +89,11 @@
     function configureTesterId() {
       const key='villagelens.tester.v1';
       const requested=(new URLSearchParams(location.search).get('tester')||'').toLowerCase();
-      if (/^a[1-9][0-9]{0,2}$/.test(requested)) {
+      if (/^a(?:10|[1-9])$/.test(requested)) {
         try { localStorage.setItem(key,requested); } catch (_) {}
         return requested;
       }
-      try { const saved=localStorage.getItem(key)||''; return /^a[1-9][0-9]{0,2}$/.test(saved)?saved:''; }
+      try { const saved=localStorage.getItem(key)||''; return /^a(?:10|[1-9])$/.test(saved)?saved:''; }
       catch (_) { return ''; }
     }
     function testerHeaders(headers={}) {

@@ -43,7 +43,7 @@ MODEL_SHA256 = {
     "kan": "bd31e6b6ae93271e3bcf5383d306d8eefbb91542937cd6d735a5930c970e61d8",
     "eng": "7d4322bd2a7749724879683fc3912cb542f19906c83bcc1a52132556427170b2",
 }
-TESTER_ID_PATTERN = re.compile(r"a[1-9][0-9]{0,2}")
+TESTER_ID_PATTERN = re.compile(r"a(?:10|[1-9])")
 DEMO_ASSETS = {
     "i1.jpeg", "i1-scene.json", "i2.jpeg", "i2-scene.json", "i2-gold.json",
 }

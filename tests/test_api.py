@@ -124,6 +124,25 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.get_json()["status"], "ok")
 
+    @patch("api.app._store_capture", return_value=False)
+    @patch("api.app.subprocess.run")
+    def test_tester_roster_accepts_a10_and_rejects_a11(
+        self, run: object, store: object,
+    ) -> None:
+        run.return_value = subprocess.CompletedProcess([], 0, stdout=TSV, stderr="")
+
+        accepted = self.client.post(
+            "/api/capture", data=image_bytes(), content_type="image/jpeg",
+            headers={"X-VillageLens-Tester-ID": "A10"},
+        ).get_json()
+        rejected = self.client.post(
+            "/api/capture", data=image_bytes(), content_type="image/jpeg",
+            headers={"X-VillageLens-Tester-ID": "A11"},
+        ).get_json()
+
+        self.assertEqual(accepted["tester_id"], "a10")
+        self.assertEqual(rejected["tester_id"], "unassigned")
+
     def test_access_gate_protects_page_and_api(self) -> None:
         self.enable_access_gate()
         page = self.client.get("/a/")

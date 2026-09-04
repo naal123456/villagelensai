@@ -5,10 +5,12 @@ Status: field evidence reviewed; corrections locally validated; not deployed
 
 ## Participant IDs
 
-The operator mapping for future tests is:
+The controlled field roster is limited to `A1` through `A10`. The current
+operator mapping is:
 
 - `A1`: Umesh
-- `A2`: Eeregowda
+- `A2`: Eeregowda; Samsung SM-M325F confirmed by the owner on 2026-09-04
+- `A3` through `A10`: unassigned pending names from the owner
 
 Each phone must enter through its dedicated link once:
 
@@ -23,8 +25,9 @@ retroactively attributed to a participant from device metadata alone.
 ## Existing device cohorts
 
 The retained September 3 evidence contains three device signatures: Samsung
-SM-M325F, OPPO A5 Pro 5G, and one OPPO Reno8 5G capture. This proves that the
-existing evidence cannot safely be divided into only two participant cohorts.
+SM-M325F, OPPO A5 Pro 5G, and one OPPO Reno8 5G capture. The owner subsequently
+confirmed that the Samsung belongs to Eeregowda (`A2`). The OPPO cohorts remain
+unassigned, and their ownership must not be inferred.
 No photographs or raw OCR/provider responses are copied into this repository.
 
 Representative visual and aggregate checks found:
@@ -76,7 +79,7 @@ a tapped English word in Kannada without replacing stage-two geometry.
 
 ## Local validation
 
-- Focused tests: 15/15 passed.
+- Focused tests: 16/16 passed.
 - Python compilation, embedded JavaScript syntax, and `git diff --check`: passed.
 - Representative phone-image stage-one API check: 3/3 returned HTTP 200.
 
