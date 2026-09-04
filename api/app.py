@@ -143,22 +143,22 @@ def _capture_too_large(_: Exception) -> tuple[Response, int]:
 
 @app.get("/")
 def root() -> Response:
-    return redirect("/a/", code=302)
+    return redirect("/access" if _access_configured() else "/a/", code=302)
 
 
 @app.route("/access", methods=["GET", "POST"])
 def access() -> Response:
     if not _access_configured():
         return redirect("/a/", code=302)
-    failed = False
+    message = "ಬಳಕೆದಾರರನ್ನು ಆಯ್ಕೆಮಾಡಿ ಮತ್ತು ಪ್ರವೇಶ ಕೋಡ್ ನಮೂದಿಸಿ"
     tester_id = request.values.get("tester", "").strip().lower()
     if not TESTER_ID_PATTERN.fullmatch(tester_id):
         tester_id = ""
     if request.method == "POST":
         submitted = request.form.get("code", "").strip()
         expected = _access_code()
-        if submitted and hmac.compare_digest(submitted, expected):
-            destination = f"/a/?tester={tester_id}" if tester_id else "/a/"
+        if tester_id and submitted and hmac.compare_digest(submitted, expected):
+            destination = f"/a/?tester={tester_id}"
             response = make_response(redirect(destination, code=303))
             response.set_cookie(
                 ACCESS_COOKIE_NAME,
@@ -170,27 +170,39 @@ def access() -> Response:
                 path="/",
             )
             return response
-        failed = True
-    message = "ಕೋಡ್ ಸರಿಯಾಗಿಲ್ಲ. ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ." if failed else "ಪ್ರವೇಶ ಕೋಡ್ ನಮೂದಿಸಿ"
+        message = (
+            "ಬಳಕೆದಾರರನ್ನು ಆಯ್ಕೆಮಾಡಿ. Choose a user."
+            if not tester_id else "ಕೋಡ್ ಸರಿಯಾಗಿಲ್ಲ. ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ."
+        )
+    options = ['<option value="">User — A1 to A10</option>']
+    for number in range(1, 11):
+        value = f"a{number}"
+        selected = " selected" if value == tester_id else ""
+        options.append(f'<option value="{value}"{selected}>A{number}</option>')
+    user_options = "".join(options)
     page = f"""<!doctype html>
 <html lang="kn"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
 <meta name="theme-color" content="#101418"><title>VillageLensAI Access</title>
 <style>body{{margin:0;min-height:100vh;display:grid;place-items:center;background:#101418;
 color:#f5f7fa;font-family:system-ui,sans-serif}}main{{width:min(92vw,420px);text-align:center}}
-label{{display:block;font-size:1.35rem;margin:1rem}}input,button{{width:100%;min-height:58px;
-border-radius:12px;font-size:1.4rem}}input{{padding:0 14px;border:2px solid #64717d}}
+label{{display:block;font-size:1.1rem;margin:1rem 0 .4rem;text-align:left}}input,select,button{{width:100%;min-height:58px;
+border-radius:12px;font-size:1.3rem}}input,select{{padding:0 14px;border:2px solid #64717d;background:#fff;color:#111}}
 button{{margin-top:14px;border:0;background:#168447;color:white;font-weight:700}}</style></head>
 <body><main><h1>VillageLensAI</h1><form method="post" action="/access">
-<label for="code">{message}<br><small>Access code</small></label>
-<input name="tester" type="hidden" value="{tester_id}">
+<p>{message}</p>
+<label for="tester">User</label><select id="tester" name="tester" required autofocus>{user_options}</select>
+<label for="code">Code</label>
 <input id="code" name="code" type="password" autocomplete="one-time-code"
-required autofocus aria-label="Access code"><button type="submit">🔓</button></form></main></body></html>"""
-    return make_response(page, 401 if failed else 200)
+required aria-label="Access code"><button type="submit">🔓</button></form></main></body></html>"""
+    return make_response(page, 401 if request.method == "POST" else 200)
 
 
 @app.get("/a/")
 def tester_page() -> Response:
+    tester_id = request.args.get("tester", "").strip().lower()
+    if _access_configured() and not TESTER_ID_PATTERN.fullmatch(tester_id):
+        return redirect("/access", code=302)
     return send_from_directory(WEB_ROOT / "a", "index.html")
 
 

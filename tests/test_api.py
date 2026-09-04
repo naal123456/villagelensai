@@ -157,15 +157,18 @@ class ApiTests(unittest.TestCase):
     def test_correct_access_code_sets_secure_cookie(self) -> None:
         self.enable_access_gate()
         app.config["VILLAGELENS_ACCESS_CODE"] = "test-code\n"
-        response = self.client.post("/access", data={"code": "test-code"})
+        response = self.client.post(
+            "/access", data={"code": "test-code", "tester": "a1"},
+        )
         self.assertEqual(response.status_code, 303)
+        self.assertEqual(response.headers["Location"], "/a/?tester=a1")
         cookie = response.headers["Set-Cookie"]
         self.assertIn("HttpOnly", cookie)
         self.assertIn("Secure", cookie)
         self.assertIn("SameSite=Lax", cookie)
         token = cookie.split(";", 1)[0].split("=", 1)[1]
         self.client.set_cookie("villagelens_access", token, secure=True)
-        allowed = self.client.get("/a/", base_url="https://localhost")
+        allowed = self.client.get("/a/?tester=a1", base_url="https://localhost")
         self.addCleanup(allowed.close)
         self.assertEqual(allowed.status_code, 200)
 
@@ -178,12 +181,33 @@ class ApiTests(unittest.TestCase):
         invalid = self.client.get("/a/?tester=a11")
         self.assertEqual(invalid.headers["Location"], "/access")
         access_page = self.client.get(protected.headers["Location"])
-        self.assertIn(b'name="tester" type="hidden" value="a10"', access_page.data)
+        self.assertIn(b'<label for="tester">User</label>', access_page.data)
+        self.assertIn(b'<label for="code">Code</label>', access_page.data)
+        self.assertIn(b'<option value="a10" selected>A10</option>', access_page.data)
         accepted = self.client.post(
             "/access", data={"code": "test-code", "tester": "a10"},
         )
         self.assertEqual(accepted.status_code, 303)
         self.assertEqual(accepted.headers["Location"], "/a/?tester=a10")
+
+    def test_main_domain_requires_user_and_code_even_with_access_cookie(self) -> None:
+        self.enable_access_gate()
+        accepted = self.client.post(
+            "/access", data={"code": "test-code", "tester": "a2"},
+        )
+        self.assertEqual(accepted.status_code, 303)
+
+        root = self.client.get("/")
+        self.assertEqual(root.status_code, 302)
+        self.assertEqual(root.headers["Location"], "/access")
+        form = self.client.get(root.headers["Location"])
+        self.assertEqual(form.status_code, 200)
+        self.assertEqual(form.data.count(b'<select id="tester"'), 1)
+        self.assertEqual(form.data.count(b'<input id="code"'), 1)
+
+        missing_user = self.client.post("/access", data={"code": "test-code"})
+        self.assertEqual(missing_user.status_code, 401)
+        self.assertIn(b"Choose a user", missing_user.data)
 
     def test_capture_rejects_non_image(self) -> None:
         response = self.client.post("/api/capture", data=b"hello", content_type="text/plain")

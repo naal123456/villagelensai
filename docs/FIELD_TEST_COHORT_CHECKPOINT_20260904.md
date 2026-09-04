@@ -22,6 +22,10 @@ position, is attached to capture and reader evidence, and filters that phone's
 saved gallery. Historical captures remain `unassigned`; they must not be
 retroactively attributed to a participant from device metadata alone.
 
+The simpler default is now `https://villagelensai.com`: it always opens a form
+with exactly two fields, `User` and `Code`. User is an A1–A10 selector. The
+dedicated links remain available and preselect the matching user.
+
 ## Existing device cohorts
 
 The retained September 3 evidence contains three device signatures: Samsung
@@ -79,8 +83,8 @@ a tapped English word in Kannada without replacing stage-two geometry.
 
 ## Local validation
 
-- Focused tests: 17/17 passed, including fresh-phone tester enrollment through
-  the access-code redirect.
+- Focused tests: 18/18 passed, including fresh-phone tester enrollment through
+  the access-code redirect and the main-domain two-field flow.
 - Python compilation, embedded JavaScript syntax, and `git diff --check`: passed.
 - Representative phone-image stage-one API check: 3/3 returned HTTP 200.
 

@@ -64,3 +64,7 @@ its saved gallery so test cohorts are not mixed.
 The deployed tester page and capture API are protected by a server-side access
 code. The code and cookie-signing secret live in Google Secret Manager and are
 never sent to GitHub or embedded in browser JavaScript.
+
+The main domain opens an enrollment form with exactly two fields: an anonymous
+user selector (`A1` through `A10`) and the shared access code. A successful entry
+redirects to that user's reader URL and persists the cohort on the phone.
