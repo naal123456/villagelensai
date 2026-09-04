@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 
 from PIL import Image
 
-from api.app import app
+from api.app import _access_token, app
 
 
 TSV = """level\tpage_num\tblock_num\tpar_num\tline_num\tword_num\tleft\ttop\twidth\theight\tconf\ttext
@@ -211,15 +211,43 @@ class ApiTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 303)
         self.assertEqual(response.headers["Location"], "/a/?tester=a1")
-        cookie = response.headers["Set-Cookie"]
+        cookies = response.headers.getlist("Set-Cookie")
+        cookie = next(value for value in cookies if value.startswith("villagelens_access_v2="))
         self.assertIn("HttpOnly", cookie)
         self.assertIn("Secure", cookie)
         self.assertIn("SameSite=Lax", cookie)
+        self.assertTrue(any(value.startswith("villagelens_access=;") for value in cookies))
         token = cookie.split(";", 1)[0].split("=", 1)[1]
-        self.client.set_cookie("villagelens_access", token, secure=True)
+        self.client.set_cookie("villagelens_access_v2", token, secure=True)
         allowed = self.client.get("/a/?tester=a1", base_url="https://localhost")
         self.addCleanup(allowed.close)
         self.assertEqual(allowed.status_code, 200)
+
+    def test_valid_legacy_cookie_remains_accepted(self) -> None:
+        self.enable_access_gate()
+        with app.test_request_context("/"):
+            token = _access_token()
+        self.client.set_cookie("villagelens_access", token, secure=True)
+
+        response = self.client.get("/a/?tester=a2", base_url="https://localhost")
+        self.addCleanup(response.close)
+
+        self.assertEqual(response.status_code, 200)
+
+    def test_valid_cookie_survives_duplicate_stale_legacy_cookie(self) -> None:
+        self.enable_access_gate()
+        with app.test_request_context("/"):
+            token = _access_token()
+        client = app.test_client(use_cookies=False)
+
+        response = client.get(
+            "/a/?tester=a4",
+            base_url="https://localhost",
+            headers={"Cookie": f"villagelens_access=stale.invalid; villagelens_access={token}"},
+        )
+        self.addCleanup(response.close)
+
+        self.assertEqual(response.status_code, 200)
 
     def test_fresh_phone_access_preserves_tester_enrollment(self) -> None:
         self.enable_access_gate()

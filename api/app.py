@@ -39,7 +39,8 @@ ALLOWED_MEDIA_TYPES = {"image/jpeg", "image/png", "image/webp"}
 CAPTURE_BUCKET = os.environ.get("VILLAGELENS_CAPTURE_BUCKET", "")
 OPENAI_MODEL = os.environ.get("VILLAGELENS_OPENAI_MODEL", "gpt-5-mini")
 KANNADA_TTS_VOICE = os.environ.get("VILLAGELENS_KANNADA_TTS_VOICE", "kn-IN-Standard-A")
-ACCESS_COOKIE_NAME = "villagelens_access"
+ACCESS_COOKIE_NAME = "villagelens_access_v2"
+LEGACY_ACCESS_COOKIE_NAMES = ("villagelens_access",)
 ACCESS_COOKIE_TTL_SECONDS = 30 * 24 * 60 * 60
 MODEL_SHA256 = {
     "kan": "bd31e6b6ae93271e3bcf5383d306d8eefbb91542937cd6d735a5930c970e61d8",
@@ -89,15 +90,19 @@ def _has_access() -> bool:
             app.config.get("VILLAGELENS_ACCESS_CODE")
             or app.config.get("VILLAGELENS_SESSION_SECRET")
         )
-    try:
-        issued, signature = request.cookies.get(ACCESS_COOKIE_NAME, "").split(".", 1)
-        age = int(time.time()) - int(issued)
-    except (TypeError, ValueError):
-        return False
-    return (
-        -60 <= age <= ACCESS_COOKIE_TTL_SECONDS
-        and hmac.compare_digest(signature, _access_signature(issued))
-    )
+    for name in (ACCESS_COOKIE_NAME, *LEGACY_ACCESS_COOKIE_NAMES):
+        for token in request.cookies.getlist(name):
+            try:
+                issued, signature = token.split(".", 1)
+                age = int(time.time()) - int(issued)
+            except (TypeError, ValueError):
+                continue
+            if (
+                -60 <= age <= ACCESS_COOKIE_TTL_SECONDS
+                and hmac.compare_digest(signature, _access_signature(issued))
+            ):
+                return True
+    return False
 
 
 @app.before_request
@@ -165,6 +170,14 @@ def access() -> Response:
         if tester_id and submitted and hmac.compare_digest(submitted, expected):
             destination = f"/a/?tester={tester_id}"
             response = make_response(redirect(destination, code=303))
+            for legacy_name in LEGACY_ACCESS_COOKIE_NAMES:
+                response.delete_cookie(
+                    legacy_name,
+                    secure=True,
+                    httponly=True,
+                    samesite="Lax",
+                    path="/",
+                )
             response.set_cookie(
                 ACCESS_COOKIE_NAME,
                 _access_token(),
