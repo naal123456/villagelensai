@@ -1,7 +1,7 @@
 # A1 calendar and login checkpoint
 
 Date: 2026-09-04
-Status: superseded by the server-audio correction; deployment pending
+Status: superseded by the deployed server-audio correction
 
 ## Login evidence
 
@@ -35,8 +35,9 @@ speech-synthesis failure rather than missing cloud OCR.
 
 The first client correction selected exact or language-matched system voices,
 but the A1 tester cannot install a missing Kannada voice. That approach has been
-superseded locally: Kannada now uses server-generated audio while English keeps
-using the system voice. The deployment result is recorded separately.
+superseded: Kannada now uses server-generated audio while English keeps using
+the system voice. Deployment evidence is in
+`KANNADA_SERVER_AUDIO_DEPLOYMENT_20260904.md`.
 
 The temporary local image copy will be deleted after validation. No photograph
 or raw provider response is committed to the repository.
