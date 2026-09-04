@@ -1,7 +1,7 @@
 # Field-test cohort checkpoint
 
 Date: 2026-09-04
-Status: field evidence reviewed; corrections locally validated; not deployed
+Status: field evidence reviewed; corrections deployed and verified
 
 ## Participant IDs
 
@@ -83,4 +83,25 @@ a tapped English word in Kannada without replacing stage-two geometry.
 - Python compilation, embedded JavaScript syntax, and `git diff --check`: passed.
 - Representative phone-image stage-one API check: 3/3 returned HTTP 200.
 
-Deployment and on-device speech readiness are not claimed by this checkpoint.
+## Deployment verification
+
+- Source commit: `8d4884e` (`Bound field tester roster to ten participants`).
+- Cloud Build `cdc2b3b7-461d-4b32-a54e-5198092c2608`: successful.
+- Deployed image digest:
+  `sha256:b4af46d0d4a7460da27318be160a3fe7ad137b56b9dc0054747719b7aa04deac`.
+- Cloud Run revision `vlens-a-8d4884e` serves 100% of traffic in
+  `us-central1`; minimum instances remain zero, maximum instances one,
+  concurrency four, and timeout 90 seconds.
+- Protected access returned 303; both A1 and A2 pages returned 200; health
+  returned 200 with both local language models present.
+- The authenticated live HTML exactly matched the tested local source and its
+  orange-first, translation, and A1–A10 contracts were present.
+- The A1 and A2 gallery requests were isolated and currently contain only the
+  two shared demo items because historical captures remain unassigned.
+- No photograph was uploaded and no paid reader call was made during deployment
+  verification.
+
+Rollback revision: `vlens-a-ff19439`.
+
+On-device Kannada/English speech quality still requires field verification and
+is not claimed by this checkpoint.
