@@ -68,3 +68,7 @@ never sent to GitHub or embedded in browser JavaScript.
 The main domain opens an enrollment form with exactly two fields: an anonymous
 user selector (`A1` through `A10`) and the shared access code. A successful entry
 redirects to that user's reader URL and persists the cohort on the phone.
+
+The browser explicitly selects matching Kannada and English system voices for
+mixed-script speech. If Android reports a Kannada synthesis failure, the tester
+is told to install the Kannada voice in the phone's Speech Services settings.

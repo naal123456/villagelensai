@@ -51,6 +51,8 @@ class ApiTests(unittest.TestCase):
         self.assertIn(b'localStorage.setItem', response.data)
         self.assertIn(b'X-VillageLens-Tester-ID', response.data)
         self.assertIn(b'function speechSegments', response.data)
+        self.assertIn(b'function voiceFor', response.data)
+        self.assertIn(b'Speech Services', response.data)
         self.assertIn(b'function translatedWord', response.data)
         self.assertIn(b"?'saved':'local'", response.data)
         stage_three = response.data.split(b"if (stageNumber===3)", 1)[1].split(

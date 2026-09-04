@@ -21,4 +21,4 @@ RUN useradd --create-home --uid 10001 villagelens \
     && chown -R villagelens:villagelens /app
 USER villagelens
 
-CMD exec gunicorn --bind :${PORT} --workers 1 --threads 4 --timeout 90 api.app:app
+CMD exec gunicorn --bind :${PORT} --workers 1 --threads 8 --timeout 90 api.app:app

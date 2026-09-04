@@ -84,7 +84,19 @@
     let gallery=[], galleryIndex=0, result=null, mode='word', timerId=0, started=0, timerOwner=null;
     let navigationGeneration=0;
     let playbackGeneration=0, speechGeneration=0, pointerStart=null, suppressTap=false;
+    let speechVoices=[];
     const testerId=configureTesterId();
+
+    function refreshSpeechVoices() {
+      speechVoices='speechSynthesis' in window?speechSynthesis.getVoices():[];
+    }
+    function voiceFor(language) {
+      const requested=language.toLowerCase(), prefix=requested.split('-')[0];
+      return speechVoices.find(voice=>String(voice.lang||'').toLowerCase()===requested)||
+        speechVoices.find(voice=>String(voice.lang||'').toLowerCase().split('-')[0]===prefix)||null;
+    }
+    refreshSpeechVoices();
+    if ('speechSynthesis' in window) speechSynthesis.onvoiceschanged=refreshSpeechVoices;
 
     function configureTesterId() {
       const key='villagelens.tester.v1';
@@ -181,18 +193,32 @@
       }
       return segments.filter(segment=>segment.text.trim());
     }
+    function showKannadaVoiceError() {
+      status.textContent='ಈ ಫೋನ್‌ನಲ್ಲಿ ಕನ್ನಡ ಧ್ವನಿ ಲಭ್ಯವಿಲ್ಲ. Speech Services ನಲ್ಲಿ Kannada ಧ್ವನಿಯನ್ನು ಸ್ಥಾಪಿಸಿ.';
+    }
     async function speak(text) {
       stopSpeechOnly();
       if (!text || !('speechSynthesis' in window)) return false;
       const generation=speechGeneration;
       for (const segment of speechSegments(text)) {
+        const selectedVoice=voiceFor(segment.language);
+        if (segment.language==='kn-IN'&&speechVoices.length&&!selectedVoice) {
+          showKannadaVoiceError(); return false;
+        }
         const completed=await new Promise(resolve => {
           const utterance=new SpeechSynthesisUtterance(segment.text);
           utterance.lang=segment.language; utterance.rate=.7;
-          utterance.onend=()=>resolve(generation===speechGeneration);
-          utterance.onerror=()=>resolve(false); speechSynthesis.speak(utterance);
+          if (selectedVoice) utterance.voice=selectedVoice;
+          utterance.onend=()=>resolve({ok:generation===speechGeneration,error:''});
+          utterance.onerror=event=>resolve({ok:false,error:event.error||'speech-error'});
+          speechSynthesis.speak(utterance);
         });
-        if (!completed||generation!==speechGeneration) return false;
+        if (!completed.ok||generation!==speechGeneration) {
+          if (segment.language==='kn-IN'&&generation===speechGeneration) {
+            showKannadaVoiceError();
+          }
+          return false;
+        }
       }
       return true;
     }
