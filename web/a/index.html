@@ -168,9 +168,11 @@
         if (item.result) { item.result.summary_kn=item.summary_kn; item.result.translations=item.translations; }
       }
       if (gallery[galleryIndex]===item) {
-        $('quality-'+stageNumber).classList.add('ready');
+        const validated=stageNumber!==3||value.quality_validated===true;
+        $('quality-'+stageNumber).classList.toggle('ready',validated);
+        $('quality-'+stageNumber).classList.toggle('failed',!validated);
         if (stageNumber===2&&(value.words||[]).length&&item.id!=='demo-i2') render(item.result,false);
-        if (stageNumber===3&&value.summary_kn) status.textContent='ಓದುವಿಕೆ ಮತ್ತು ಅರ್ಥ ಸಿದ್ಧವಾಗಿದೆ.';
+        if (stageNumber===3&&validated&&value.summary_kn) status.textContent='ಓದುವಿಕೆ ಮತ್ತು ಅರ್ಥ ಸಿದ್ಧವಾಗಿದೆ.';
       }
     }
     function normalizedSpeech(text) {
@@ -356,6 +358,9 @@
           if (cached) applyReaderResult(item,stageNumber,cached);
         }
         timer.textContent=[2,3].some(stageNumber=>readCachedStage(item,stageNumber))?'saved':'local';
+        if (item.kind==='capture'&&[2,3].some(stageNumber=>!readCachedStage(item,stageNumber))) {
+          startCloudReaders(item);
+        }
       }
       catch (_) { if (navigation===navigationGeneration) status.textContent='ಈ ಉಳಿಸಿದ ಚಿತ್ರವನ್ನು ಓದಲು ಆಗಲಿಲ್ಲ.'; }
     }
@@ -385,6 +390,21 @@
         return {ok:true};
       } catch (error) { saveFailure(item,stageNumber); return {ok:false,error:error.message||'READER_FAILED'}; }
     }
+    async function processStoredReaders(item,requested) {
+      const response=await fetch(`/api/captures/${item.id}/process`,{
+        method:'POST',headers:testerHeaders(),credentials:'same-origin',keepalive:true,
+      });
+      if (response.status===401) { location.href='/access'; return requested.map(()=>({ok:false,error:'ACCESS_REQUIRED'})); }
+      const value=await response.json();
+      if (!response.ok) throw new Error(value.error||'PROCESSING_FAILED');
+      const errors=value.errors||{}, stages=value.stages||{};
+      return requested.map(stageNumber=>{
+        const stageValue=stages[String(stageNumber)];
+        if (stageValue) { applyReaderResult(item,stageNumber,stageValue); return {ok:true}; }
+        saveFailure(item,stageNumber);
+        return {ok:false,error:errors[String(stageNumber)]||'READER_FAILED'};
+      });
+    }
     async function startCloudReaders(item,blob) {
       const missing=[2,3].filter(stageNumber=>!readCachedStage(item,stageNumber));
       const cooling=missing.filter(stageNumber=>coolingDown(item,stageNumber));
@@ -396,17 +416,25 @@
       item.cloudStartedAt=item.startedAt||Date.now(); beginTimer(item,item.cloudStartedAt);
       item.cloudPromise=(async()=>{
       try {
-        if (!blob) { const response=await fetch(item.image_url); if (!response.ok) throw new Error('IMAGE_FAILED'); blob=await response.blob(); }
         const captureId=/^[0-9a-f]{32}$/.test(item.id)?item.id:'';
-        const outcomes=await Promise.all(requested.map(stageNumber=>callReader(stageNumber,blob,captureId,item)));
+        let outcomes;
+        if (captureId&&(item.retained||item.result&&item.result.retained)) {
+          outcomes=await processStoredReaders(item,requested);
+        } else {
+          if (!blob) { const response=await fetch(item.image_url); if (!response.ok) throw new Error('IMAGE_FAILED'); blob=await response.blob(); }
+          outcomes=await Promise.all(requested.map(stageNumber=>callReader(stageNumber,blob,captureId,item)));
+        }
         if (gallery[galleryIndex]===item) {
           outcomes.forEach((outcome,index)=>{ if (!outcome.ok) $('quality-'+requested[index]).classList.add('failed'); });
-          const ready=[2,3].filter(stageNumber=>readCachedStage(item,stageNumber)).length;
+          const ready=[2,3].filter(stageNumber=>{
+            const cached=readCachedStage(item,stageNumber);
+            return cached&&(stageNumber!==3||cached.quality_validated===true);
+          }).length;
           status.textContent=ready ? `${1+ready}/4 reading stages ready.` : 'ಮೊದಲ ಓದುವಿಕೆ ಸಿದ್ಧವಾಗಿದೆ. Cloud reading is busy; try again later.';
         }
       } catch (_) {
         if (gallery[galleryIndex]===item) status.textContent='ಮೊದಲ ಓದುವಿಕೆ ಸಿದ್ಧವಾಗಿದೆ. Slow connection; cloud reading was not completed.';
-      } finally { endTimer(item); }
+      } finally { endTimer(item); item.cloudPromise=null; }
       })();
       await item.cloudPromise;
     }
@@ -422,6 +450,7 @@
         if (response.status===401) return location.href='/access'; const value=await response.json();
         if (!response.ok) throw new Error(value.error||'CAPTURE_FAILED');
         item.id=value.capture_id; item.image_url=value.retained?value.image_url:objectUrl;
+        item.retained=value.retained;
         if (!item.result||!item.stage2) item.result=value;
         if (item.summary_kn) item.result.summary_kn=item.summary_kn;
         if (navigation===navigationGeneration&&gallery[galleryIndex]===item) {

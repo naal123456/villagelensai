@@ -10,9 +10,11 @@ import os
 import re
 import subprocess
 import tempfile
+import threading
 import time
 import uuid
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -57,6 +59,7 @@ app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = MAX_CAPTURE_BYTES
 app.config["VILLAGELENS_ACCESS_CODE"] = os.environ.get("VILLAGELENS_ACCESS_CODE", "").strip()
 app.config["VILLAGELENS_SESSION_SECRET"] = os.environ.get("VILLAGELENS_SESSION_SECRET", "")
+_capture_processing_locks: defaultdict[str, threading.Lock] = defaultdict(threading.Lock)
 
 
 def _access_code() -> str:
@@ -324,7 +327,9 @@ def _normalized_image(data: bytes) -> tuple[Image.Image, bool]:
 def _parse_tsv(tsv: str) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     words: list[dict[str, Any]] = []
     grouped: dict[tuple[int, int, int], list[dict[str, Any]]] = defaultdict(list)
-    for row in csv.DictReader(io.StringIO(tsv), delimiter="\t"):
+    # Tesseract text is not CSV-quoted. A stray recognised quote must not consume
+    # every following TSV row as one enormous word.
+    for row in csv.DictReader(io.StringIO(tsv), delimiter="\t", quoting=csv.QUOTE_NONE):
         if row.get("level") != "5" or not (text := (row.get("text") or "").strip()):
             continue
         try:
@@ -378,6 +383,43 @@ def _scale_regions(
             width=max(1, round(box["width"] * scale_x)),
             height=max(1, round(box["height"] * scale_y)),
         )
+
+
+def _filter_local_regions(
+    words: list[dict[str, Any]], lines: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    kept_words = []
+    for word in words:
+        text = str(word.get("text", ""))
+        confidence = float(word.get("confidence", -1))
+        kannada_letters = re.findall(r"[\u0c85-\u0cb9]", text)
+        if confidence < 0 or "\n" in text or "\t" in text:
+            continue
+        if kannada_letters and (confidence < 35 or (len(kannada_letters) == 1 and confidence < 70)):
+            continue
+        kept_words.append(word)
+
+    kept_ids = {word["id"] for word in kept_words}
+    kept_lines = []
+    words_by_id = {word["id"]: word for word in kept_words}
+    for line in lines:
+        line_words = [words_by_id[word_id] for word_id in line["word_ids"] if word_id in kept_ids]
+        if not line_words:
+            continue
+        left = min(word["box"]["x"] for word in line_words)
+        top = min(word["box"]["y"] for word in line_words)
+        right = max(word["box"]["x"] + word["box"]["width"] for word in line_words)
+        bottom = max(word["box"]["y"] + word["box"]["height"] for word in line_words)
+        confidences = [word["confidence"] for word in line_words]
+        normalized = dict(line)
+        normalized.update(
+            text=" ".join(word["text"] for word in line_words),
+            confidence=round(sum(confidences) / len(confidences), 3),
+            box={"x": left, "y": top, "width": right-left, "height": bottom-top},
+            word_ids=[word["id"] for word in line_words],
+        )
+        kept_lines.append(normalized)
+    return kept_words, kept_lines
 
 
 def _select_regions(
@@ -435,7 +477,9 @@ def _tesseract(image_path: Path) -> tuple[list[dict[str, Any]], list[dict[str, A
         completed = subprocess.run(
             [
                 "tesseract", str(image_path), "stdout", "--tessdata-dir", str(TESSDATA_DIRECTORY),
-                "-l", "kan+eng", "--oem", "1", "--psm", "11",
+                # English first reduces false Kannada glyphs on branded Latin text
+                # while retaining the repository-local Kannada model.
+                "-l", "eng+kan", "--oem", "1", "--psm", "11",
                 "-c", "tessedit_create_tsv=1",
             ],
             check=False, capture_output=True, text=True, timeout=LOCAL_OCR_TIMEOUT_SECONDS,
@@ -445,6 +489,7 @@ def _tesseract(image_path: Path) -> tuple[list[dict[str, Any]], list[dict[str, A
     if completed.returncode != 0:
         raise RuntimeError("LOCAL_OCR_FAILED")
     words, lines = _parse_tsv(completed.stdout)
+    words, lines = _filter_local_regions(words, lines)
     return words, lines, round((time.monotonic() - started) * 1000)
 
 
@@ -459,10 +504,11 @@ def _vision_reader(data: bytes, width: int, height: int) -> dict[str, Any]:
         raise RuntimeError("VISION_OCR_FAILED")
     words: list[dict[str, Any]] = []
     lines: list[dict[str, Any]] = []
+    paragraph_index = 0
     for page in response.full_text_annotation.pages:
         for block in page.blocks:
             for paragraph in block.paragraphs:
-                line_words: list[dict[str, Any]] = []
+                paragraph_words: list[dict[str, Any]] = []
                 for source_word in paragraph.words:
                     text = "".join(symbol.text for symbol in source_word.symbols).strip()
                     vertices = list(source_word.bounding_box.vertices)
@@ -476,19 +522,14 @@ def _vision_reader(data: bytes, width: int, height: int) -> dict[str, Any]:
                         "box": {"x": min(xs), "y": min(ys), "width": max(xs) - min(xs),
                                 "height": max(ys) - min(ys)},
                     }
-                    words.append(word); line_words.append(word)
-                if not line_words:
-                    continue
-                line_id = f"vision-line-{len(lines) + 1:03d}"
-                for word in line_words:
-                    word["line_id"] = line_id
-                left = min(word["box"]["x"] for word in line_words)
-                top = min(word["box"]["y"] for word in line_words)
-                right = max(word["box"]["x"] + word["box"]["width"] for word in line_words)
-                bottom = max(word["box"]["y"] + word["box"]["height"] for word in line_words)
-                lines.append({"id": line_id, "text": " ".join(word["text"] for word in line_words),
-                              "box": {"x": left, "y": top, "width": right-left, "height": bottom-top},
-                              "word_ids": [word["id"] for word in line_words]})
+                    words.append(word)
+                    paragraph_words.append(word)
+                if paragraph_words:
+                    paragraph_index += 1
+                    lines.extend(_geometry_lines(paragraph_words, f"vision-p{paragraph_index:03d}"))
+    # Vision paragraphs can span several physical rows. Rebuild touchable
+    # sentence rows within each paragraph instead of merging the paragraph.
+    lines.sort(key=lambda line: (line["box"]["y"], line["box"]["x"]))
     words, lines = _select_regions(words, lines, width=width, height=height)
     return {"schema": "villagelens.reader.v1", "stage": 2, "reader": "cloud_ocr",
             "latency_ms": round((time.monotonic()-started)*1000), "image_size": {"width": width, "height": height},
@@ -501,6 +542,46 @@ def _openai_output_text(response: dict[str, Any]) -> str:
             if content.get("type") == "output_text":
                 return str(content.get("text", ""))
     raise RuntimeError("OPENAI_READER_INVALID_RESPONSE")
+
+
+def _valid_kannada_text(value: Any) -> bool:
+    text = str(value or "").strip()
+    if not text or not re.search(r"[\u0c80-\u0cff]", text):
+        return False
+    # Provider output may preserve Latin names, but other writing systems are a
+    # strong signal that the requested Kannada rendering is corrupt.
+    return not re.search(
+        r"[\u0900-\u0c7f\u0d00-\u0dff\u1000-\u10ff\u1200-\u2dff\ua000-\uabff]",
+        text,
+    )
+
+
+def _validated_kannada_output(parsed: dict[str, Any]) -> tuple[list[dict[str, str]], str, bool]:
+    candidates = parsed.get("translations", [])
+    translations = [
+        {"source": str(item.get("source", "")).strip(),
+         "translation_kn": str(item.get("translation_kn", "")).strip()}
+        for item in candidates if isinstance(item, dict)
+        and str(item.get("source", "")).strip()
+        and _valid_kannada_text(item.get("translation_kn"))
+    ] if isinstance(candidates, list) else []
+    summary = str(parsed.get("summary_kn", "")).strip()
+    summary_valid = _valid_kannada_text(summary)
+    expected = sum(
+        1 for item in candidates if isinstance(item, dict)
+        and re.search(r"[A-Za-z]", str(item.get("source", "")))
+    ) if isinstance(candidates, list) else 0
+    translations_valid = expected == len(translations)
+    return translations, summary if summary_valid else "", summary_valid and translations_valid
+
+
+def _normalize_stage_three(value: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(value)
+    translations, summary, valid = _validated_kannada_output(normalized)
+    normalized.update(
+        translations=translations, summary_kn=summary, quality_validated=valid,
+    )
+    return normalized
 
 
 def _openai_reader(data: bytes, media_type: str, width: int, height: int) -> dict[str, Any]:
@@ -548,12 +629,13 @@ def _openai_reader(data: bytes, media_type: str, width: int, height: int) -> dic
     if len(model_lines) == len(lines):
         for line, text in zip(lines, model_lines):
             line["text"] = text
+    translations, summary_kn, quality_validated = _validated_kannada_output(parsed)
     return {"schema": "villagelens.reader.v1", "stage": 3, "reader": "vision_language",
             "model": OPENAI_MODEL, "latency_ms": round((time.monotonic()-started)*1000),
             "image_size": {"width": width, "height": height}, "words": words, "lines": lines,
             "text": "\n".join(line["text"] for line in lines),
-            "translations": parsed.get("translations", []),
-            "summary_kn": parsed.get("summary_kn", "")}
+            "translations": translations, "summary_kn": summary_kn,
+            "quality_validated": quality_validated}
 
 
 def _storage_bucket() -> Any:
@@ -588,6 +670,68 @@ def _store_reader_evidence(capture_id: str, stage: int, result: dict[str, Any]) 
         json.dumps(result, ensure_ascii=False, separators=(",", ":")),
         content_type="application/json; charset=utf-8",
     )
+
+
+def _stored_json(bucket: Any, name: str) -> dict[str, Any] | None:
+    blob = bucket.blob(name)
+    if not blob.exists():
+        return None
+    try:
+        value = json.loads(blob.download_as_text(encoding="utf-8"))
+        return value if isinstance(value, dict) else None
+    except (TypeError, ValueError, json.JSONDecodeError):
+        app.logger.warning("Ignoring invalid stored JSON at %s", name)
+        return None
+
+
+def _process_stored_capture(capture_id: str, tester_id: str) -> tuple[dict[int, dict[str, Any]], dict[int, str]]:
+    bucket = _storage_bucket()
+    if bucket is None:
+        raise FileNotFoundError
+    with _capture_processing_locks[capture_id]:
+        capture = _stored_json(bucket, f"captures/{capture_id}/result.json")
+        if capture is None or (tester_id and capture.get("tester_id") != tester_id):
+            raise FileNotFoundError
+
+        stages = {
+            stage: value for stage in (2, 3)
+            if (value := _stored_json(bucket, f"captures/{capture_id}/stage-{stage}.json")) is not None
+        }
+        if 3 in stages:
+            stages[3] = _normalize_stage_three(stages[3])
+        missing = [stage for stage in (2, 3) if stage not in stages]
+        errors: dict[int, str] = {}
+        if 3 in missing and not os.environ.get("OPENAI_API_KEY", "").strip():
+            missing.remove(3)
+            errors[3] = "OPENAI_READER_NOT_CONFIGURED"
+        if not missing:
+            return stages, errors
+
+        source = bucket.blob(f"captures/{capture_id}/source")
+        if not source.exists():
+            raise FileNotFoundError
+        image, _ = _normalized_image(source.download_as_bytes())
+        normalized = io.BytesIO()
+        image.save(normalized, format="PNG")
+        data = normalized.getvalue()
+
+        def run(stage: int) -> dict[str, Any]:
+            value = (_vision_reader(data, image.width, image.height) if stage == 2
+                     else _openai_reader(data, "image/png", image.width, image.height))
+            value["tester_id"] = tester_id or capture.get("tester_id") or "unassigned"
+            _store_reader_evidence(capture_id, stage, value)
+            return value
+
+        with ThreadPoolExecutor(max_workers=len(missing)) as executor:
+            futures = {executor.submit(run, stage): stage for stage in missing}
+            for future in as_completed(futures):
+                stage = futures[future]
+                try:
+                    stages[stage] = future.result()
+                except Exception as exc:
+                    app.logger.exception("Stored reader stage %s failed for capture %s", stage, capture_id)
+                    errors[stage] = str(exc) if isinstance(exc, RuntimeError) else f"STAGE_{stage}_UNAVAILABLE"
+        return stages, errors
 
 
 def _valid_capture_id(capture_id: str) -> bool:
@@ -710,8 +854,11 @@ def gallery() -> tuple[Response, int]:
                 for stage in (2, 3):
                     if evidence_blob := evidence.get((capture_id, stage)):
                         try:
-                            item[f"stage{stage}"] = json.loads(
+                            stage_value = json.loads(
                                 evidence_blob.download_as_text(encoding="utf-8")
+                            )
+                            item[f"stage{stage}"] = (
+                                _normalize_stage_three(stage_value) if stage == 3 else stage_value
                             )
                         except (TypeError, ValueError, json.JSONDecodeError):
                             app.logger.warning(
@@ -746,6 +893,28 @@ def captured_image(capture_id: str) -> Response | tuple[Response, int]:
     except Exception:
         app.logger.exception("Stored capture could not be read")
         return jsonify(error="CAPTURE_STORAGE_UNAVAILABLE"), 503
+
+
+@app.post("/api/captures/<capture_id>/process")
+def process_captured_image(capture_id: str) -> tuple[Response, int]:
+    if not _valid_capture_id(capture_id):
+        return jsonify(error="CAPTURE_NOT_FOUND"), 404
+    try:
+        stages, errors = _process_stored_capture(capture_id, _tester_id())
+        return jsonify(
+            schema="villagelens.processing.v1",
+            capture_id=capture_id,
+            stages={str(stage): value for stage, value in stages.items()},
+            errors={str(stage): error for stage, error in errors.items()},
+            complete=all(stage in stages for stage in (2, 3)),
+        ), 200
+    except FileNotFoundError:
+        return jsonify(error="CAPTURE_NOT_FOUND"), 404
+    except ValueError as exc:
+        return jsonify(error=str(exc)), 400
+    except Exception:
+        app.logger.exception("Stored capture processing failed for %s", capture_id)
+        return jsonify(error="CAPTURE_PROCESSING_UNAVAILABLE"), 503
 
 
 @app.post("/api/capture")

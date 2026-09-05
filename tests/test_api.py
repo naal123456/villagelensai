@@ -8,7 +8,10 @@ from unittest.mock import MagicMock, patch
 
 from PIL import Image
 
-from api.app import _access_token, _tester_link_token, app
+from api.app import (
+    _access_token, _filter_local_regions, _normalize_stage_three, _parse_tsv,
+    _process_stored_capture, _tester_link_token, app,
+)
 
 
 TSV = """level\tpage_num\tblock_num\tpar_num\tline_num\tword_num\tleft\ttop\twidth\theight\tconf\ttext
@@ -55,6 +58,8 @@ class ApiTests(unittest.TestCase):
         self.assertIn(b"fetch('/api/speech'", response.data)
         self.assertIn(b'function playKannada', response.data)
         self.assertIn(b'speechAudioCache', response.data)
+        self.assertIn(b'keepalive:true', response.data)
+        self.assertIn(b'/process`', response.data)
         self.assertNotIn(b'Speech Services', response.data)
         self.assertIn(b'function translatedWord', response.data)
         self.assertIn(b"?'saved':'local'", response.data)
@@ -322,6 +327,22 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 415)
         self.assertEqual(response.get_json()["error"], "CAPTURE_MEDIA_TYPE_UNSUPPORTED")
 
+    def test_tesseract_quote_does_not_swallow_following_rows(self) -> None:
+        quoted = TSV.replace("91.5\tಕನ್ನಡ", '91.5\t"').replace("88.0\ttext", "88.0\tnext")
+
+        words, lines = _parse_tsv(quoted)
+
+        self.assertEqual([word["text"] for word in words], ['"', "next"])
+        self.assertEqual(lines[0]["text"], '" next')
+
+    def test_low_confidence_isolated_kannada_noise_is_removed(self) -> None:
+        words, lines = _parse_tsv(TSV.replace("91.5\tಕನ್ನಡ", "30.0\tಕ"))
+
+        filtered_words, filtered_lines = _filter_local_regions(words, lines)
+
+        self.assertEqual([word["text"] for word in filtered_words], ["text"])
+        self.assertEqual(filtered_lines[0]["text"], "text")
+
     @patch("api.app._store_capture", return_value=False)
     @patch("api.app.subprocess.run")
     def test_capture_returns_stage_one_geometry_without_retention(
@@ -342,6 +363,7 @@ class ApiTests(unittest.TestCase):
         self.assertFalse(value["retained"])
         self.assertEqual(value["tester_id"], "a2")
         self.assertEqual(value["reader"]["input_size"], {"width": 320, "height": 120})
+        self.assertIn("eng+kan", run.call_args.args[0])
         self.assertEqual(response.headers["Cache-Control"], "no-store")
 
     @patch("api.app._store_capture", return_value=False)
@@ -415,12 +437,78 @@ class ApiTests(unittest.TestCase):
         value = response.get_json()
         self.assertEqual(response.status_code, 200)
         self.assertEqual(value["translations"][0]["translation_kn"], "ಪುಸ್ತಕ")
+        self.assertTrue(value["quality_validated"])
         self.assertEqual(value["tester_id"], "a1")
         request_payload = provider.call_args.kwargs["json"]
         prompt = request_payload["input"][0]["content"][0]["text"]
         self.assertIn("do not infer", prompt)
         self.assertIn("translations", request_payload["text"]["format"]["schema"]["required"])
         store.assert_called_once_with(capture_id, 3, value)
+
+    def test_mixed_script_kannada_output_is_not_marked_ready(self) -> None:
+        value = _normalize_stage_three({
+            "translations": [
+                {"source": "Supreme", "translation_kn": "ಸुप್ರೀಮ್"},
+                {"source": "book", "translation_kn": "ಪುಸ್ತಕ"},
+            ],
+            "summary_kn": "ಚಿತ್ರದಲ್ಲ ಕಾಣುತ್ತದೆ",
+        })
+
+        self.assertEqual(value["translations"], [
+            {"source": "book", "translation_kn": "ಪುಸ್ತಕ"},
+        ])
+        self.assertEqual(value["summary_kn"], "ಚಿತ್ರದಲ್ಲ ಕಾಣುತ್ತದೆ")
+        self.assertFalse(value["quality_validated"])
+
+    @patch("api.app._process_stored_capture")
+    def test_stored_capture_processing_contract(self, process: object) -> None:
+        capture_id = "c" * 32
+        process.return_value = ({2: {"stage": 2, "words": []}}, {3: "READER_FAILED"})
+
+        response = self.client.post(
+            f"/api/captures/{capture_id}/process",
+            headers={"X-VillageLens-Tester-ID": "A5"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["stages"]["2"]["stage"], 2)
+        self.assertEqual(response.get_json()["errors"]["3"], "READER_FAILED")
+        self.assertFalse(response.get_json()["complete"])
+        process.assert_called_once_with(capture_id, "a5")
+
+    @patch("api.app._openai_reader")
+    @patch("api.app._vision_reader")
+    @patch("api.app._storage_bucket")
+    def test_stored_processing_reuses_both_existing_stages(
+        self, storage_bucket: object, vision: object, openai: object,
+    ) -> None:
+        capture_id = "d" * 32
+        values = {
+            f"captures/{capture_id}/result.json": {
+                "capture_id": capture_id, "tester_id": "a5",
+            },
+            f"captures/{capture_id}/stage-2.json": {"stage": 2, "words": []},
+            f"captures/{capture_id}/stage-3.json": {
+                "stage": 3, "translations": [{"source": "book", "translation_kn": "ಪುಸ್ತಕ"}],
+                "summary_kn": "ಪುಸ್ತಕ",
+            },
+        }
+
+        def blob_for(name: str) -> MagicMock:
+            blob = MagicMock(name=name)
+            blob.exists.return_value = name in values
+            blob.download_as_text.return_value = json.dumps(values.get(name))
+            return blob
+
+        storage_bucket.return_value.blob.side_effect = blob_for
+
+        stages, errors = _process_stored_capture(capture_id, "a5")
+
+        self.assertEqual(set(stages), {2, 3})
+        self.assertTrue(stages[3]["quality_validated"])
+        self.assertEqual(errors, {})
+        vision.assert_not_called()
+        openai.assert_not_called()
 
     def test_unknown_reader_stage_is_rejected(self) -> None:
         response = self.client.post("/api/read/4", data=image_bytes(), content_type="image/jpeg")
