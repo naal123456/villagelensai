@@ -363,7 +363,9 @@
       if (!gallery.length) return;
       stop(); const navigation=++navigationGeneration;
       galleryIndex=(index+gallery.length)%gallery.length; const item=gallery[galleryIndex];
-      position.textContent=`${testerId?testerId.toUpperCase()+' · ':''}${item.label}  ${galleryIndex+1}/${gallery.length}`; status.textContent='ಚಿತ್ರವನ್ನು ಸಿದ್ಧಪಡಿಸುತ್ತಿದೆ…';
+      const owner=item.tester_id&&item.tester_id!=='unassigned'?item.tester_id.toUpperCase():'';
+      const ownerName=item.tester_name?` · ${item.tester_name}`:'';
+      position.textContent=`${owner}${ownerName}${owner?' · ':''}${item.label}  ${galleryIndex+1}/${gallery.length}`; status.textContent='ಚಿತ್ರವನ್ನು ಸಿದ್ಧಪಡಿಸುತ್ತಿದೆ…';
       current.textContent=''; overlay.textContent=''; stage.style.display='inline-block'; stage.classList.add('loading'); resetQuality();
       image.onload=()=>{ if (navigation===navigationGeneration) stage.classList.remove('loading'); };
       image.onerror=()=>{ if (navigation===navigationGeneration) status.textContent='ಚಿತ್ರವನ್ನು ತೆರೆಯಲು ಆಗಲಿಲ್ಲ.'; };
@@ -460,9 +462,11 @@
       if (!file) return; stop(); const navigation=++navigationGeneration; resetQuality(); status.textContent='ಚಿತ್ರವನ್ನು ಓದುತ್ತಿದೆ…';
       const captureId=newCaptureId();
       const objectUrl=URL.createObjectURL(file); image.src=objectUrl; stage.style.display='inline-block';
-      const item={id:captureId,label:'Captured page',kind:'capture',image_url:objectUrl,result:null,startedAt:Date.now()};
+      const item={id:captureId,label:'Captured page',kind:'capture',image_url:objectUrl,result:null,
+        tester_id:testerId,tester_name:testerId==='a3'?'Reviewer':'',startedAt:Date.now()};
       beginTimer(item,item.startedAt);
-      gallery.splice(Math.min(2,gallery.length),0,item); galleryIndex=gallery.indexOf(item); position.textContent=`${testerId?testerId.toUpperCase()+' · ':''}Captured page  ${galleryIndex+1}/${gallery.length}`;
+      gallery.splice(Math.min(2,gallery.length),0,item); galleryIndex=gallery.indexOf(item);
+      position.textContent=`${testerId?testerId.toUpperCase()+' · ':''}Captured page  ${galleryIndex+1}/${gallery.length}`;
       try {
         const response=await fetch('/api/capture',{method:'POST',headers:testerHeaders({'Content-Type':file.type||'image/jpeg','X-VillageLens-Capture-ID':captureId}),body:file});
         if (response.status===401) return location.href='/access'; const value=await response.json();

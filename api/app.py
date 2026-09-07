@@ -51,6 +51,13 @@ MODEL_SHA256 = {
     "eng": "7d4322bd2a7749724879683fc3912cb542f19906c83bcc1a52132556427170b2",
 }
 TESTER_ID_PATTERN = re.compile(r"a(?:10|[1-9])")
+REVIEWER_TESTER_IDS = {"a3"}
+TESTER_NAMES = {
+    "a1": "Eeregowda",
+    "a2": "Umesh",
+    "a3": "Reviewer",
+    "a4": "Selvan",
+}
 DEMO_ASSETS = {
     "i1.jpeg", "i1-scene.json", "i2.jpeg", "i2-scene.json", "i2-gold.json",
 }
@@ -159,6 +166,10 @@ def _allowed_origins() -> set[str]:
 def _tester_id() -> str:
     candidate = request.headers.get("X-VillageLens-Tester-ID", "").strip().lower()
     return candidate if TESTER_ID_PATTERN.fullmatch(candidate) else ""
+
+
+def _is_reviewer(tester_id: str) -> bool:
+    return tester_id in REVIEWER_TESTER_IDS
 
 
 @app.after_request
@@ -760,7 +771,9 @@ def _process_stored_capture(capture_id: str, tester_id: str) -> tuple[dict[int, 
         raise FileNotFoundError
     with _capture_processing_locks[capture_id]:
         capture = _stored_json(bucket, f"captures/{capture_id}/result.json")
-        if capture is None or (tester_id and capture.get("tester_id") != tester_id):
+        if capture is None or (
+            tester_id and not _is_reviewer(tester_id) and capture.get("tester_id") != tester_id
+        ):
             raise FileNotFoundError
 
         stages = {
@@ -789,7 +802,11 @@ def _process_stored_capture(capture_id: str, tester_id: str) -> tuple[dict[int, 
         def run(stage: int) -> dict[str, Any]:
             value = (_vision_reader(data, image.width, image.height) if stage == 2
                      else _openai_reader(data, "image/png", image.width, image.height))
-            value["tester_id"] = tester_id or capture.get("tester_id") or "unassigned"
+            owner_id = str(capture.get("tester_id", "")).strip().lower()
+            value["tester_id"] = (
+                owner_id if TESTER_ID_PATTERN.fullmatch(owner_id)
+                else tester_id or "unassigned"
+            )
             _store_reader_evidence(capture_id, stage, value)
             return value
 
@@ -912,8 +929,13 @@ def gallery() -> tuple[Response, int]:
                 capture_id = value.get("capture_id", "")
                 if not _valid_capture_id(capture_id):
                     continue
-                if requested_tester_id and value.get("tester_id") != requested_tester_id:
+                if (
+                    requested_tester_id
+                    and not _is_reviewer(requested_tester_id)
+                    and value.get("tester_id") != requested_tester_id
+                ):
                     continue
+                owner_id = str(value.get("tester_id", "")).strip().lower()
                 item = {
                     "id": capture_id,
                     "label": value.get("label") or "Captured page",
@@ -921,6 +943,8 @@ def gallery() -> tuple[Response, int]:
                     "captured_at": value.get("captured_at"),
                     "image_url": f"/api/captures/{capture_id}/image",
                     "result": value,
+                    "tester_id": owner_id or "unassigned",
+                    "tester_name": TESTER_NAMES.get(owner_id, ""),
                 }
                 for stage in (2, 3):
                     if evidence_blob := evidence.get((capture_id, stage)):
@@ -939,10 +963,13 @@ def gallery() -> tuple[Response, int]:
                             )
                 stored.append(item)
             stored.sort(key=lambda item: item.get("captured_at") or "", reverse=True)
-            items.extend(stored[:20])
+            items.extend(stored if _is_reviewer(requested_tester_id) else stored[:20])
     except Exception:
         app.logger.exception("Capture gallery is temporarily unavailable")
-    return jsonify(schema="villagelens.gallery.v1", items=items), 200
+    return jsonify(
+        schema="villagelens.gallery.v1", items=items,
+        review_mode=_is_reviewer(_tester_id()),
+    ), 200
 
 
 @app.get("/api/captures/<capture_id>/image")

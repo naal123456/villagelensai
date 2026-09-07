@@ -200,6 +200,13 @@ class ApiTests(unittest.TestCase):
             "/api/gallery", headers={"X-VillageLens-Tester-ID": "a2"},
         ).get_json()["items"]
         self.assertEqual(len(other_items), 2)
+        reviewer = self.client.get(
+            "/api/gallery", headers={"X-VillageLens-Tester-ID": "a3"},
+        ).get_json()
+        self.assertTrue(reviewer["review_mode"])
+        self.assertEqual(len(reviewer["items"]), 3)
+        self.assertEqual(reviewer["items"][2]["tester_id"], "a1")
+        self.assertEqual(reviewer["items"][2]["tester_name"], "Eeregowda")
 
     def test_health_reports_pinned_models(self) -> None:
         response = self.client.get("/health")
@@ -575,13 +582,16 @@ class ApiTests(unittest.TestCase):
 
         storage_bucket.return_value.blob.side_effect = blob_for
 
-        stages, errors = _process_stored_capture(capture_id, "a5")
+        stages, errors = _process_stored_capture(capture_id, "a3")
 
         self.assertEqual(set(stages), {2, 3})
         self.assertTrue(stages[3]["quality_validated"])
         self.assertEqual(errors, {})
         vision.assert_not_called()
         openai.assert_not_called()
+
+        with self.assertRaises(FileNotFoundError):
+            _process_stored_capture(capture_id, "a4")
 
     def test_unknown_reader_stage_is_rejected(self) -> None:
         response = self.client.post("/api/read/4", data=image_bytes(), content_type="image/jpeg")
