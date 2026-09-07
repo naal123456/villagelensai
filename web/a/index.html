@@ -4,6 +4,9 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
   <meta name="theme-color" content="#101418">
+  <link rel="manifest" href="/a/manifest.webmanifest">
+  <link rel="icon" href="/a/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/a/icon-192.png">
   <title>VillageLensAI</title>
   <style>
     :root { color-scheme: dark; font-family: system-ui, sans-serif; }
@@ -37,6 +40,7 @@
     #status, #current { min-height: 1.7em; line-height: 1.4; margin: 7px 0; }
     #current { font-size: clamp(1.3rem, 5vw, 2.35rem); }
     .note { color: #9fb3c8; font-size: .8rem; margin: 6px 0; }
+    #install { width: 100%; margin: 7px 0 0; background: #176c42; border-color: #55c98a; }
     @media (hover:hover) { button:hover::after { content: attr(data-tip); position: absolute; transform: translate(-75%, 40px);
       background: #000; padding: 5px 8px; border-radius: 6px; font-size: .75rem; white-space: nowrap; z-index: 10; } }
   </style>
@@ -61,6 +65,7 @@
         <span class="bar" id="quality-3"></span><span class="bar" id="quality-4"></span>
         <span id="quality-timer">—</span>
       </div>
+      <button id="install" hidden aria-label="Keep VillageLens on this phone">📲 ಫೋನ್‌ನಲ್ಲಿ ಇಡಿ</button>
     </section>
     <div class="gallery" aria-label="Saved pages">
       <button id="previous" aria-label="Previous page" data-tip="Previous page">‹</button>
@@ -86,6 +91,9 @@
     let playbackGeneration=0, speechGeneration=0, pointerStart=null, suppressTap=false;
     let audioContext=null, activeAudioSource=null;
     const speechAudioCache=new Map();
+    const meaningFields=['summary_kn','brief_spoken_kn','detailed_spoken_kn','scene_type','objects',
+      'what_is_it_kn','what_it_does_kn','important_points_kn','action_needed_kn','warning_kn','uncertainty_kn'];
+    const analysisVersion='context-v1';
     let speechVoices=[];
     const testerId=configureTesterId();
 
@@ -141,8 +149,9 @@
     function cacheKey(item,stageNumber) { return `villagelens.reader.v1:${item.id}:${stageNumber}`; }
     function failureKey(item,stageNumber) { return `villagelens.reader.failure.v1:${item.id}:${stageNumber}`; }
     function readCachedStage(item,stageNumber) {
-      if (item[`stage${stageNumber}`]) return item[`stage${stageNumber}`];
-      try { return JSON.parse(localStorage.getItem(cacheKey(item,stageNumber))||'null'); } catch (_) { return null; }
+      let value=item[`stage${stageNumber}`]||null;
+      try { value=value||JSON.parse(localStorage.getItem(cacheKey(item,stageNumber))||'null'); } catch (_) { value=null; }
+      return stageNumber===3&&value&&value.analysis_version!==analysisVersion?null:value;
     }
     function saveCachedStage(item,stageNumber,value) {
       item[`stage${stageNumber}`]=value;
@@ -158,21 +167,29 @@
     function saveFailure(item,stageNumber) {
       try { localStorage.setItem(failureKey(item,stageNumber),String(Date.now())); } catch (_) {}
     }
+    function copyMeaning(target,source) {
+      if (!target||!source) return;
+      for (const key of meaningFields) if (source[key]!==undefined) target[key]=source[key];
+      if (source.translations!==undefined) target.translations=source.translations;
+    }
     function applyReaderResult(item,stageNumber,value) {
       saveCachedStage(item,stageNumber,value);
       if (stageNumber===2&&item.id!=='demo-i2'&&(value.words||[]).length) {
-        item.result=value; if (item.summary_kn) item.result.summary_kn=item.summary_kn;
+        item.result=value; copyMeaning(item.result,item);
       }
       if (stageNumber===3) {
-        item.summary_kn=value.summary_kn||''; item.translations=value.translations||[];
-        if (item.result) { item.result.summary_kn=item.summary_kn; item.result.translations=item.translations; }
+        copyMeaning(item,value);
+        if (item.result) copyMeaning(item.result,item);
       }
       if (gallery[galleryIndex]===item) {
         const validated=stageNumber!==3||value.quality_validated===true;
         $('quality-'+stageNumber).classList.toggle('ready',validated);
         $('quality-'+stageNumber).classList.toggle('failed',!validated);
         if (stageNumber===2&&(value.words||[]).length&&item.id!=='demo-i2') render(item.result,false);
-        if (stageNumber===3&&validated&&value.summary_kn) status.textContent='ಓದುವಿಕೆ ಮತ್ತು ಅರ್ಥ ಸಿದ್ಧವಾಗಿದೆ.';
+        if (stageNumber===3&&validated&&value.summary_kn) {
+          const count=(value.objects||[]).length;
+          status.textContent=count?`ಓದುವಿಕೆ, ಅರ್ಥ ಮತ್ತು ${count} ವಸ್ತುಗಳು ಸಿದ್ಧವಾಗಿವೆ.`:'ಓದುವಿಕೆ ಮತ್ತು ಅರ್ಥ ಸಿದ್ಧವಾಗಿದೆ.';
+        }
       }
     }
     function normalizedSpeech(text) {
@@ -264,8 +281,9 @@
       document.querySelectorAll('.underline').forEach(node=>node.classList.toggle('active',node.dataset.id===id));
       current.textContent=text||'';
     }
-    function explainMeaning() {
-      stop(); const meaning=result&&result.summary_kn;
+    function explainMeaning(detailed=false) {
+      stop(); const meaning=result&&(detailed?result.detailed_spoken_kn:
+        (result.brief_spoken_kn||result.summary_kn));
       if (meaning) { current.textContent=meaning; status.textContent='ಪುಟದ ಅರ್ಥ'; speak(meaning); return; }
       current.textContent='Meaning is still being prepared.'; status.textContent='ಅರ್ಥ ಇನ್ನೂ ಸಿದ್ಧವಾಗಿಲ್ಲ.';
     }
@@ -280,7 +298,7 @@
       if (mode==='meaning') {
         const translation=translatedWord(word);
         if (translation) { stop(); activate(word.id,translation); status.textContent='ಪದದ ಕನ್ನಡ ಅರ್ಥ'; await speak(translation); return; }
-        return explainMeaning();
+        return explainMeaning(false);
       }
       const target=mode==='sentence' ? lineForWord(word) : word;
       if (!target) return; activate(target.id,target.text); await speak(target.text);
@@ -452,7 +470,7 @@
         item.id=value.capture_id; item.image_url=value.retained?value.image_url:objectUrl;
         item.retained=value.retained;
         if (!item.result||!item.stage2) item.result=value;
-        if (item.summary_kn) item.result.summary_kn=item.summary_kn;
+        copyMeaning(item.result,item);
         if (navigation===navigationGeneration&&gallery[galleryIndex]===item) {
           render(item.result);
           if (!value.retained) status.textContent+=' This test could not be saved.';
@@ -467,7 +485,7 @@
     $('mode-word').onclick=()=>setMode('word'); $('mode-sentence').onclick=()=>setMode('sentence');
     $('mode-meaning').onclick=()=>setMode('meaning'); $('camera').onclick=()=>input.click();
     $('play-words').onclick=()=>result&&play(result.words||[]); $('play-sentences').onclick=()=>result&&play(result.lines||[]);
-    $('play-meanings').onclick=explainMeaning; $('play-whole').onclick=explainMeaning; $('stop').onclick=stop;
+    $('play-meanings').onclick=()=>explainMeaning(false); $('play-whole').onclick=()=>explainMeaning(true); $('stop').onclick=stop;
     $('previous').onclick=()=>showGallery(galleryIndex-1); $('next').onclick=()=>showGallery(galleryIndex+1);
     input.onchange=()=>useCapture(input.files&&input.files[0]);
     document.addEventListener('pointerdown',()=>{ ensureAudioContext(); },{passive:true});
@@ -476,7 +494,39 @@
       if (!pointerStart) return; const dx=event.clientX-pointerStart.x,dy=event.clientY-pointerStart.y; pointerStart=null;
       if (Math.abs(dx)>45&&Math.abs(dx)>Math.abs(dy)) { suppressTap=true; showGallery(galleryIndex+(dx<0?1:-1)); setTimeout(()=>suppressTap=false,250); }
     });
-    loadGallery();
+    let installPrompt=null;
+    window.addEventListener('beforeinstallprompt',event=>{
+      event.preventDefault(); installPrompt=event; $('install').hidden=false;
+    });
+    $('install').onclick=async()=>{
+      if (!installPrompt) return;
+      $('install').hidden=true; await installPrompt.prompt(); installPrompt=null;
+    };
+    window.addEventListener('appinstalled',()=>{ $('install').hidden=true; installPrompt=null; });
+
+    async function loadSharedImage() {
+      if (new URLSearchParams(location.search).get('shared')!=='1') return false;
+      history.replaceState(null,'',testerId?`/a/?tester=${testerId}`:'/a/');
+      try {
+        if ('serviceWorker' in navigator) await navigator.serviceWorker.ready;
+        const response=await fetch('/a/shared-image',{cache:'no-store'});
+        if (!response.ok) throw new Error('SHARED_IMAGE_MISSING');
+        const blob=await response.blob();
+        await useCapture(new File([blob],'shared-image',{type:blob.type||'image/jpeg'}));
+        return true;
+      } catch (_) {
+        status.textContent='ಹಂಚಿದ ಚಿತ್ರವನ್ನು ತೆರೆಯಲು ಆಗಲಿಲ್ಲ. ಮತ್ತೆ ಹಂಚಿರಿ.';
+        return false;
+      }
+    }
+    async function startApp() {
+      if ('serviceWorker' in navigator) {
+        try { await navigator.serviceWorker.register('/a/sw.js',{scope:'/a/'}); } catch (_) {}
+      }
+      await loadGallery();
+      await loadSharedImage();
+    }
+    startApp();
   </script>
 </body>
 </html>

@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="VillageLens ಓದು">
+  <rect width="512" height="512" rx="112" fill="#101418"/>
+  <circle cx="256" cy="256" r="176" fill="#176c42" stroke="#9adfae" stroke-width="22"/>
+  <circle cx="256" cy="256" r="112" fill="#f5f7fa"/>
+  <text x="256" y="307" text-anchor="middle" font-family="Noto Sans Kannada, sans-serif" font-size="176" font-weight="700" fill="#101418">ಅ</text>
+  <circle cx="387" cy="125" r="36" fill="#e5bc27"/>
+</svg>

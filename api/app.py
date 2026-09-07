@@ -39,9 +39,11 @@ LOCAL_OCR_TIMEOUT_SECONDS = int(os.environ.get("VILLAGELENS_LOCAL_OCR_TIMEOUT_SE
 MAX_SPEECH_CHARACTERS = int(os.environ.get("VILLAGELENS_MAX_SPEECH_CHARACTERS", 500))
 ALLOWED_MEDIA_TYPES = {"image/jpeg", "image/png", "image/webp"}
 CAPTURE_BUCKET = os.environ.get("VILLAGELENS_CAPTURE_BUCKET", "")
-OPENAI_MODEL = os.environ.get("VILLAGELENS_OPENAI_MODEL", "gpt-5-mini")
+OPENAI_MODEL = os.environ.get("VILLAGELENS_OPENAI_MODEL", "gpt-5.6-sol")
+OPENAI_ANALYSIS_VERSION = "context-v1"
 KANNADA_TTS_VOICE = os.environ.get("VILLAGELENS_KANNADA_TTS_VOICE", "kn-IN-Standard-A")
 ACCESS_COOKIE_NAME = "villagelens_access_v2"
+TESTER_COOKIE_NAME = "villagelens_tester_v1"
 LEGACY_ACCESS_COOKIE_NAMES = ("villagelens_access",)
 ACCESS_COOKIE_TTL_SECONDS = 30 * 24 * 60 * 60
 MODEL_SHA256 = {
@@ -51,6 +53,9 @@ MODEL_SHA256 = {
 TESTER_ID_PATTERN = re.compile(r"a(?:10|[1-9])")
 DEMO_ASSETS = {
     "i1.jpeg", "i1-scene.json", "i2.jpeg", "i2-scene.json", "i2-gold.json",
+}
+APP_ASSETS = {
+    "manifest.webmanifest", "sw.js", "icon.svg", "icon-192.png", "icon-512.png",
 }
 
 Image.MAX_IMAGE_PIXELS = MAX_IMAGE_PIXELS
@@ -183,7 +188,7 @@ def root() -> Response:
     return redirect("/access" if _access_configured() else "/a/", code=302)
 
 
-def _with_access_cookie(response: Response) -> Response:
+def _with_access_cookie(response: Response, tester_id: str = "") -> Response:
     for legacy_name in LEGACY_ACCESS_COOKIE_NAMES:
         response.delete_cookie(
             legacy_name,
@@ -201,6 +206,16 @@ def _with_access_cookie(response: Response) -> Response:
         samesite="Lax",
         path="/",
     )
+    if TESTER_ID_PATTERN.fullmatch(tester_id):
+        response.set_cookie(
+            TESTER_COOKIE_NAME,
+            tester_id,
+            max_age=ACCESS_COOKIE_TTL_SECONDS,
+            secure=True,
+            httponly=True,
+            samesite="Lax",
+            path="/a/",
+        )
     return response
 
 
@@ -211,7 +226,7 @@ def access_link() -> Response | tuple[Response, int]:
     tester_id = _tester_from_link(request.form.get("token", "").strip())
     if not tester_id:
         return jsonify(error="ACCESS_LINK_INVALID"), 401
-    return _with_access_cookie(jsonify(destination=f"/a/?tester={tester_id}"))
+    return _with_access_cookie(jsonify(destination=f"/a/?tester={tester_id}"), tester_id)
 
 
 @app.route("/access", methods=["GET", "POST"])
@@ -227,7 +242,7 @@ def access() -> Response:
         expected = _access_code()
         if tester_id and submitted and hmac.compare_digest(submitted, expected):
             destination = f"/a/?tester={tester_id}"
-            return _with_access_cookie(make_response(redirect(destination, code=303)))
+            return _with_access_cookie(make_response(redirect(destination, code=303)), tester_id)
         message = (
             "ಬಳಕೆದಾರರನ್ನು ಆಯ್ಕೆಮಾಡಿ. Choose a user."
             if not tester_id else "ಕೋಡ್ ಸರಿಯಾಗಿಲ್ಲ. ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ."
@@ -277,8 +292,23 @@ required aria-label="Access code"><button type="submit">🔓</button></form>
 def tester_page() -> Response:
     tester_id = request.args.get("tester", "").strip().lower()
     if _access_configured() and not TESTER_ID_PATTERN.fullmatch(tester_id):
+        installed_tester = request.cookies.get(TESTER_COOKIE_NAME, "").strip().lower()
+        if TESTER_ID_PATTERN.fullmatch(installed_tester):
+            shared = "&shared=1" if request.args.get("shared") == "1" else ""
+            return redirect(f"/a/?tester={installed_tester}{shared}", code=302)
         return redirect("/access", code=302)
     return send_from_directory(WEB_ROOT / "a", "index.html")
+
+
+@app.get("/a/<path:filename>")
+def app_asset(filename: str) -> Response | tuple[Response, int]:
+    if filename not in APP_ASSETS:
+        return jsonify(error="APP_ASSET_NOT_FOUND"), 404
+    response = make_response(send_from_directory(WEB_ROOT / "a", filename))
+    if filename == "sw.js":
+        response.headers["Service-Worker-Allowed"] = "/a/"
+        response.headers["Cache-Control"] = "no-cache"
+    return response
 
 
 @app.get("/a/demo/<path:filename>")
@@ -551,7 +581,8 @@ def _valid_kannada_text(value: Any) -> bool:
     # Provider output may preserve Latin names, but other writing systems are a
     # strong signal that the requested Kannada rendering is corrupt.
     return not re.search(
-        r"[\u0900-\u0c7f\u0d00-\u0dff\u1000-\u10ff\u1200-\u2dff\ua000-\uabff]",
+        r"[\u0370-\u052f\u0590-\u0c7f\u0d00-\u0dff\u0e00-\u109f"
+        r"\u10a0-\u10ff\u1200-\u137f\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]",
         text,
     )
 
@@ -565,7 +596,7 @@ def _validated_kannada_output(parsed: dict[str, Any]) -> tuple[list[dict[str, st
         and str(item.get("source", "")).strip()
         and _valid_kannada_text(item.get("translation_kn"))
     ] if isinstance(candidates, list) else []
-    summary = str(parsed.get("summary_kn", "")).strip()
+    summary = str(parsed.get("brief_spoken_kn") or parsed.get("summary_kn", "")).strip()
     summary_valid = _valid_kannada_text(summary)
     expected = sum(
         1 for item in candidates if isinstance(item, dict)
@@ -578,10 +609,50 @@ def _validated_kannada_output(parsed: dict[str, Any]) -> tuple[list[dict[str, st
 def _normalize_stage_three(value: dict[str, Any]) -> dict[str, Any]:
     normalized = dict(value)
     translations, summary, valid = _validated_kannada_output(normalized)
+    context, context_valid = _validated_context(normalized)
+    has_context = any(key in normalized for key in ("brief_spoken_kn", "objects", "what_is_it_kn"))
     normalized.update(
-        translations=translations, summary_kn=summary, quality_validated=valid,
+        translations=translations, summary_kn=summary,
+        quality_validated=valid and (context_valid if has_context else True),
     )
+    if has_context:
+        normalized.update(context)
     return normalized
+
+
+def _current_stage_three(value: dict[str, Any] | None) -> bool:
+    return bool(value and value.get("analysis_version") == OPENAI_ANALYSIS_VERSION)
+
+
+def _validated_context(parsed: dict[str, Any]) -> tuple[dict[str, Any], bool]:
+    required_text = ("what_is_it_kn", "what_it_does_kn", "brief_spoken_kn", "detailed_spoken_kn")
+    context = {
+        "scene_type": str(parsed.get("scene_type", "unknown")).strip() or "unknown",
+        **{key: str(parsed.get(key, "")).strip() for key in required_text},
+        "action_needed_kn": str(parsed.get("action_needed_kn", "")).strip(),
+        "warning_kn": str(parsed.get("warning_kn", "")).strip(),
+        "uncertainty_kn": str(parsed.get("uncertainty_kn", "")).strip(),
+    }
+    points = parsed.get("important_points_kn", [])
+    context["important_points_kn"] = [
+        str(point).strip() for point in points if _valid_kannada_text(point)
+    ] if isinstance(points, list) else []
+    objects = parsed.get("objects", [])
+    context["objects"] = [
+        {
+            "name": str(item.get("name", "")).strip(),
+            "name_kn": str(item.get("name_kn", "")).strip(),
+            "purpose_kn": str(item.get("purpose_kn", "")).strip(),
+            "evidence": str(item.get("evidence", "")).strip(),
+            "uncertain": bool(item.get("uncertain", False)),
+        }
+        for item in objects
+        if isinstance(item, dict)
+        and _valid_kannada_text(item.get("name_kn"))
+        and _valid_kannada_text(item.get("purpose_kn"))
+    ] if isinstance(objects, list) else []
+    valid = all(_valid_kannada_text(context[key]) for key in required_text)
+    return context, valid
 
 
 def _openai_reader(data: bytes, media_type: str, width: int, height: int) -> dict[str, Any]:
@@ -589,53 +660,52 @@ def _openai_reader(data: bytes, media_type: str, width: int, height: int) -> dic
     if not api_key:
         raise RuntimeError("OPENAI_READER_NOT_CONFIGURED")
     started = time.monotonic()
+    object_schema = {"type": "object", "additionalProperties": False,
+                     "required": ["name", "name_kn", "purpose_kn", "evidence", "uncertain"],
+                     "properties": {"name": {"type": "string"}, "name_kn": {"type": "string"},
+                                    "purpose_kn": {"type": "string"}, "evidence": {"type": "string"},
+                                    "uncertain": {"type": "boolean"}}}
     schema = {"type": "object", "additionalProperties": False,
-              "required": ["words", "lines", "translations", "summary_kn"],
+              "required": ["translations", "scene_type", "objects",
+                           "what_is_it_kn", "what_it_does_kn", "important_points_kn",
+                           "action_needed_kn", "warning_kn", "uncertainty_kn",
+                           "brief_spoken_kn", "detailed_spoken_kn"],
               "properties": {
-                  "words": {"type": "array", "items": {"type": "object", "additionalProperties": False,
-                      "required": ["text", "box"], "properties": {"text": {"type": "string"},
-                      "box": {"type": "array", "items": {"type": "number"}, "minItems": 4, "maxItems": 4}}}},
-                  "lines": {"type": "array", "items": {"type": "string"}},
                   "translations": {"type": "array", "items": {"type": "object",
                       "additionalProperties": False, "required": ["source", "translation_kn"],
                       "properties": {"source": {"type": "string"},
                                      "translation_kn": {"type": "string"}}}},
-                  "summary_kn": {"type": "string"}}}
+                  "scene_type": {"type": "string"},
+                  "objects": {"type": "array", "items": object_schema},
+                  "what_is_it_kn": {"type": "string"},
+                  "what_it_does_kn": {"type": "string"},
+                  "important_points_kn": {"type": "array", "items": {"type": "string"}},
+                  "action_needed_kn": {"type": "string"},
+                  "warning_kn": {"type": "string"},
+                  "uncertainty_kn": {"type": "string"},
+                  "brief_spoken_kn": {"type": "string"},
+                  "detailed_spoken_kn": {"type": "string"}}}
     encoded = base64.b64encode(data).decode("ascii")
-    payload = {"model": OPENAI_MODEL, "store": False, "reasoning": {"effort": "low"},
+    payload = {"model": OPENAI_MODEL, "store": False, "reasoning": {"effort": "none"},
+               "max_output_tokens": 3000,
                "input": [{"role": "user", "content": [
-                   {"type": "input_text", "text": "Read every clearly visible Kannada or English word exactly. Return words in reading order. For each word, box is [left,top,width,height] normalized from 0 to 1000. Do not guess unclear text. For each distinct clearly visible English word, return its source spelling exactly and a simple Kannada translation. summary_kn must be a faithful Kannada rendering of the visible content: preserve names, numbers, prices, and existing Kannada; do not infer facts, intent, or context beyond the image; say when text is unclear rather than guessing."},
+                   {"type": "input_text", "text": """Help a low-literacy Kannada-speaking adult understand this image. Read the clearly visible Kannada and English text for comprehension, but do not return word boxes or line geometry; faster OCR readers provide all touch positions. Do not guess unclear text. Translate each distinct clearly visible English word into simple Kannada. Examine the whole image and identify the visible objects and likely document or scene type. Explain in short, natural spoken Kannada: what it is, what it does or is for, the few important details, any action needed, and any safety warning. brief_spoken_kn is the most useful one- or two-sentence answer; detailed_spoken_kn adds useful context without mechanically repeating OCR. For calendars, summarize month, year, highlighted date and notable events instead of reciting every date. For adapters, motors, switches, medicine, or electrical equipment, report only visible or strongly supported identity, purpose, and ratings; never advise wiring, energizing, repairing, or taking medicine. State uncertainty plainly and never invent hidden facts, intent, diagnosis, species, disease, or expertise. Preserve visible names, numbers, prices, dates, and units exactly."""},
                    {"type": "input_image", "image_url": f"data:{media_type};base64,{encoded}", "detail": "high"}]}],
-               "text": {"format": {"type": "json_schema", "name": "villagelens_reading", "strict": True, "schema": schema}}}
+               "text": {"verbosity": "low", "format": {"type": "json_schema", "name": "villagelens_reading", "strict": True, "schema": schema}}}
     response = requests.post("https://api.openai.com/v1/responses", json=payload,
                              headers={"Authorization": f"Bearer {api_key}"}, timeout=75)
     if response.status_code != 200:
         app.logger.warning("OpenAI reader failed with HTTP %s", response.status_code)
         raise RuntimeError("OPENAI_READER_FAILED")
     parsed = json.loads(_openai_output_text(response.json()))
-    words: list[dict[str, Any]] = []
-    for candidate in parsed.get("words", []):
-        box = candidate.get("box", [])
-        if len(box) != 4 or not str(candidate.get("text", "")).strip():
-            continue
-        x, y, w, h = [max(0.0, min(1000.0, float(value))) for value in box]
-        if w <= 0 or h <= 0 or x+w > 1020 or y+h > 1020:
-            continue
-        words.append({"id": f"openai-word-{len(words)+1:04d}", "text": candidate["text"].strip(),
-                      "box": {"x": round(x*width/1000), "y": round(y*height/1000),
-                              "width": round(w*width/1000), "height": round(h*height/1000)}})
-    lines = _geometry_lines(words, "openai")
-    model_lines = [str(text).strip() for text in parsed.get("lines", []) if str(text).strip()]
-    if len(model_lines) == len(lines):
-        for line, text in zip(lines, model_lines):
-            line["text"] = text
     translations, summary_kn, quality_validated = _validated_kannada_output(parsed)
+    context, context_validated = _validated_context(parsed)
     return {"schema": "villagelens.reader.v1", "stage": 3, "reader": "vision_language",
-            "model": OPENAI_MODEL, "latency_ms": round((time.monotonic()-started)*1000),
-            "image_size": {"width": width, "height": height}, "words": words, "lines": lines,
-            "text": "\n".join(line["text"] for line in lines),
-            "translations": translations, "summary_kn": summary_kn,
-            "quality_validated": quality_validated}
+            "model": OPENAI_MODEL, "analysis_version": OPENAI_ANALYSIS_VERSION,
+            "latency_ms": round((time.monotonic()-started)*1000),
+            "image_size": {"width": width, "height": height}, "words": [], "lines": [], "text": "",
+            "translations": translations, "summary_kn": summary_kn, **context,
+            "quality_validated": quality_validated and context_validated}
 
 
 def _storage_bucket() -> Any:
@@ -696,6 +766,7 @@ def _process_stored_capture(capture_id: str, tester_id: str) -> tuple[dict[int, 
         stages = {
             stage: value for stage in (2, 3)
             if (value := _stored_json(bucket, f"captures/{capture_id}/stage-{stage}.json")) is not None
+            and (stage != 3 or _current_stage_three(value))
         }
         if 3 in stages:
             stages[3] = _normalize_stage_three(stages[3])
@@ -857,9 +928,10 @@ def gallery() -> tuple[Response, int]:
                             stage_value = json.loads(
                                 evidence_blob.download_as_text(encoding="utf-8")
                             )
-                            item[f"stage{stage}"] = (
-                                _normalize_stage_three(stage_value) if stage == 3 else stage_value
-                            )
+                            if stage != 3 or _current_stage_three(stage_value):
+                                item[f"stage{stage}"] = (
+                                    _normalize_stage_three(stage_value) if stage == 3 else stage_value
+                                )
                         except (TypeError, ValueError, json.JSONDecodeError):
                             app.logger.warning(
                                 "Ignoring invalid stage %s evidence for capture %s",

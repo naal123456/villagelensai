@@ -62,12 +62,17 @@ class ApiTests(unittest.TestCase):
         self.assertIn(b'/process`', response.data)
         self.assertNotIn(b'Speech Services', response.data)
         self.assertIn(b'function translatedWord', response.data)
+        self.assertIn(b'function loadSharedImage', response.data)
+        self.assertIn(b"serviceWorker.register('/a/sw.js'", response.data)
+        self.assertIn(b'id="install"', response.data)
+        self.assertIn(b"result.detailed_spoken_kn", response.data)
+        self.assertIn(b"analysisVersion='context-v1'", response.data)
         self.assertIn(b"?'saved':'local'", response.data)
         stage_three = response.data.split(b"if (stageNumber===3)", 1)[1].split(
             b"if (gallery[galleryIndex]===item)", 1,
         )[0]
         self.assertNotIn(b"item.result=value", stage_three)
-        self.assertIn(b"item.result.translations=item.translations", stage_three)
+        self.assertIn(b"copyMeaning(item.result,item)", stage_three)
         capture_flow = response.data.split(b"async function useCapture", 1)[1].split(
             b"$('mode-word').onclick", 1,
         )[0]
@@ -78,6 +83,9 @@ class ApiTests(unittest.TestCase):
             b"await startCloudReaders(item,file)",
         ))
         self.assertIn(b"$('quality-1').classList.add('failed')", capture_flow)
+        self.assertNotIn(b"Math.min", response.data.split(b"function beginTimer", 1)[1].split(
+            b"function cacheKey", 1,
+        )[0])
         self.assertIn(b"Swipe the page", response.data)
         self.assertIn("ಅ ಆ ಇ".encode(), response.data)
 
@@ -97,6 +105,26 @@ class ApiTests(unittest.TestCase):
     def test_unknown_demo_asset_is_rejected(self) -> None:
         response = self.client.get("/a/demo/unknown.jpeg")
         self.assertEqual(response.status_code, 404)
+
+    def test_installable_app_assets_and_share_target_are_served(self) -> None:
+        manifest = self.client.get("/a/manifest.webmanifest")
+        worker = self.client.get("/a/sw.js")
+        icon = self.client.get("/a/icon-192.png")
+        self.addCleanup(manifest.close)
+        self.addCleanup(worker.close)
+        self.addCleanup(icon.close)
+
+        value = manifest.get_json()
+        self.assertEqual(manifest.status_code, 200)
+        self.assertEqual(value["start_url"], "/a/")
+        self.assertEqual(value["display"], "standalone")
+        self.assertEqual(value["share_target"]["action"], "/a/share-target")
+        self.assertEqual(value["share_target"]["params"]["files"][0]["name"], "image")
+        self.assertEqual(worker.status_code, 200)
+        self.assertEqual(worker.headers["Service-Worker-Allowed"], "/a/")
+        self.assertIn(b"event.request.formData()", worker.data)
+        self.assertEqual(icon.status_code, 200)
+        self.assertEqual(icon.content_type, "image/png")
 
     @patch("api.app._storage_bucket", return_value=None)
     @patch("api.app._synthesize_kannada", return_value=b"mp3-audio")
@@ -239,9 +267,14 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.get_json()["destination"], "/a/?tester=a4")
         cookies = response.headers.getlist("Set-Cookie")
         self.assertTrue(any(value.startswith("villagelens_access_v2=") for value in cookies))
+        self.assertTrue(any(value.startswith("villagelens_tester_v1=a4") for value in cookies))
         page = self.client.get("/a/?tester=a4", base_url="https://localhost")
         self.addCleanup(page.close)
         self.assertEqual(page.status_code, 200)
+
+        installed = self.client.get("/a/?shared=1", base_url="https://localhost")
+        self.assertEqual(installed.status_code, 302)
+        self.assertEqual(installed.headers["Location"], "/a/?tester=a4&shared=1")
 
     def test_invalid_tester_link_is_rejected(self) -> None:
         self.enable_access_gate()
@@ -411,7 +444,7 @@ class ApiTests(unittest.TestCase):
 
     @patch("api.app._store_reader_evidence")
     @patch("api.app.requests.post")
-    def test_stage_three_returns_word_translations_without_inference(
+    def test_stage_three_returns_translations_and_contextual_kannada(
         self, provider: object, store: object,
     ) -> None:
         provider.return_value.status_code = 200
@@ -420,7 +453,18 @@ class ApiTests(unittest.TestCase):
             "text": json.dumps({
                 "words": [], "lines": [],
                 "translations": [{"source": "book", "translation_kn": "ಪುಸ್ತಕ"}],
-                "summary_kn": "ಪುಸ್ತಕ",
+                "scene_type": "book",
+                "objects": [{"name": "book", "name_kn": "ಪುಸ್ತಕ",
+                             "purpose_kn": "ಓದಲು ಬಳಸುವ ಪುಸ್ತಕ", "evidence": "visible pages",
+                             "uncertain": False}],
+                "what_is_it_kn": "ಇದು ಒಂದು ಪುಸ್ತಕ.",
+                "what_it_does_kn": "ಇದನ್ನು ಓದಲು ಬಳಸುತ್ತಾರೆ.",
+                "important_points_kn": ["ಮುಖಪುಟದಲ್ಲಿ ಹೆಸರು ಇದೆ."],
+                "action_needed_kn": "",
+                "warning_kn": "",
+                "uncertainty_kn": "",
+                "brief_spoken_kn": "ಇದು ಓದಲು ಬಳಸುವ ಪುಸ್ತಕ.",
+                "detailed_spoken_kn": "ಇದು ಒಂದು ಪುಸ್ತಕ. ಮುಖಪುಟದಲ್ಲಿ ಹೆಸರು ಇದೆ.",
             }),
         }]}]}
         capture_id = "b" * 32
@@ -437,12 +481,22 @@ class ApiTests(unittest.TestCase):
         value = response.get_json()
         self.assertEqual(response.status_code, 200)
         self.assertEqual(value["translations"][0]["translation_kn"], "ಪುಸ್ತಕ")
+        self.assertEqual(value["objects"][0]["name_kn"], "ಪುಸ್ತಕ")
+        self.assertEqual(value["summary_kn"], value["brief_spoken_kn"])
         self.assertTrue(value["quality_validated"])
+        self.assertEqual(value["analysis_version"], "context-v1")
         self.assertEqual(value["tester_id"], "a1")
         request_payload = provider.call_args.kwargs["json"]
         prompt = request_payload["input"][0]["content"][0]["text"]
-        self.assertIn("do not infer", prompt)
+        self.assertIn("identify the visible objects", prompt)
+        self.assertIn("instead of reciting every date", prompt)
+        self.assertIn("never invent", prompt)
         self.assertIn("translations", request_payload["text"]["format"]["schema"]["required"])
+        self.assertIn("objects", request_payload["text"]["format"]["schema"]["required"])
+        self.assertIn("brief_spoken_kn", request_payload["text"]["format"]["schema"]["required"])
+        self.assertNotIn("words", request_payload["text"]["format"]["schema"]["properties"])
+        self.assertEqual(request_payload["reasoning"]["effort"], "none")
+        self.assertEqual(request_payload["text"]["verbosity"], "low")
         store.assert_called_once_with(capture_id, 3, value)
 
     def test_mixed_script_kannada_output_is_not_marked_ready(self) -> None:
@@ -459,6 +513,24 @@ class ApiTests(unittest.TestCase):
         ])
         self.assertEqual(value["summary_kn"], "ಚಿತ್ರದಲ್ಲ ಕಾಣುತ್ತದೆ")
         self.assertFalse(value["quality_validated"])
+
+    def test_kannada_context_allows_normal_unicode_punctuation(self) -> None:
+        value = _normalize_stage_three({
+            "analysis_version": "context-v1",
+            "translations": [],
+            "scene_type": "calendar",
+            "objects": [],
+            "what_is_it_kn": "ಇದು “ಸೆಪ್ಟೆಂಬರ್” ತಿಂಗಳ ಕ್ಯಾಲೆಂಡರ್.",
+            "what_it_does_kn": "ಇದು ದಿನಾಂಕಗಳನ್ನು ತೋರಿಸುತ್ತದೆ.",
+            "important_points_kn": ["ಮುಖ್ಯ ದಿನಾಂಕ—ಏಳು."],
+            "action_needed_kn": "",
+            "warning_kn": "",
+            "uncertainty_kn": "",
+            "brief_spoken_kn": "ಇದು ಸೆಪ್ಟೆಂಬರ್ ಕ್ಯಾಲೆಂಡರ್.",
+            "detailed_spoken_kn": "ಇದು “ಸೆಪ್ಟೆಂಬರ್” ತಿಂಗಳ ಕ್ಯಾಲೆಂಡರ್—ದಿನಾಂಕಗಳನ್ನು ತೋರಿಸುತ್ತದೆ.",
+        })
+
+        self.assertTrue(value["quality_validated"])
 
     @patch("api.app._process_stored_capture")
     def test_stored_capture_processing_contract(self, process: object) -> None:
@@ -489,7 +561,8 @@ class ApiTests(unittest.TestCase):
             },
             f"captures/{capture_id}/stage-2.json": {"stage": 2, "words": []},
             f"captures/{capture_id}/stage-3.json": {
-                "stage": 3, "translations": [{"source": "book", "translation_kn": "ಪುಸ್ತಕ"}],
+                "stage": 3, "analysis_version": "context-v1",
+                "translations": [{"source": "book", "translation_kn": "ಪುಸ್ತಕ"}],
                 "summary_kn": "ಪುಸ್ತಕ",
             },
         }
