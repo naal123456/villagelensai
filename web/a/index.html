@@ -29,6 +29,9 @@
     .gallery { display: grid; grid-template-columns: 42px 1fr 42px; align-items: center; gap: 4px; margin-top: 7px; }
     .gallery > button { min-height: 42px; padding: 0; }
     #position { color: #c7d1da; font-size: .9rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #owner-badge { display: inline-block; margin: 8px 0 1px; padding: 7px 14px; border-radius: 999px;
+      background: #f5f7fa; color: #101418; border: 3px solid #39ad68; font-size: 1.15rem; font-weight: 800; }
+    #owner-badge[hidden] { display: none; }
     .stage { position: relative; display: none; max-width: 100%; margin: 4px auto 0; background: #222; touch-action: pan-y; }
     .stage.loading #source-image { opacity: .28; }
     #source-image { display: block; max-width: 100%; max-height: 67vh; object-fit: contain; user-select: none; -webkit-user-drag: none; }
@@ -72,6 +75,7 @@
       <div id="position" aria-live="polite">Loading I2…</div>
       <button id="next" aria-label="Next page" data-tip="Next page">›</button>
     </div>
+    <div id="owner-badge" aria-live="polite" hidden></div>
     <input id="camera-input" type="file" accept="image/jpeg,image/png,image/webp" capture="environment" hidden>
     <p id="status" aria-live="polite">ಚಿತ್ರವನ್ನು ಸಿದ್ಧಪಡಿಸುತ್ತಿದೆ…</p>
     <div class="stage" id="stage">
@@ -86,6 +90,7 @@
     const $ = id => document.getElementById(id);
     const input=$('camera-input'), image=$('source-image'), overlay=$('overlay'), stage=$('stage');
     const status=$('status'), current=$('current'), position=$('position'), timer=$('quality-timer');
+    const ownerBadge=$('owner-badge');
     let gallery=[], galleryIndex=0, result=null, mode='word', timerId=0, started=0, timerOwner=null;
     let navigationGeneration=0;
     let playbackGeneration=0, speechGeneration=0, pointerStart=null, suppressTap=false;
@@ -365,7 +370,11 @@
       galleryIndex=(index+gallery.length)%gallery.length; const item=gallery[galleryIndex];
       const owner=item.tester_id&&item.tester_id!=='unassigned'?item.tester_id.toUpperCase():'';
       const ownerName=item.tester_name?` · ${item.tester_name}`:'';
-      position.textContent=`${owner}${ownerName}${owner?' · ':''}${item.label}  ${galleryIndex+1}/${gallery.length}`; status.textContent='ಚಿತ್ರವನ್ನು ಸಿದ್ಧಪಡಿಸುತ್ತಿದೆ…';
+      position.textContent=`${item.label}  ${galleryIndex+1}/${gallery.length}`;
+      ownerBadge.hidden=false;
+      ownerBadge.textContent=item.kind==='demo'?'DEMO IMAGE':
+        (owner?`${owner}${ownerName}`:'UNASSIGNED · OLDER CAPTURE');
+      status.textContent='ಚಿತ್ರವನ್ನು ಸಿದ್ಧಪಡಿಸುತ್ತಿದೆ…';
       current.textContent=''; overlay.textContent=''; stage.style.display='inline-block'; stage.classList.add('loading'); resetQuality();
       image.onload=()=>{ if (navigation===navigationGeneration) stage.classList.remove('loading'); };
       image.onerror=()=>{ if (navigation===navigationGeneration) status.textContent='ಚಿತ್ರವನ್ನು ತೆರೆಯಲು ಆಗಲಿಲ್ಲ.'; };
@@ -467,6 +476,7 @@
       beginTimer(item,item.startedAt);
       gallery.splice(Math.min(2,gallery.length),0,item); galleryIndex=gallery.indexOf(item);
       position.textContent=`${testerId?testerId.toUpperCase()+' · ':''}Captured page  ${galleryIndex+1}/${gallery.length}`;
+      ownerBadge.hidden=false; ownerBadge.textContent=testerId?testerId.toUpperCase():'UNASSIGNED';
       try {
         const response=await fetch('/api/capture',{method:'POST',headers:testerHeaders({'Content-Type':file.type||'image/jpeg','X-VillageLens-Capture-ID':captureId}),body:file});
         if (response.status===401) return location.href='/access'; const value=await response.json();
