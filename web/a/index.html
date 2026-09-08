@@ -66,16 +66,16 @@
       <nav class="toolbar" aria-label="Continuous reading">
         <button id="play-words" aria-label="Read words continuously" data-tip="Read words">▶ ಅ</button>
         <button id="play-sentences" aria-label="Read sentences continuously" data-tip="Read sentences"><small>▶ ಅ ಆ ಇ</small></button>
-        <button id="select-object" aria-label="Select an object for information" data-tip="Select object">◎ ವಸ್ತು</button>
-        <button id="infer-global" aria-label="Explain the whole image" data-tip="Explain image">💡 ಚಿತ್ರ</button>
+        <button id="select-object" aria-label="Select an object for information" data-tip="Select object"><small>◎ Object<br>ವಸ್ತು</small></button>
+        <button id="infer-global" aria-label="Explain the whole image" data-tip="Explain image"><small>💡 Explain<br>ಅರ್ಥ</small></button>
       </nav>
       <div class="quality" aria-label="Reading confidence">
         <span class="bar" id="quality-1"></span><span class="bar" id="quality-2"></span>
         <span class="bar" id="quality-3"></span>
         <span id="quality-timer">—</span>
       </div>
-      <button id="ask" aria-label="Ask a spoken question about this image">🎤 ಚಿತ್ರದ ಬಗ್ಗೆ ಕೇಳಿ</button>
-      <button id="install" aria-label="Keep VillageLens on this phone">📲 ಫೋನ್‌ನಲ್ಲಿ ಐಕಾನ್ ಇಡಿ</button>
+      <button id="ask" aria-label="Ask a spoken question about this image">🎤 Ask / ಕೇಳಿ</button>
+      <button id="install" aria-label="Keep VillageLens on this phone">📲 Install / ಐಕಾನ್</button>
     </section>
     <div class="gallery" aria-label="Saved pages">
       <button id="previous" aria-label="Previous page" data-tip="Previous page">‹</button>
@@ -100,9 +100,12 @@
     const ownerBadge=$('owner-badge');
     let gallery=[], galleryIndex=0, result=null, mode='word', timerId=0, started=0, timerOwner=null;
     let navigationGeneration=0;
-    let playbackGeneration=0, speechGeneration=0, pointerStart=null, suppressTap=false;
+    let playbackGeneration=0, speechGeneration=0, pointerStart=null, suppressTap=false, activeControl='mode-word';
     let audioContext=null, activeAudioSource=null;
     const speechAudioCache=new Map();
+    const translationCache=new Map();
+    const controlIds=['mode-word','mode-sentence','mode-translate','camera','play-words','play-sentences',
+      'select-object','infer-global','ask','install'];
     const meaningFields=['summary_kn','brief_spoken_kn','detailed_spoken_kn','scene_type','objects',
       'what_is_it_kn','what_it_does_kn','important_points_kn','action_needed_kn','warning_kn','uncertainty_kn',
       'transcription_kn','spoken_sections','confidence','needs_independent_review'];
@@ -145,20 +148,31 @@
     }
     function working(id,on) { const node=$(id); node.classList.toggle('working',on); node.setAttribute('aria-busy',String(on)); }
 
-    function setMode(next) {
-      mode=next;
-      ['word','sentence','translate'].forEach(name => $('mode-'+name).classList.toggle('active', name===mode));
-      $('select-object').classList.toggle('active',mode==='object');
+    function clearControls() {
+      for (const id of controlIds) { $(id).classList.remove('active','working'); $(id).setAttribute('aria-busy','false'); }
+      activeControl='';
+    }
+    function setMode(next,id) {
+      stop(); mode=next; activeControl=id; $(id).classList.add('active');
       renderContextRegions();
     }
-    function stop() {
+    function startAction(id) {
+      if (activeControl===id) { stop(); return false; }
+      stop(); mode='none'; activeControl=id; $(id).classList.add('active'); working(id,true); return true;
+    }
+    function finishAction(id) {
+      if (activeControl!==id) return;
+      $(id).classList.remove('active'); working(id,false); activeControl='';
+    }
+    function stop(keepControl=false) {
       playbackGeneration++; speechGeneration++;
       if ('speechSynthesis' in window) speechSynthesis.cancel();
       if (activeAudioSource) { try { activeAudioSource.stop(); } catch (_) {} activeAudioSource=null; }
       stage.classList.remove('playing');
       document.querySelectorAll('.underline,.object-region').forEach(node => node.classList.remove('active'));
       overlay.querySelectorAll('.focus-region').forEach(node=>node.remove());
-      ['play-words','play-sentences','infer-global','ask'].forEach(id=>working(id,false));
+      if (!keepControl) { clearControls(); mode='none'; }
+      else for (const id of ['play-words','play-sentences','infer-global','ask']) if (id!==activeControl) working(id,false);
     }
     function resetQuality() {
       for (let n=1;n<=3;n++) $('quality-'+n).classList.remove('ready','failed');
@@ -208,6 +222,7 @@
       if (stageNumber===3) {
         copyMeaning(item,value);
         if (item.result) copyMeaning(item.result,item);
+        if (gallery[galleryIndex]===item&&result) copyMeaning(result,item);
       }
       if (gallery[galleryIndex]===item) {
         const validated=true;
@@ -328,36 +343,90 @@
       if (target&&target.box) addFocus(target.box);
       current.textContent=text||'';
     }
+    function hasContext() {
+      return Boolean(result&&(result.brief_spoken_kn||result.detailed_spoken_kn||
+        (result.objects||[]).length||(result.translations||[]).length));
+    }
+    async function ensureContext() {
+      if (hasContext()) return true;
+      const item=gallery[galleryIndex];
+      if (!item) return false;
+      try { localStorage.removeItem(failureKey(item,3)); } catch (_) {}
+      status.textContent='ಮೂರನೇ ಹಂತದ ಅರ್ಥವನ್ನು ಸಿದ್ಧಪಡಿಸುತ್ತಿದೆ… · Preparing meaning…';
+      if (item.kind==='demo') {
+        beginTimer(item);
+        try {
+          const response=await fetch(item.image_url); if (!response.ok) return false;
+          const blob=await response.blob(); const outcome=await callReader(3,blob,'',item);
+          return outcome.ok&&hasContext();
+        } finally { endTimer(item); }
+      }
+      if (item.kind!=='capture'||!/^[0-9a-f]{32}$/.test(item.id)||
+          !(item.retained||item.result&&item.result.retained)) return false;
+      await startCloudReaders(item); return hasContext();
+    }
     async function explainGlobal() {
-      stop(); working('infer-global',true); $('infer-global').classList.add('active'); const began=Date.now();
+      if (!startAction('infer-global')) return;
+      const generation=playbackGeneration, began=Date.now();
       try {
+        await ensureContext();
+        if (generation!==playbackGeneration||activeControl!=='infer-global') return;
         const sections=result&&(result.spoken_sections||[]);
         const fallback=result&&(result.detailed_spoken_kn||result.brief_spoken_kn||result.summary_kn);
         if (sections.length) {
           status.textContent='ಚಿತ್ರದ ಅರ್ಥ';
           for (const section of sections) { activate(section,section.text_kn); if (!await speak(section.text_kn)) break; }
         } else if (fallback) { current.textContent=fallback; status.textContent='ಚಿತ್ರದ ಅರ್ಥ'; await speak(fallback); }
-        else { current.textContent='Inference is still being prepared.'; status.textContent='ಅರ್ಥ ಇನ್ನೂ ಸಿದ್ಧವಾಗಿಲ್ಲ.'; }
+        else {
+          current.textContent='Meaning unavailable · ಅರ್ಥ ಲಭ್ಯವಿಲ್ಲ';
+          status.textContent='ಮೂರನೇ ಹಂತ ಸಿಗಲಿಲ್ಲ. ಮತ್ತೆ ಚಿತ್ರ ತೆಗೆಯಿರಿ. · Stage 3 failed; retake the photo.';
+          await speak('ಅರ್ಥ ಸಿಗಲಿಲ್ಲ. ಮತ್ತೆ ಚಿತ್ರ ತೆಗೆಯಿರಿ.');
+        }
         track('infer',Boolean(fallback||sections.length),Date.now()-began);
-      } finally { working('infer-global',false); $('infer-global').classList.remove('active'); }
+      } finally { finishAction('infer-global'); }
     }
     function translatedWord(word) {
       if (!word||!/[A-Za-z]/.test(word.text||'')) return '';
       const normalized=String(word.text).toLocaleLowerCase('en-IN').replace(/[^a-z0-9]+/g,'');
-      const match=(result&&result.translations||[]).find(candidate=>
-        String(candidate.source||'').toLocaleLowerCase('en-IN').replace(/[^a-z0-9]+/g,'')===normalized);
+      const match=(result&&result.translations||[]).find(candidate=>{
+        const source=String(candidate.source||'').toLocaleLowerCase('en-IN');
+        return source.replace(/[^a-z0-9]+/g,'')===normalized||source.split(/[^a-z0-9]+/).includes(normalized);
+      });
       return match&&match.translation_kn||'';
+    }
+    async function translateOnDemand(text) {
+      const key=String(text||'').toLocaleLowerCase('en-IN').replace(/[^a-z0-9]+/g,'');
+      if (!key) return '';
+      if (translationCache.has(key)) return translationCache.get(key);
+      try {
+        const saved=localStorage.getItem(`villagelens.translation.v1:${key}`)||'';
+        if (saved) { translationCache.set(key,saved); return saved; }
+      } catch (_) {}
+      try {
+        const response=await fetch('/api/translate',{method:'POST',headers:testerHeaders({'Content-Type':'application/json'}),
+          body:JSON.stringify({text:String(text).slice(0,80)})});
+        const value=await response.json(); if (!response.ok) throw new Error(value.error||'TRANSLATION_FAILED');
+        translationCache.set(key,value.translation_kn);
+        try { localStorage.setItem(`villagelens.translation.v1:${key}`,value.translation_kn); } catch (_) {}
+        return value.translation_kn;
+      } catch (_) { return ''; }
     }
     async function selectWord(word) {
       if (mode==='object') return;
+      if (mode==='none') return;
       if (mode==='translate') {
         if (/[ಀ-೿]/.test(word.text||'')) {
-          stop(); activate(word,word.text); status.textContent='ಕನ್ನಡ ಪದ'; track('translate'); await speak(word.text); return;
+          stop(true); activate(word,word.text); status.textContent='ಕನ್ನಡ ಪದ · Kannada word'; track('translate'); await speak(word.text); return;
         }
-        const translation=translatedWord(word);
-        stop(); activate(word,translation||word.text);
+        stop(true); working('mode-translate',true); activate(word,word.text);
+        status.textContent='ಕನ್ನಡ ಅರ್ಥ ಸಿದ್ಧಪಡಿಸುತ್ತಿದೆ… · Translating…';
+        let translation=translatedWord(word);
+        if (!translation) translation=await translateOnDemand(word.text);
+        working('mode-translate',false);
+        if (mode!=='translate') return;
+        activate(word,translation||word.text);
         if (translation) { status.textContent='ಇಂಗ್ಲಿಷ್ ಪದದ ಕನ್ನಡ ಅರ್ಥ'; track('translate'); await speak(translation); return; }
-        status.textContent='ಈ ಪದದ ಕನ್ನಡ ಅರ್ಥ ಇನ್ನೂ ಸಿದ್ಧವಾಗಿಲ್ಲ.'; track('translate',false); return;
+        status.textContent='ಕನ್ನಡ ಅರ್ಥ ಸಿಗಲಿಲ್ಲ. · Translation unavailable.'; track('translate',false); return;
       }
       const semanticGroup=groupedWords(result.words||[]).find(item=>item.ids&&item.ids.includes(word.id));
       const target=mode==='sentence' ? lineForWord(word) : (semanticGroup||word);
@@ -373,10 +442,22 @@
       return [object.name_kn,object.purpose_kn].filter(Boolean).join('. ');
     }
     async function selectObject(object) {
-      stop(); setMode('object');
+      stop(true);
       document.querySelectorAll('.object-region').forEach(node=>node.classList.toggle('active',node.dataset.id===object.id));
       addFocus(object.box); const text=objectText(object); current.textContent=text;
       status.textContent='ಆಯ್ಕೆಯಾದ ವಸ್ತುವಿನ ಮಾಹಿತಿ'; track('object',Boolean(text)); if (text) await speak(text);
+    }
+    async function chooseObjectMode() {
+      if (activeControl==='select-object') { stop(); return; }
+      setMode('object','select-object');
+      working('select-object',true);
+      await ensureContext();
+      if (mode!=='object'||activeControl!=='select-object') return;
+      working('select-object',false);
+      renderObjects(); const count=(result&&result.objects||[]).filter(object=>object.box).length;
+      const message=count?'ನೀಲಿ ಚೌಕಟ್ಟಿನ ವಸ್ತುವನ್ನು ಸ್ಪರ್ಶಿಸಿ.':'ವಸ್ತುಗಳ ಮಾಹಿತಿ ಸಿಗಲಿಲ್ಲ.';
+      status.textContent=count?`${message} · Tap a blue object box.`:`${message} · No object regions available.`;
+      await speak(message);
     }
     function renderObjects() {
       overlay.querySelectorAll('.object-region').forEach(node=>node.remove());
@@ -525,7 +606,8 @@
       return {x,y,width:right-x,height:bottom-y};
     }
     async function play(items,buttonId,eventName) {
-      stop(); const generation=playbackGeneration; stage.classList.add('playing'); working(buttonId,true); const began=Date.now();
+      if (!startAction(buttonId)) return;
+      const generation=playbackGeneration; stage.classList.add('playing'); const began=Date.now();
       const queue=eventName==='word'?groupedWords(items):items;
       let ok=true;
       for (const item of queue) {
@@ -533,7 +615,7 @@
         activate(item,item.text);
         if (!await speak(item.text) || generation!==playbackGeneration) { ok=false; break; }
       }
-      working(buttonId,false); track(eventName,ok,Date.now()-began);
+      finishAction(buttonId); track(eventName,ok,Date.now()-began);
       if (generation===playbackGeneration) { stage.classList.remove('playing'); document.querySelectorAll('.underline').forEach(n=>n.classList.remove('active')); }
     }
     function newCaptureId() {
@@ -629,13 +711,16 @@
       finally { input.value=''; if (image.src!==objectUrl) URL.revokeObjectURL(objectUrl); }
     }
     async function askImageQuestion() {
+      if (activeControl==='ask') { stop(); return; }
+      stop();
       const Recognition=window.SpeechRecognition||window.webkitSpeechRecognition;
       if (!Recognition) { status.textContent='ಈ ಫೋನ್‌ನಲ್ಲಿ ಮಾತಿನ ಪ್ರಶ್ನೆ ಲಭ್ಯವಿಲ್ಲ.'; track('question',false); return; }
       const item=gallery[galleryIndex];
       if (!item||!item.retained||!/^[0-9a-f]{32}$/.test(item.id)) {
         status.textContent='ಉಳಿಸಿದ ಚಿತ್ರಕ್ಕೆ ಮಾತ್ರ ಪ್ರಶ್ನೆ ಕೇಳಬಹುದು.'; track('question',false); return;
       }
-      stop(); working('ask',true); $('ask').classList.add('active'); status.textContent='ನಿಮ್ಮ ಪ್ರಶ್ನೆಯನ್ನು ಕೇಳುತ್ತಿದ್ದೇನೆ…'; const began=Date.now();
+      if (!startAction('ask')) return;
+      status.textContent='ನಿಮ್ಮ ಪ್ರಶ್ನೆಯನ್ನು ಕೇಳುತ್ತಿದ್ದೇನೆ… · Listening…'; const began=Date.now();
       try {
         const question=await new Promise((resolve,reject)=>{
           const recognition=new Recognition(); recognition.lang='kn-IN'; recognition.interimResults=false; recognition.maxAlternatives=1;
@@ -648,13 +733,13 @@
         if (answer.evidence&&answer.evidence[0]) addFocus(answer.evidence[0].box);
         current.textContent=answer.answer_kn; status.textContent='ಚಿತ್ರದ ಪ್ರಶ್ನೆಗೆ ಉತ್ತರ'; await speak(answer.answer_kn); track('question',true,Date.now()-began);
       } catch (_) { status.textContent='ಪ್ರಶ್ನೆಯನ್ನು ಕೇಳಲಾಗಲಿಲ್ಲ. ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.'; track('question',false,Date.now()-began); }
-      finally { working('ask',false); $('ask').classList.remove('active'); }
+      finally { finishAction('ask'); }
     }
-    $('mode-word').onclick=()=>setMode('word'); $('mode-sentence').onclick=()=>setMode('sentence');
-    $('mode-translate').onclick=()=>setMode('translate'); $('camera').onclick=()=>input.click();
+    $('mode-word').onclick=()=>setMode('word','mode-word'); $('mode-sentence').onclick=()=>setMode('sentence','mode-sentence');
+    $('mode-translate').onclick=()=>setMode('translate','mode-translate'); $('camera').onclick=()=>{ stop(); activeControl='camera'; $('camera').classList.add('active'); input.click(); };
     $('play-words').onclick=()=>result&&play(result.words||[],'play-words','word');
     $('play-sentences').onclick=()=>result&&play(effectiveLines(),'play-sentences','line');
-    $('select-object').onclick=()=>setMode('object'); $('infer-global').onclick=explainGlobal; $('ask').onclick=askImageQuestion; $('stop').onclick=stop;
+    $('select-object').onclick=chooseObjectMode; $('infer-global').onclick=explainGlobal; $('ask').onclick=askImageQuestion; $('stop').onclick=()=>stop();
     $('previous').onclick=()=>showGallery(galleryIndex-1); $('next').onclick=()=>showGallery(galleryIndex+1);
     input.onchange=()=>useCapture(input.files&&input.files[0]);
     document.addEventListener('pointerdown',()=>{ ensureAudioContext(); },{passive:true});
@@ -670,9 +755,11 @@
       event.preventDefault(); installPrompt=event;
     });
     $('install').onclick=async()=>{
-      if (installPrompt) { await installPrompt.prompt(); installPrompt=null; return; }
+      stop(); activeControl='install'; $('install').classList.add('active'); working('install',true);
+      if (installPrompt) { await installPrompt.prompt(); installPrompt=null; finishAction('install'); return; }
       const ios=/iPad|iPhone|iPod/.test(navigator.userAgent);
       status.textContent=ios?'ಸಫಾರಿಯ Share ⬆️ ಒತ್ತಿ, Add to Home Screen ಆಯ್ಕೆ ಮಾಡಿ.':'Chrome ಮೆನು ⋮ ಒತ್ತಿ, Add to Home screen ಆಯ್ಕೆ ಮಾಡಿ.';
+      finishAction('install');
     };
     window.addEventListener('appinstalled',()=>{ $('install').hidden=true; installPrompt=null; });
 

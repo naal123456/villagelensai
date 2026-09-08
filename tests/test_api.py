@@ -10,7 +10,8 @@ from PIL import Image
 
 from api.app import (
     _access_token, _filter_local_regions, _normalize_stage_three,
-    _openai_question, _parse_tsv, _process_stored_capture, _tester_link_token, app,
+    _openai_question, _openai_translate, _parse_tsv, _process_stored_capture,
+    _tester_link_token, app,
 )
 
 
@@ -72,6 +73,15 @@ class ApiTests(unittest.TestCase):
         self.assertIn(b'function loadSharedImage', response.data)
         self.assertIn(b"serviceWorker.register('/a/sw.js'", response.data)
         self.assertIn(b'id="install"', response.data)
+        self.assertIn(b'Ask /', response.data)
+        self.assertIn(b'Install /', response.data)
+        self.assertIn(b'function clearControls', response.data)
+        self.assertIn(b'function startAction', response.data)
+        self.assertIn(b'function ensureContext', response.data)
+        self.assertIn(b'function chooseObjectMode', response.data)
+        self.assertIn(b"fetch('/api/translate'", response.data)
+        self.assertIn(b'villagelens.translation.v1:', response.data)
+        self.assertIn(b"if (activeControl===id) { stop(); return false; }", response.data)
         self.assertIn(b"result.detailed_spoken_kn", response.data)
         self.assertIn(b"analysisVersion='context-v2'", response.data)
         self.assertIn(b"function groupedWords", response.data)
@@ -185,6 +195,37 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(latin.get_json()["error"], "SPEECH_LANGUAGE_UNSUPPORTED")
         self.assertEqual(empty.get_json()["error"], "SPEECH_TEXT_REQUIRED")
         self.assertEqual(long_text.get_json()["error"], "SPEECH_TEXT_TOO_LONG")
+
+    @patch("api.app.requests.post")
+    def test_openai_translation_uses_fast_structured_response(self, provider: object) -> None:
+        provider.return_value.status_code = 200
+        provider.return_value.json.return_value = {"output": [{"content": [{
+            "type": "output_text", "text": json.dumps({"translation_kn": "ಸ್ಟಾರ್ಟರ್"}),
+        }]}]}
+
+        with patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"}):
+            value = _openai_translate("starter")
+
+        self.assertEqual(value["translation_kn"], "ಸ್ಟಾರ್ಟರ್")
+        request_payload = provider.call_args.kwargs["json"]
+        self.assertEqual(request_payload["model"], "gpt-5-mini")
+        self.assertFalse(request_payload["store"])
+        self.assertEqual(request_payload["reasoning"]["effort"], "minimal")
+        self.assertNotIn("input_image", str(request_payload))
+
+    @patch("api.app._openai_translate", return_value={
+        "translation_kn": "ವಿದ್ಯುತ್ ಸ್ವಿಚ್", "model": "gpt-5-mini",
+    })
+    def test_translation_endpoint_contract(self, translate: object) -> None:
+        response = self.client.post("/api/translate", json={"text": " power   switch "})
+        no_english = self.client.post("/api/translate", json={"text": "ಕನ್ನಡ"})
+        too_long = self.client.post("/api/translate", json={"text": "a" * 81})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["translation_kn"], "ವಿದ್ಯುತ್ ಸ್ವಿಚ್")
+        translate.assert_called_once_with("power switch")
+        self.assertEqual(no_english.get_json()["error"], "TRANSLATION_LANGUAGE_UNSUPPORTED")
+        self.assertEqual(too_long.get_json()["error"], "TRANSLATION_TEXT_TOO_LONG")
 
     def test_gallery_starts_with_i2_then_i1(self) -> None:
         response = self.client.get("/api/gallery")

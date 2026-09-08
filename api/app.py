@@ -40,6 +40,7 @@ MAX_SPEECH_CHARACTERS = int(os.environ.get("VILLAGELENS_MAX_SPEECH_CHARACTERS", 
 ALLOWED_MEDIA_TYPES = {"image/jpeg", "image/png", "image/webp"}
 CAPTURE_BUCKET = os.environ.get("VILLAGELENS_CAPTURE_BUCKET", "")
 OPENAI_MODEL = os.environ.get("VILLAGELENS_OPENAI_MODEL", "gpt-5.6-sol")
+OPENAI_TRANSLATION_MODEL = os.environ.get("VILLAGELENS_TRANSLATION_MODEL", "gpt-5-mini")
 OPENAI_ANALYSIS_VERSION = "context-v2"
 KANNADA_TTS_VOICE = os.environ.get("VILLAGELENS_KANNADA_TTS_VOICE", "kn-IN-Standard-A")
 ACCESS_COOKIE_NAME = "villagelens_access_v2"
@@ -854,6 +855,45 @@ def _openai_question(
     return result
 
 
+def _openai_translate(text: str) -> dict[str, str]:
+    api_key = os.environ.get("OPENAI_API_KEY", "").strip()
+    if not api_key:
+        raise RuntimeError("OPENAI_READER_NOT_CONFIGURED")
+    schema = {
+        "type": "object", "additionalProperties": False,
+        "required": ["translation_kn"],
+        "properties": {"translation_kn": {"type": "string"}},
+    }
+    payload = {
+        "model": OPENAI_TRANSLATION_MODEL, "store": False,
+        "reasoning": {"effort": "minimal"}, "max_output_tokens": 160,
+        "input": [{"role": "user", "content": [{
+            "type": "input_text", "text": (
+                "Translate the English word or short visible label below into simple, natural Kannada "
+                "for a low-literacy adult. Preserve numbers and joined units such as 110V, 50Hz, and "
+                "2.0 HP, and explain the unit briefly in Kannada. Return only the requested structured "
+                "field.\n\nVisible text:\n" + text
+            ),
+        }]}],
+        "text": {"verbosity": "low", "format": {
+            "type": "json_schema", "name": "villagelens_translation",
+            "strict": True, "schema": schema,
+        }},
+    }
+    response = requests.post(
+        "https://api.openai.com/v1/responses", json=payload,
+        headers={"Authorization": f"Bearer {api_key}"}, timeout=30,
+    )
+    if response.status_code != 200:
+        app.logger.warning("OpenAI translation failed with HTTP %s", response.status_code)
+        raise RuntimeError("OPENAI_TRANSLATION_FAILED")
+    parsed = json.loads(_openai_output_text(response.json()))
+    translation = str(parsed.get("translation_kn", "")).strip()
+    if not _valid_kannada_text(translation):
+        raise RuntimeError("OPENAI_TRANSLATION_INVALID_RESPONSE")
+    return {"translation_kn": translation, "model": OPENAI_TRANSLATION_MODEL}
+
+
 def _storage_bucket() -> Any:
     if not CAPTURE_BUCKET:
         return None
@@ -984,6 +1024,23 @@ def _synthesize_kannada(text: str) -> bytes:
         timeout=20,
     )
     return bytes(response.audio_content)
+
+
+@app.post("/api/translate")
+def translate() -> Response | tuple[Response, int]:
+    payload = request.get_json(silent=True)
+    text = re.sub(r"\s+", " ", str(payload.get("text", ""))).strip() if isinstance(payload, dict) else ""
+    if not text:
+        return jsonify(error="TRANSLATION_TEXT_REQUIRED"), 400
+    if len(text) > 80:
+        return jsonify(error="TRANSLATION_TEXT_TOO_LONG"), 400
+    if not re.search(r"[A-Za-z]", text):
+        return jsonify(error="TRANSLATION_LANGUAGE_UNSUPPORTED"), 400
+    try:
+        return jsonify(_openai_translate(text)), 200
+    except RuntimeError as exc:
+        app.logger.exception("English-to-Kannada translation failed")
+        return jsonify(error=str(exc)), 503
 
 
 @app.post("/api/speech")
