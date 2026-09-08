@@ -17,7 +17,9 @@
     .toolbar { display: grid; grid-template-columns: repeat(4, 1fr); gap: 7px; margin-bottom: 7px; }
     button { min-height: 48px; border: 2px solid #52606d; border-radius: 12px; background: #26323b;
       color: white; font-size: 1.3rem; touch-action: manipulation; }
-    button.active { border-color: #62d7ff; background: #174b5f; }
+    button.active { border-color: #fff36a; background: #5b4c08; box-shadow: 0 0 0 3px #fff36a, 0 0 15px #fff36a; }
+    button.working { border-color: #62d7ff; background: #174b5f; animation: working 1s infinite alternate; }
+    @keyframes working { to { box-shadow: 0 0 15px #62d7ff; } }
     button:focus-visible { outline: 4px solid #65d6ff; outline-offset: 2px; }
     .quality { display: grid; grid-template-columns: repeat(4, 1fr) auto; gap: 6px; align-items: center; }
     .bar { height: 14px; border: 1px solid #64717d; border-radius: 5px; background: #46515b; }
@@ -39,11 +41,16 @@
     .hit { fill: transparent; stroke: none; }
     .underline { stroke: #43caff; stroke-width: 2; vector-effect: non-scaling-stroke; pointer-events: none; }
     .underline.active { stroke: #fff36a; stroke-width: 6; }
+    .focus-region { fill: rgba(255,243,106,.22); stroke: #fff36a; stroke-width: 6; vector-effect: non-scaling-stroke; pointer-events: none; }
+    .object-region { fill: rgba(98,215,255,.12); stroke: #62d7ff; stroke-width: 4; vector-effect: non-scaling-stroke; cursor: pointer; }
+    .object-region.active { fill: rgba(255,243,106,.28); stroke: #fff36a; stroke-width: 7; }
+    .transcription-region { fill: rgba(184,140,255,.12); stroke: #b88cff; stroke-width: 4; vector-effect: non-scaling-stroke; cursor: pointer; }
     .playing .underline:not(.active) { opacity: 0; }
     #status, #current { min-height: 1.7em; line-height: 1.4; margin: 7px 0; }
     #current { font-size: clamp(1.3rem, 5vw, 2.35rem); }
     .note { color: #9fb3c8; font-size: .8rem; margin: 6px 0; }
-    #install { width: 100%; margin: 7px 0 0; background: #176c42; border-color: #55c98a; }
+    #install, #ask { width: 100%; margin: 7px 0 0; background: #176c42; border-color: #55c98a; }
+    #install[hidden] { display: none; }
     @media (hover:hover) { button:hover::after { content: attr(data-tip); position: absolute; transform: translate(-75%, 40px);
       background: #000; padding: 5px 8px; border-radius: 6px; font-size: .75rem; white-space: nowrap; z-index: 10; } }
   </style>
@@ -54,21 +61,22 @@
       <nav class="toolbar" aria-label="Touch reading">
         <button id="mode-word" class="active" aria-label="Touch a word" data-tip="Touch a word">ಅ</button>
         <button id="mode-sentence" aria-label="Touch a sentence" data-tip="Touch a sentence"><small>ಅ ಆ ಇ</small></button>
-        <button id="mode-meaning" aria-label="Touch for meaning" data-tip="Meaning">💡</button>
+        <button id="mode-translate" aria-label="Translate English word to Kannada" data-tip="English to Kannada"><small>EN→ಕ</small></button>
         <button id="camera" aria-label="Take a picture" data-tip="Take a picture">📷</button>
       </nav>
       <nav class="toolbar" aria-label="Continuous reading">
         <button id="play-words" aria-label="Read words continuously" data-tip="Read words">▶ ಅ</button>
         <button id="play-sentences" aria-label="Read sentences continuously" data-tip="Read sentences"><small>▶ ಅ ಆ ಇ</small></button>
-        <button id="play-meanings" aria-label="Explain sentences continuously" data-tip="Explain sentences">▶️ 💡</button>
-        <button id="play-whole" aria-label="Explain the whole page" data-tip="Explain whole page">📖 💡</button>
+        <button id="select-object" aria-label="Select an object for information" data-tip="Select object">◎ ವಸ್ತು</button>
+        <button id="infer-global" aria-label="Explain the whole image" data-tip="Explain image">💡 ಚಿತ್ರ</button>
       </nav>
       <div class="quality" aria-label="Reading confidence">
         <span class="bar" id="quality-1"></span><span class="bar" id="quality-2"></span>
         <span class="bar" id="quality-3"></span><span class="bar" id="quality-4"></span>
         <span id="quality-timer">—</span>
       </div>
-      <button id="install" hidden aria-label="Keep VillageLens on this phone">📲 ಫೋನ್‌ನಲ್ಲಿ ಇಡಿ</button>
+      <button id="ask" aria-label="Ask a spoken question about this image">🎤 ಚಿತ್ರದ ಬಗ್ಗೆ ಕೇಳಿ</button>
+      <button id="install" aria-label="Keep VillageLens on this phone">📲 ಫೋನ್‌ನಲ್ಲಿ ಐಕಾನ್ ಇಡಿ</button>
     </section>
     <div class="gallery" aria-label="Saved pages">
       <button id="previous" aria-label="Previous page" data-tip="Previous page">‹</button>
@@ -97,8 +105,9 @@
     let audioContext=null, activeAudioSource=null;
     const speechAudioCache=new Map();
     const meaningFields=['summary_kn','brief_spoken_kn','detailed_spoken_kn','scene_type','objects',
-      'what_is_it_kn','what_it_does_kn','important_points_kn','action_needed_kn','warning_kn','uncertainty_kn'];
-    const analysisVersion='context-v1';
+      'what_is_it_kn','what_it_does_kn','important_points_kn','action_needed_kn','warning_kn','uncertainty_kn',
+      'transcription_kn','spoken_sections','confidence','needs_independent_review'];
+    const analysisVersion='context-v2', validatorVersion='consensus-v1';
     let speechVoices=[];
     const testerId=configureTesterId();
 
@@ -127,16 +136,30 @@
       return testerId ? {...headers,'X-VillageLens-Tester-ID':testerId} : headers;
     }
 
+    function captureId() {
+      const item=gallery[galleryIndex];
+      return item&&/^[0-9a-f]{32}$/.test(item.id)?item.id:'';
+    }
+    function track(name,ok=true,elapsedMs=0) {
+      fetch('/api/events',{method:'POST',headers:testerHeaders({'Content-Type':'application/json'}),
+        body:JSON.stringify({events:[{name,capture_id:captureId(),ok,elapsed_ms:elapsedMs}]})}).catch(()=>{});
+    }
+    function working(id,on) { const node=$(id); node.classList.toggle('working',on); node.setAttribute('aria-busy',String(on)); }
+
     function setMode(next) {
       mode=next;
-      ['word','sentence','meaning'].forEach(name => $('mode-'+name).classList.toggle('active', name===mode));
+      ['word','sentence','translate'].forEach(name => $('mode-'+name).classList.toggle('active', name===mode));
+      $('select-object').classList.toggle('active',mode==='object');
+      renderContextRegions();
     }
     function stop() {
       playbackGeneration++; speechGeneration++;
       if ('speechSynthesis' in window) speechSynthesis.cancel();
       if (activeAudioSource) { try { activeAudioSource.stop(); } catch (_) {} activeAudioSource=null; }
       stage.classList.remove('playing');
-      document.querySelectorAll('.underline').forEach(node => node.classList.remove('active'));
+      document.querySelectorAll('.underline,.object-region').forEach(node => node.classList.remove('active'));
+      overlay.querySelectorAll('.focus-region').forEach(node=>node.remove());
+      ['play-words','play-sentences','infer-global','ask'].forEach(id=>working(id,false));
     }
     function resetQuality() {
       for (let n=1;n<=4;n++) $('quality-'+n).classList.remove('ready','failed');
@@ -156,7 +179,9 @@
     function readCachedStage(item,stageNumber) {
       let value=item[`stage${stageNumber}`]||null;
       try { value=value||JSON.parse(localStorage.getItem(cacheKey(item,stageNumber))||'null'); } catch (_) { value=null; }
-      return stageNumber===3&&value&&value.analysis_version!==analysisVersion?null:value;
+      if (stageNumber===3&&value&&value.analysis_version!==analysisVersion) return null;
+      if (stageNumber===4&&value&&value.analysis_version!==validatorVersion) return null;
+      return value;
     }
     function saveCachedStage(item,stageNumber,value) {
       item[`stage${stageNumber}`]=value;
@@ -176,6 +201,7 @@
       if (!target||!source) return;
       for (const key of meaningFields) if (source[key]!==undefined) target[key]=source[key];
       if (source.translations!==undefined) target.translations=source.translations;
+      if (source.stage4!==undefined) target.stage4=source.stage4;
     }
     function applyReaderResult(item,stageNumber,value) {
       saveCachedStage(item,stageNumber,value);
@@ -186,20 +212,29 @@
         copyMeaning(item,value);
         if (item.result) copyMeaning(item.result,item);
       }
+      if (stageNumber===4) {
+        item.stage4=value;
+        if (item.result) item.result.stage4=value;
+      }
       if (gallery[galleryIndex]===item) {
-        const validated=stageNumber!==3||value.quality_validated===true;
+        const validated=stageNumber!==4||value.quality_validated===true;
         $('quality-'+stageNumber).classList.toggle('ready',validated);
         $('quality-'+stageNumber).classList.toggle('failed',!validated);
         if (stageNumber===2&&(value.words||[]).length&&item.id!=='demo-i2') render(item.result,false);
-        if (stageNumber===3&&validated&&value.summary_kn) {
+        if (stageNumber===2) track('stage_2',Boolean((value.words||[]).length),value.latency_ms||0);
+        if (stageNumber===3&&value.summary_kn) {
           const count=(value.objects||[]).length;
           status.textContent=count?`ಓದುವಿಕೆ, ಅರ್ಥ ಮತ್ತು ${count} ವಸ್ತುಗಳು ಸಿದ್ಧವಾಗಿವೆ.`:'ಓದುವಿಕೆ ಮತ್ತು ಅರ್ಥ ಸಿದ್ಧವಾಗಿದೆ.';
+          renderContextRegions(); track('stage_3',value.quality_validated===true,value.latency_ms||0);
         }
+        if (stageNumber===4) track('stage_4',validated,value.latency_ms||0);
       }
     }
     function normalizedSpeech(text) {
       return String(text||'').replace(/\bSmt\.?\s*/gi,'Shrimati ').replace(/\bSri\.?\s*/gi,'Shri ')
         .replace(/\bProf\.?\s*/gi,'Professor ').replace(/\bDr\.?\s*/gi,'Doctor ')
+        .replace(/(\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)\s*V\b/gi,'$1 ವೋಲ್ಟ್ ಅಥವಾ $2 ವೋಲ್ಟ್')
+        .replace(/(\d+(?:\.\d+)?)\s*(kW|HP|Hz|V|A|W|kg|ml|°C)\b/gi,(_,n,u)=>`${n} ${{kw:'ಕಿಲೋವ್ಯಾಟ್',hp:'ಹಾರ್ಸ್ ಪವರ್',hz:'ಹರ್ಟ್ಸ್',v:'ವೋಲ್ಟ್',a:'ಆಂಪಿಯರ್',w:'ವ್ಯಾಟ್',kg:'ಕಿಲೋಗ್ರಾಂ',ml:'ಮಿಲಿಲಿಟರ್','°c':'ಡಿಗ್ರಿ ಸೆಲ್ಸಿಯಸ್'}[u.toLowerCase()]||u}`)
         .replace(/ಪ್ರೊ\.?/g,'ಪ್ರೊಫೆಸರ್ ').replace(/ಡಾ\.?/g,'ಡಾಕ್ಟರ್ ');
     }
     function speechSegments(text) {
@@ -251,7 +286,7 @@
         });
       } catch (_) { if (generation===speechGeneration) showKannadaVoiceError(); return false; }
     }
-    async function speak(text) {
+    async function speakRaw(text) {
       stopSpeechOnly();
       if (!text) return false;
       const generation=speechGeneration;
@@ -276,21 +311,46 @@
       }
       return true;
     }
+    async function speak(text) {
+      const began=Date.now(); const ok=await speakRaw(text);
+      track(ok?'audio_ok':'audio_failed',ok,Date.now()-began); return ok;
+    }
     function stopSpeechOnly() {
       speechGeneration++;
       if ('speechSynthesis' in window) speechSynthesis.cancel();
       if (activeAudioSource) { try { activeAudioSource.stop(); } catch (_) {} activeAudioSource=null; }
     }
     function lineForWord(word) { return (result.lines||[]).find(line=>line.id===word.line_id); }
-    function activate(id,text) {
-      document.querySelectorAll('.underline').forEach(node=>node.classList.toggle('active',node.dataset.id===id));
+    function addFocus(box,className='focus-region',id='') {
+      overlay.querySelectorAll('.focus-region').forEach(node=>node.remove());
+      if (!box) return;
+      const focus=document.createElementNS('http://www.w3.org/2000/svg','rect');
+      for (const key of ['x','y','width','height']) focus.setAttribute(key,Math.max(0,Number(box[key])||0));
+      focus.setAttribute('rx','8'); focus.setAttribute('class',className); if (id) focus.dataset.id=id;
+      overlay.appendChild(focus);
+    }
+    function activate(target,text) {
+      const ids=new Set(Array.isArray(target)?target:(target&&target.ids&&target.ids.length?target.ids:
+        (target&&target.word_ids&&target.word_ids.length?target.word_ids:[target&&target.id||target])));
+      document.querySelectorAll('.underline').forEach(node=>node.classList.toggle('active',ids.has(node.dataset.id)));
+      if (target&&target.box) addFocus(target.box);
       current.textContent=text||'';
     }
-    function explainMeaning(detailed=false) {
-      stop(); const meaning=result&&(detailed?result.detailed_spoken_kn:
-        (result.brief_spoken_kn||result.summary_kn));
-      if (meaning) { current.textContent=meaning; status.textContent='ಪುಟದ ಅರ್ಥ'; speak(meaning); return; }
-      current.textContent='Meaning is still being prepared.'; status.textContent='ಅರ್ಥ ಇನ್ನೂ ಸಿದ್ಧವಾಗಿಲ್ಲ.';
+    async function explainGlobal() {
+      stop(); working('infer-global',true); $('infer-global').classList.add('active'); const began=Date.now();
+      try {
+        const validator=result&&result.stage4;
+        const validated=validator&&validator.quality_validated===true;
+        const sections=result&&(result.spoken_sections||[]);
+        const fallback=validated?(validator.validated_detailed_kn||validator.validated_brief_kn):
+          result&&(result.detailed_spoken_kn||result.brief_spoken_kn||result.summary_kn);
+        if (sections.length) {
+          status.textContent=validated?'ದ್ವಿತೀಯ ಪರಿಶೀಲನೆಯ ಚಿತ್ರದ ಅರ್ಥ':'ಚಿತ್ರದ ಅರ್ಥ';
+          for (const section of sections) { activate(section,section.text_kn); if (!await speak(section.text_kn)) break; }
+        } else if (fallback) { current.textContent=fallback; status.textContent='ಚಿತ್ರದ ಅರ್ಥ'; await speak(fallback); }
+        else { current.textContent='Inference is still being prepared.'; status.textContent='ಅರ್ಥ ಇನ್ನೂ ಸಿದ್ಧವಾಗಿಲ್ಲ.'; }
+        track('infer',Boolean(fallback||sections.length),Date.now()-began);
+      } finally { working('infer-global',false); $('infer-global').classList.remove('active'); }
     }
     function translatedWord(word) {
       if (!word||!/[A-Za-z]/.test(word.text||'')) return '';
@@ -300,13 +360,18 @@
       return match&&match.translation_kn||'';
     }
     async function selectWord(word) {
-      if (mode==='meaning') {
+      if (mode==='object') return;
+      if (mode==='translate') {
+        if (/[ಀ-೿]/.test(word.text||'')) {
+          stop(); activate(word,word.text); status.textContent='ಕನ್ನಡ ಪದ'; track('translate'); await speak(word.text); return;
+        }
         const translation=translatedWord(word);
-        if (translation) { stop(); activate(word.id,translation); status.textContent='ಪದದ ಕನ್ನಡ ಅರ್ಥ'; await speak(translation); return; }
-        return explainMeaning(false);
+        stop(); activate(word,translation||word.text);
+        if (translation) { status.textContent='ಇಂಗ್ಲಿಷ್ ಪದದ ಕನ್ನಡ ಅರ್ಥ'; track('translate'); await speak(translation); return; }
+        status.textContent='ಈ ಪದದ ಕನ್ನಡ ಅರ್ಥ ಇನ್ನೂ ಸಿದ್ಧವಾಗಿಲ್ಲ.'; track('translate',false); return;
       }
       const target=mode==='sentence' ? lineForWord(word) : word;
-      if (!target) return; activate(target.id,target.text); await speak(target.text);
+      if (!target) return; activate(target,target.text); track(mode==='sentence'?'line':'word'); await speak(target.text);
     }
     function addUnderline(target,box) {
       const line=document.createElementNS('http://www.w3.org/2000/svg','line');
@@ -314,6 +379,47 @@
       line.setAttribute('x1',box.x); line.setAttribute('x2',box.x+box.width); line.setAttribute('y1',y); line.setAttribute('y2',y);
       line.setAttribute('class','underline'); line.dataset.id=target.id; overlay.appendChild(line);
     }
+    function objectText(object) {
+      return [object.name_kn,object.purpose_kn].filter(Boolean).join('. ');
+    }
+    async function selectObject(object) {
+      stop(); setMode('object');
+      document.querySelectorAll('.object-region').forEach(node=>node.classList.toggle('active',node.dataset.id===object.id));
+      addFocus(object.box); const text=objectText(object); current.textContent=text;
+      status.textContent='ಆಯ್ಕೆಯಾದ ವಸ್ತುವಿನ ಮಾಹಿತಿ'; track('object',Boolean(text)); if (text) await speak(text);
+    }
+    function renderObjects() {
+      overlay.querySelectorAll('.object-region').forEach(node=>node.remove());
+      if (mode!=='object'||!result) return;
+      const objects=(result.objects||[]).filter(object=>object.box&&object.box.width>0&&object.box.height>0);
+      for (const [index,object] of objects.entries()) {
+        object.id=object.id||`object-${index}`;
+        const hit=document.createElementNS('http://www.w3.org/2000/svg','rect');
+        for (const key of ['x','y','width','height']) hit.setAttribute(key,object.box[key]);
+        hit.setAttribute('rx','8'); hit.setAttribute('class','object-region'); hit.dataset.id=object.id;
+        hit.addEventListener('click',event=>{ event.stopPropagation(); if (!suppressTap) selectObject(object); }); overlay.appendChild(hit);
+      }
+      status.textContent=objects.length?'ಮಾಹಿತಿಗಾಗಿ ನೀಲಿ ಚೌಕಟ್ಟಿನ ವಸ್ತುವನ್ನು ಸ್ಪರ್ಶಿಸಿ.':'ವಸ್ತುಗಳ ಮಾಹಿತಿ ಇನ್ನೂ ಸಿದ್ಧವಾಗಿಲ್ಲ.';
+    }
+    function transcriptionLines() {
+      return (result&&result.transcription_kn||[]).filter(line=>line.box&&line.text_kn).map((line,index)=>({
+        id:`transcription-${index}`,text:line.text_kn,box:line.box,word_ids:[],uncertain:line.uncertain,
+      }));
+    }
+    function effectiveLines() { const handwritten=transcriptionLines(); return handwritten.length?handwritten:(result&&result.lines||[]); }
+    function renderTranscriptions() {
+      overlay.querySelectorAll('.transcription-region').forEach(node=>node.remove());
+      if (mode!=='sentence') return;
+      for (const line of transcriptionLines()) {
+        const hit=document.createElementNS('http://www.w3.org/2000/svg','rect');
+        for (const key of ['x','y','width','height']) hit.setAttribute(key,line.box[key]);
+        hit.setAttribute('rx','6'); hit.setAttribute('class','transcription-region');
+        hit.addEventListener('click',event=>{ event.stopPropagation(); activate(line,line.text); track('line'); speak(line.text); });
+        overlay.appendChild(hit);
+      }
+      if (transcriptionLines().length) status.textContent='ಕೈಬರಹದ ಸಾಲನ್ನು ಸ್ಪರ್ಶಿಸಿ.';
+    }
+    function renderContextRegions() { renderObjects(); renderTranscriptions(); }
     function render(value,markStageOne=true) {
       result=value; overlay.textContent=''; current.textContent='';
       overlay.setAttribute('viewBox',`0 0 ${value.image_size.width} ${value.image_size.height}`);
@@ -324,7 +430,8 @@
         hit.addEventListener('click',()=>{ if (!suppressTap) selectWord(word); }); overlay.appendChild(hit);
         addUnderline(word,word.box);
       }
-      if (markStageOne) $('quality-1').classList.add('ready');
+      renderContextRegions();
+      if (markStageOne) { $('quality-1').classList.add('ready'); track('stage_1'); }
       status.textContent=(value.words||[]).length?'ಪದ ಅಥವಾ ಸಾಲನ್ನು ಸ್ಪರ್ಶಿಸಿ.':'ಪಠ್ಯ ಸಿಗಲಿಲ್ಲ. ಮತ್ತೊಂದು ಚಿತ್ರ ಪ್ರಯತ್ನಿಸಿ.';
     }
     function sceneToResult(scene) {
@@ -382,12 +489,12 @@
       try {
         const loaded=await loadItem(item); if (navigation!==navigationGeneration) return;
         render(loaded);
-        for (const stageNumber of [2,3]) {
+        for (const stageNumber of [2,3,4]) {
           const cached=readCachedStage(item,stageNumber);
           if (cached) applyReaderResult(item,stageNumber,cached);
         }
-        timer.textContent=[2,3].some(stageNumber=>readCachedStage(item,stageNumber))?'saved':'local';
-        if (item.kind==='capture'&&[2,3].some(stageNumber=>!readCachedStage(item,stageNumber))) {
+        timer.textContent=[2,3,4].some(stageNumber=>readCachedStage(item,stageNumber))?'saved':'local';
+        if (item.kind==='capture'&&[2,3,4].some(stageNumber=>!readCachedStage(item,stageNumber))) {
           startCloudReaders(item);
         }
       }
@@ -399,12 +506,39 @@
         if (!response.ok) throw new Error('GALLERY_FAILED'); gallery=(await response.json()).items||[]; await showGallery(0);
       } catch (_) { status.textContent='ಉಳಿಸಿದ ಚಿತ್ರಗಳನ್ನು ತೆರೆಯಲು ಆಗಲಿಲ್ಲ.'; }
     }
-    async function play(items) {
-      stop(); const generation=playbackGeneration; stage.classList.add('playing');
-      for (const item of items) {
-        if (generation!==playbackGeneration) break; activate(item.id,item.text);
-        if (!await speak(item.text) || generation!==playbackGeneration) break;
+    function groupedWords(items) {
+      const output=[];
+      for (let index=0;index<items.length;index++) {
+        const first=items[index], sameLine=next=>next&&next.line_id===first.line_id;
+        const second=items[index+1],third=items[index+2],fourth=items[index+3];
+        if (/^\d+(?:\.\d+)?$/.test(first.text)&&sameLine(second)&&second.text==='/'&&sameLine(third)&&
+            /^\d+(?:\.\d+)?$/.test(third.text)&&sameLine(fourth)&&/^(?:V|HP|Hz|A|W|kW)$/i.test(fourth.text)) {
+          output.push({id:first.id,ids:[first.id,second.id,third.id,fourth.id],text:`${first.text}/${third.text}${fourth.text}`,
+            box:unionBoxes([first.box,second.box,third.box,fourth.box])}); index+=3; continue;
+        }
+        if (/^\d+(?:\.\d+)?$/.test(first.text)&&sameLine(second)&&/^(?:V|HP|Hz|A|W|kW|kg|ml|°C)$/i.test(second.text)) {
+          output.push({id:first.id,ids:[first.id,second.id],text:first.text+second.text,box:unionBoxes([first.box,second.box])}); index++; continue;
+        }
+        output.push(first);
       }
+      return output;
+    }
+    function unionBoxes(boxes) {
+      const valid=boxes.filter(Boolean); if (!valid.length) return null;
+      const x=Math.min(...valid.map(box=>box.x)),y=Math.min(...valid.map(box=>box.y));
+      const right=Math.max(...valid.map(box=>box.x+box.width)),bottom=Math.max(...valid.map(box=>box.y+box.height));
+      return {x,y,width:right-x,height:bottom-y};
+    }
+    async function play(items,buttonId,eventName) {
+      stop(); const generation=playbackGeneration; stage.classList.add('playing'); working(buttonId,true); const began=Date.now();
+      const queue=eventName==='word'?groupedWords(items):items;
+      let ok=true;
+      for (const item of queue) {
+        if (generation!==playbackGeneration) { ok=false; break; }
+        activate(item,item.text);
+        if (!await speak(item.text) || generation!==playbackGeneration) { ok=false; break; }
+      }
+      working(buttonId,false); track(eventName,ok,Date.now()-began);
       if (generation===playbackGeneration) { stage.classList.remove('playing'); document.querySelectorAll('.underline').forEach(n=>n.classList.remove('active')); }
     }
     function newCaptureId() {
@@ -420,22 +554,30 @@
       } catch (error) { saveFailure(item,stageNumber); return {ok:false,error:error.message||'READER_FAILED'}; }
     }
     async function processStoredReaders(item,requested) {
-      const response=await fetch(`/api/captures/${item.id}/process`,{
-        method:'POST',headers:testerHeaders(),credentials:'same-origin',keepalive:true,
-      });
-      if (response.status===401) { location.href='/access'; return requested.map(()=>({ok:false,error:'ACCESS_REQUIRED'})); }
-      const value=await response.json();
-      if (!response.ok) throw new Error(value.error||'PROCESSING_FAILED');
-      const errors=value.errors||{}, stages=value.stages||{};
+      const outcomes=new Map();
+      async function requestProcess(query='') {
+        const response=await fetch(`/api/captures/${item.id}/process${query}`,{
+          method:'POST',headers:testerHeaders(),credentials:'same-origin',keepalive:true,
+        });
+        if (response.status===401) { location.href='/access'; throw new Error('ACCESS_REQUIRED'); }
+        const value=await response.json(); if (!response.ok) throw new Error(value.error||'PROCESSING_FAILED');
+        const errors=value.errors||{}, stages=value.stages||{};
+        for (const stageNumber of requested) {
+          const stageValue=stages[String(stageNumber)];
+          if (stageValue) { applyReaderResult(item,stageNumber,stageValue); outcomes.set(stageNumber,{ok:true}); }
+          else if (errors[String(stageNumber)]) outcomes.set(stageNumber,{ok:false,error:errors[String(stageNumber)]});
+        }
+      }
+      if (requested.some(stageNumber=>stageNumber<4)) await requestProcess('?through=3');
+      if (requested.includes(4)&&!outcomes.get(4)?.ok) await requestProcess();
       return requested.map(stageNumber=>{
-        const stageValue=stages[String(stageNumber)];
-        if (stageValue) { applyReaderResult(item,stageNumber,stageValue); return {ok:true}; }
-        saveFailure(item,stageNumber);
-        return {ok:false,error:errors[String(stageNumber)]||'READER_FAILED'};
+        const outcome=outcomes.get(stageNumber)||{ok:false,error:'READER_FAILED'};
+        if (!outcome.ok) saveFailure(item,stageNumber); return outcome;
       });
     }
     async function startCloudReaders(item,blob) {
-      const missing=[2,3].filter(stageNumber=>!readCachedStage(item,stageNumber));
+      const stages=item.retained||item.result&&item.result.retained?[2,3,4]:[2,3];
+      const missing=stages.filter(stageNumber=>!readCachedStage(item,stageNumber));
       const cooling=missing.filter(stageNumber=>coolingDown(item,stageNumber));
       cooling.forEach(stageNumber=>$('quality-'+stageNumber).classList.add('failed'));
       const requested=missing.filter(stageNumber=>!cooling.includes(stageNumber));
@@ -455,9 +597,9 @@
         }
         if (gallery[galleryIndex]===item) {
           outcomes.forEach((outcome,index)=>{ if (!outcome.ok) $('quality-'+requested[index]).classList.add('failed'); });
-          const ready=[2,3].filter(stageNumber=>{
+          const ready=[2,3,4].filter(stageNumber=>{
             const cached=readCachedStage(item,stageNumber);
-            return cached&&(stageNumber!==3||cached.quality_validated===true);
+            return cached&&(stageNumber!==4||cached.quality_validated===true);
           }).length;
           status.textContent=ready ? `${1+ready}/4 reading stages ready.` : 'ಮೊದಲ ಓದುವಿಕೆ ಸಿದ್ಧವಾಗಿದೆ. Cloud reading is busy; try again later.';
         }
@@ -482,7 +624,7 @@
         if (response.status===401) return location.href='/access'; const value=await response.json();
         if (!response.ok) throw new Error(value.error||'CAPTURE_FAILED');
         item.id=value.capture_id; item.image_url=value.retained?value.image_url:objectUrl;
-        item.retained=value.retained;
+        item.retained=value.retained; track('capture',true,Date.now()-item.startedAt);
         if (!item.result||!item.stage2) item.result=value;
         copyMeaning(item.result,item);
         if (navigation===navigationGeneration&&gallery[galleryIndex]===item) {
@@ -491,15 +633,39 @@
         }
         await startCloudReaders(item,file);
       } catch (_) {
+        track('capture',false,Date.now()-item.startedAt);
         endTimer(item); $('quality-1').classList.add('failed');
         if (navigation===navigationGeneration) status.textContent='ಈ ಚಿತ್ರವನ್ನು ಓದಲು ಆಗಲಿಲ್ಲ. ಮತ್ತೊಮ್ಮೆ ಪ್ರಯತ್ನಿಸಿ.';
       }
       finally { input.value=''; if (image.src!==objectUrl) URL.revokeObjectURL(objectUrl); }
     }
+    async function askImageQuestion() {
+      const Recognition=window.SpeechRecognition||window.webkitSpeechRecognition;
+      if (!Recognition) { status.textContent='ಈ ಫೋನ್‌ನಲ್ಲಿ ಮಾತಿನ ಪ್ರಶ್ನೆ ಲಭ್ಯವಿಲ್ಲ.'; track('question',false); return; }
+      const item=gallery[galleryIndex];
+      if (!item||!item.retained||!/^[0-9a-f]{32}$/.test(item.id)) {
+        status.textContent='ಉಳಿಸಿದ ಚಿತ್ರಕ್ಕೆ ಮಾತ್ರ ಪ್ರಶ್ನೆ ಕೇಳಬಹುದು.'; track('question',false); return;
+      }
+      stop(); working('ask',true); $('ask').classList.add('active'); status.textContent='ನಿಮ್ಮ ಪ್ರಶ್ನೆಯನ್ನು ಕೇಳುತ್ತಿದ್ದೇನೆ…'; const began=Date.now();
+      try {
+        const question=await new Promise((resolve,reject)=>{
+          const recognition=new Recognition(); recognition.lang='kn-IN'; recognition.interimResults=false; recognition.maxAlternatives=1;
+          recognition.onresult=event=>resolve(event.results[0][0].transcript); recognition.onerror=()=>reject(new Error('RECOGNITION_FAILED'));
+          recognition.onend=()=>setTimeout(()=>reject(new Error('NO_QUESTION')),0); recognition.start();
+        });
+        status.textContent='ಉತ್ತರವನ್ನು ಸಿದ್ಧಪಡಿಸುತ್ತಿದೆ…';
+        const response=await fetch(`/api/captures/${item.id}/ask`,{method:'POST',headers:testerHeaders({'Content-Type':'application/json'}),body:JSON.stringify({question})});
+        const answer=await response.json(); if (!response.ok) throw new Error(answer.error||'QUESTION_FAILED');
+        if (answer.evidence&&answer.evidence[0]) addFocus(answer.evidence[0].box);
+        current.textContent=answer.answer_kn; status.textContent='ಚಿತ್ರದ ಪ್ರಶ್ನೆಗೆ ಉತ್ತರ'; await speak(answer.answer_kn); track('question',true,Date.now()-began);
+      } catch (_) { status.textContent='ಪ್ರಶ್ನೆಯನ್ನು ಕೇಳಲಾಗಲಿಲ್ಲ. ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.'; track('question',false,Date.now()-began); }
+      finally { working('ask',false); $('ask').classList.remove('active'); }
+    }
     $('mode-word').onclick=()=>setMode('word'); $('mode-sentence').onclick=()=>setMode('sentence');
-    $('mode-meaning').onclick=()=>setMode('meaning'); $('camera').onclick=()=>input.click();
-    $('play-words').onclick=()=>result&&play(result.words||[]); $('play-sentences').onclick=()=>result&&play(result.lines||[]);
-    $('play-meanings').onclick=()=>explainMeaning(false); $('play-whole').onclick=()=>explainMeaning(true); $('stop').onclick=stop;
+    $('mode-translate').onclick=()=>setMode('translate'); $('camera').onclick=()=>input.click();
+    $('play-words').onclick=()=>result&&play(result.words||[],'play-words','word');
+    $('play-sentences').onclick=()=>result&&play(effectiveLines(),'play-sentences','line');
+    $('select-object').onclick=()=>setMode('object'); $('infer-global').onclick=explainGlobal; $('ask').onclick=askImageQuestion; $('stop').onclick=stop;
     $('previous').onclick=()=>showGallery(galleryIndex-1); $('next').onclick=()=>showGallery(galleryIndex+1);
     input.onchange=()=>useCapture(input.files&&input.files[0]);
     document.addEventListener('pointerdown',()=>{ ensureAudioContext(); },{passive:true});
@@ -508,13 +674,16 @@
       if (!pointerStart) return; const dx=event.clientX-pointerStart.x,dy=event.clientY-pointerStart.y; pointerStart=null;
       if (Math.abs(dx)>45&&Math.abs(dx)>Math.abs(dy)) { suppressTap=true; showGallery(galleryIndex+(dx<0?1:-1)); setTimeout(()=>suppressTap=false,250); }
     });
+    const isStandalone=matchMedia('(display-mode: standalone)').matches||navigator.standalone===true;
+    if (isStandalone) $('install').hidden=true;
     let installPrompt=null;
     window.addEventListener('beforeinstallprompt',event=>{
-      event.preventDefault(); installPrompt=event; $('install').hidden=false;
+      event.preventDefault(); installPrompt=event;
     });
     $('install').onclick=async()=>{
-      if (!installPrompt) return;
-      $('install').hidden=true; await installPrompt.prompt(); installPrompt=null;
+      if (installPrompt) { await installPrompt.prompt(); installPrompt=null; return; }
+      const ios=/iPad|iPhone|iPod/.test(navigator.userAgent);
+      status.textContent=ios?'ಸಫಾರಿಯ Share ⬆️ ಒತ್ತಿ, Add to Home Screen ಆಯ್ಕೆ ಮಾಡಿ.':'Chrome ಮೆನು ⋮ ಒತ್ತಿ, Add to Home screen ಆಯ್ಕೆ ಮಾಡಿ.';
     };
     window.addEventListener('appinstalled',()=>{ $('install').hidden=true; installPrompt=null; });
 

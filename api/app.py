@@ -40,12 +40,15 @@ MAX_SPEECH_CHARACTERS = int(os.environ.get("VILLAGELENS_MAX_SPEECH_CHARACTERS", 
 ALLOWED_MEDIA_TYPES = {"image/jpeg", "image/png", "image/webp"}
 CAPTURE_BUCKET = os.environ.get("VILLAGELENS_CAPTURE_BUCKET", "")
 OPENAI_MODEL = os.environ.get("VILLAGELENS_OPENAI_MODEL", "gpt-5.6-sol")
-OPENAI_ANALYSIS_VERSION = "context-v1"
+OPENAI_ANALYSIS_VERSION = "context-v2"
+GEMINI_MODEL = os.environ.get("VILLAGELENS_GEMINI_MODEL", "gemini-3.8-flash")
+GEMINI_ANALYSIS_VERSION = "consensus-v1"
 KANNADA_TTS_VOICE = os.environ.get("VILLAGELENS_KANNADA_TTS_VOICE", "kn-IN-Standard-A")
 ACCESS_COOKIE_NAME = "villagelens_access_v2"
 TESTER_COOKIE_NAME = "villagelens_tester_v1"
 LEGACY_ACCESS_COOKIE_NAMES = ("villagelens_access",)
 ACCESS_COOKIE_TTL_SECONDS = 30 * 24 * 60 * 60
+MAX_QUESTION_CHARACTERS = 500
 MODEL_SHA256 = {
     "kan": "bd31e6b6ae93271e3bcf5383d306d8eefbb91542937cd6d735a5930c970e61d8",
     "eng": "7d4322bd2a7749724879683fc3912cb542f19906c83bcc1a52132556427170b2",
@@ -57,6 +60,10 @@ TESTER_NAMES = {
     "a2": "Umesh",
     "a3": "Reviewer",
     "a4": "Selvan",
+}
+USAGE_EVENTS = {
+    "capture", "word", "line", "translate", "object", "infer", "question",
+    "audio_ok", "audio_failed", "stage_1", "stage_2", "stage_3", "stage_4",
 }
 DEMO_ASSETS = {
     "i1.jpeg", "i1-scene.json", "i2.jpeg", "i2-scene.json", "i2-gold.json",
@@ -635,6 +642,46 @@ def _current_stage_three(value: dict[str, Any] | None) -> bool:
     return bool(value and value.get("analysis_version") == OPENAI_ANALYSIS_VERSION)
 
 
+def _current_stage_four(value: dict[str, Any] | None) -> bool:
+    return bool(value and value.get("analysis_version") == GEMINI_ANALYSIS_VERSION)
+
+
+def _context_box(value: Any) -> list[float] | dict[str, float] | None:
+    if isinstance(value, dict):
+        try:
+            box = {key: float(value[key]) for key in ("x", "y", "width", "height")}
+        except (KeyError, TypeError, ValueError):
+            return None
+        return box if box["width"] > 0 and box["height"] > 0 else None
+    if not isinstance(value, list) or len(value) != 4:
+        return None
+    try:
+        x, y, width, height = [max(0.0, min(1000.0, float(item))) for item in value]
+    except (TypeError, ValueError):
+        return None
+    return [x, y, width, height] if width > 0 and height > 0 and x + width <= 1020 and y + height <= 1020 else None
+
+
+def _scale_context_boxes(context: dict[str, Any], width: int, height: int) -> None:
+    def scaled(value: Any) -> dict[str, int] | None:
+        box = _context_box(value)
+        if not isinstance(box, list):
+            return box
+        x, y, box_width, box_height = box
+        return {
+            "x": round(x * width / 1000), "y": round(y * height / 1000),
+            "width": round(box_width * width / 1000),
+            "height": round(box_height * height / 1000),
+        }
+
+    for key in ("objects", "transcription_kn", "spoken_sections"):
+        for item in context.get(key, []):
+            if box := scaled(item.get("box")):
+                item["box"] = box
+            else:
+                item.pop("box", None)
+
+
 def _validated_context(parsed: dict[str, Any]) -> tuple[dict[str, Any], bool]:
     required_text = ("what_is_it_kn", "what_it_does_kn", "brief_spoken_kn", "detailed_spoken_kn")
     context = {
@@ -643,6 +690,8 @@ def _validated_context(parsed: dict[str, Any]) -> tuple[dict[str, Any], bool]:
         "action_needed_kn": str(parsed.get("action_needed_kn", "")).strip(),
         "warning_kn": str(parsed.get("warning_kn", "")).strip(),
         "uncertainty_kn": str(parsed.get("uncertainty_kn", "")).strip(),
+        "confidence": str(parsed.get("confidence", "low")).strip().lower(),
+        "needs_independent_review": bool(parsed.get("needs_independent_review", True)),
     }
     points = parsed.get("important_points_kn", [])
     context["important_points_kn"] = [
@@ -656,12 +705,34 @@ def _validated_context(parsed: dict[str, Any]) -> tuple[dict[str, Any], bool]:
             "purpose_kn": str(item.get("purpose_kn", "")).strip(),
             "evidence": str(item.get("evidence", "")).strip(),
             "uncertain": bool(item.get("uncertain", False)),
+            "box": _context_box(item.get("box")),
         }
         for item in objects
         if isinstance(item, dict)
         and _valid_kannada_text(item.get("name_kn"))
         and _valid_kannada_text(item.get("purpose_kn"))
     ] if isinstance(objects, list) else []
+    transcription = parsed.get("transcription_kn", [])
+    context["transcription_kn"] = [
+        {
+            "text_kn": str(item.get("text_kn", "")).strip(),
+            "box": _context_box(item.get("box")),
+            "uncertain": bool(item.get("uncertain", False)),
+        }
+        for item in transcription
+        if isinstance(item, dict) and _valid_kannada_text(item.get("text_kn"))
+    ] if isinstance(transcription, list) else []
+    sections = parsed.get("spoken_sections", [])
+    context["spoken_sections"] = [
+        {
+            "text_kn": str(item.get("text_kn", "")).strip(),
+            "box": _context_box(item.get("box")),
+        }
+        for item in sections
+        if isinstance(item, dict) and _valid_kannada_text(item.get("text_kn"))
+    ] if isinstance(sections, list) else []
+    if context["confidence"] not in {"high", "medium", "low"}:
+        context["confidence"] = "low"
     valid = all(_valid_kannada_text(context[key]) for key in required_text)
     return context, valid
 
@@ -671,16 +742,25 @@ def _openai_reader(data: bytes, media_type: str, width: int, height: int) -> dic
     if not api_key:
         raise RuntimeError("OPENAI_READER_NOT_CONFIGURED")
     started = time.monotonic()
+    box_schema = {"type": "array", "items": {"type": "number"}, "minItems": 4, "maxItems": 4}
     object_schema = {"type": "object", "additionalProperties": False,
-                     "required": ["name", "name_kn", "purpose_kn", "evidence", "uncertain"],
+                     "required": ["name", "name_kn", "purpose_kn", "evidence", "uncertain", "box"],
                      "properties": {"name": {"type": "string"}, "name_kn": {"type": "string"},
                                     "purpose_kn": {"type": "string"}, "evidence": {"type": "string"},
-                                    "uncertain": {"type": "boolean"}}}
+                                    "uncertain": {"type": "boolean"}, "box": box_schema}}
+    transcription_schema = {"type": "object", "additionalProperties": False,
+                            "required": ["text_kn", "box", "uncertain"],
+                            "properties": {"text_kn": {"type": "string"}, "box": box_schema,
+                                           "uncertain": {"type": "boolean"}}}
+    section_schema = {"type": "object", "additionalProperties": False,
+                      "required": ["text_kn", "box"],
+                      "properties": {"text_kn": {"type": "string"}, "box": box_schema}}
     schema = {"type": "object", "additionalProperties": False,
               "required": ["translations", "scene_type", "objects",
                            "what_is_it_kn", "what_it_does_kn", "important_points_kn",
                            "action_needed_kn", "warning_kn", "uncertainty_kn",
-                           "brief_spoken_kn", "detailed_spoken_kn"],
+                           "brief_spoken_kn", "detailed_spoken_kn", "transcription_kn",
+                           "spoken_sections", "confidence", "needs_independent_review"],
               "properties": {
                   "translations": {"type": "array", "items": {"type": "object",
                       "additionalProperties": False, "required": ["source", "translation_kn"],
@@ -696,11 +776,17 @@ def _openai_reader(data: bytes, media_type: str, width: int, height: int) -> dic
                   "uncertainty_kn": {"type": "string"},
                   "brief_spoken_kn": {"type": "string"},
                   "detailed_spoken_kn": {"type": "string"}}}
+    schema["properties"].update({
+        "transcription_kn": {"type": "array", "items": transcription_schema},
+        "spoken_sections": {"type": "array", "items": section_schema},
+        "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
+        "needs_independent_review": {"type": "boolean"},
+    })
     encoded = base64.b64encode(data).decode("ascii")
     payload = {"model": OPENAI_MODEL, "store": False, "reasoning": {"effort": "none"},
-               "max_output_tokens": 3000,
+               "max_output_tokens": 5000,
                "input": [{"role": "user", "content": [
-                   {"type": "input_text", "text": """Help a low-literacy Kannada-speaking adult understand this image. Read the clearly visible Kannada and English text for comprehension, but do not return word boxes or line geometry; faster OCR readers provide all touch positions. Do not guess unclear text. Translate each distinct clearly visible English word into simple Kannada. Examine the whole image and identify the visible objects and likely document or scene type. Explain in short, natural spoken Kannada: what it is, what it does or is for, the few important details, any action needed, and any safety warning. brief_spoken_kn is the most useful one- or two-sentence answer; detailed_spoken_kn adds useful context without mechanically repeating OCR. For calendars, summarize month, year, highlighted date and notable events instead of reciting every date. For adapters, motors, switches, medicine, or electrical equipment, report only visible or strongly supported identity, purpose, and ratings; never advise wiring, energizing, repairing, or taking medicine. State uncertainty plainly and never invent hidden facts, intent, diagnosis, species, disease, or expertise. Preserve visible names, numbers, prices, dates, and units exactly."""},
+                   {"type": "input_text", "text": """Help a low-literacy Kannada-speaking adult understand this image. Read clearly visible Kannada and English for comprehension. Do not recreate all OCR boxes. Translate each distinct clearly visible English word into simple Kannada. Identify up to six useful visible objects and give each one bounding box [left,top,width,height] normalized 0 to 1000. If this is handwritten Kannada, transcribe every readable line exactly into transcription_kn with a line box and mark uncertain lines; distinguish recognition failure from blur, distance, perspective, cropping, and low contrast, and give specific capture guidance. Never label readable Kannada as another script. Treat joined measurements such as 300V, 2.0 HP, 50Hz, 10A, kg, ml, and degrees C as semantic units: preserve the printed characters and explain the unit naturally in Kannada. Explain what the image is, its purpose, important details, action, safety, and uncertainty in short natural spoken Kannada. Divide the explanation into two to six spoken_sections, each with the image region it refers to, so the interface can highlight evidence while speaking. brief_spoken_kn is the most useful one- or two-sentence global answer; detailed_spoken_kn adds useful context without mechanically repeating OCR. For calendars, summarize month, year, highlighted date and notable events rather than reciting the grid. For electrical equipment or medicine, report only visible or strongly supported identity, purpose, and ratings; never advise wiring, energizing, repair, or medication. Set confidence high only when important identity, text, numbers, and purpose are clear; set needs_independent_review true for handwriting uncertainty, safety-critical content, ambiguous units, or any important doubt. Never invent hidden facts, intent, diagnosis, species, or disease."""},
                    {"type": "input_image", "image_url": f"data:{media_type};base64,{encoded}", "detail": "high"}]}],
                "text": {"verbosity": "low", "format": {"type": "json_schema", "name": "villagelens_reading", "strict": True, "schema": schema}}}
     response = requests.post("https://api.openai.com/v1/responses", json=payload,
@@ -711,12 +797,162 @@ def _openai_reader(data: bytes, media_type: str, width: int, height: int) -> dic
     parsed = json.loads(_openai_output_text(response.json()))
     translations, summary_kn, quality_validated = _validated_kannada_output(parsed)
     context, context_validated = _validated_context(parsed)
+    _scale_context_boxes(context, width, height)
     return {"schema": "villagelens.reader.v1", "stage": 3, "reader": "vision_language",
             "model": OPENAI_MODEL, "analysis_version": OPENAI_ANALYSIS_VERSION,
             "latency_ms": round((time.monotonic()-started)*1000),
             "image_size": {"width": width, "height": height}, "words": [], "lines": [], "text": "",
             "translations": translations, "summary_kn": summary_kn, **context,
             "quality_validated": quality_validated and context_validated}
+
+
+def _normalize_stage_four(value: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(value)
+    normalized["agreement"] = str(value.get("agreement", "low")).strip().lower()
+    normalized["confidence"] = str(value.get("confidence", "low")).strip().lower()
+    for key in ("validated_brief_kn", "validated_detailed_kn", "warning_kn", "uncertainty_kn"):
+        normalized[key] = str(value.get(key, "")).strip()
+    corrections = value.get("corrections_kn", [])
+    normalized["corrections_kn"] = [
+        str(item).strip() for item in corrections if _valid_kannada_text(item)
+    ] if isinstance(corrections, list) else []
+    normalized["quality_validated"] = bool(
+        normalized["agreement"] == "high"
+        and _valid_kannada_text(normalized["validated_brief_kn"])
+        and _valid_kannada_text(normalized["validated_detailed_kn"])
+    )
+    return normalized
+
+
+def _gemini_validator(
+    data: bytes, media_type: str, width: int, height: int, stage_three: dict[str, Any],
+) -> dict[str, Any]:
+    api_key = os.environ.get("GEMINI_API_KEY", "").strip()
+    if not api_key:
+        raise RuntimeError("GEMINI_VALIDATOR_NOT_CONFIGURED")
+    started = time.monotonic()
+    schema = {
+        "type": "object", "additionalProperties": False,
+        "required": ["agreement", "confidence", "validated_brief_kn",
+                     "validated_detailed_kn", "corrections_kn", "warning_kn", "uncertainty_kn"],
+        "properties": {
+            "agreement": {"type": "string", "enum": ["high", "partial", "low"]},
+            "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
+            "validated_brief_kn": {"type": "string"},
+            "validated_detailed_kn": {"type": "string"},
+            "corrections_kn": {"type": "array", "items": {"type": "string"}},
+            "warning_kn": {"type": "string"},
+            "uncertainty_kn": {"type": "string"},
+        },
+    }
+    proposed = {
+        key: stage_three.get(key)
+        for key in ("scene_type", "objects", "transcription_kn", "important_points_kn",
+                    "brief_spoken_kn", "detailed_spoken_kn", "warning_kn", "uncertainty_kn")
+    }
+    prompt = (
+        "Independently inspect this image, then validate the proposed Kannada interpretation below. "
+        "Check object identity, handwritten Kannada, every important number and unit, purpose, and safety. "
+        "Do not agree merely because the proposal is fluent. Use agreement=high only when all important "
+        "claims are visibly supported and no material correction is needed. Preserve uncertainty and never "
+        "invent a diagnosis, wiring instruction, or unseen fact. Return a concise and detailed natural spoken "
+        "Kannada result, corrections, warning, and uncertainty. Proposed interpretation:\n"
+        + json.dumps(proposed, ensure_ascii=False, separators=(",", ":"))
+    )
+    request_kwargs = {
+        "headers": {"x-goog-api-key": api_key, "Content-Type": "application/json"},
+        "json": {
+            "contents": [{"role": "user", "parts": [
+                {"text": prompt},
+                {"inlineData": {"mimeType": media_type, "data": base64.b64encode(data).decode("ascii")}},
+            ]}],
+            "generationConfig": {
+                "temperature": 0.1, "responseMimeType": "application/json",
+                "responseJsonSchema": schema,
+            },
+        },
+        "timeout": 20,
+    }
+    response = None
+    for attempt in range(3):
+        response = requests.post(
+            f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent",
+            **request_kwargs,
+        )
+        if response.status_code not in {429, 500, 502, 503, 504} or attempt == 2:
+            break
+        time.sleep(1 + attempt * 2)
+    assert response is not None
+    if response.status_code != 200:
+        app.logger.warning("Gemini validator failed with HTTP %s", response.status_code)
+        raise RuntimeError("GEMINI_VALIDATOR_FAILED")
+    try:
+        text = response.json()["candidates"][0]["content"]["parts"][0]["text"]
+        parsed = json.loads(text)
+    except (KeyError, IndexError, TypeError, json.JSONDecodeError) as exc:
+        raise RuntimeError("GEMINI_VALIDATOR_INVALID_RESPONSE") from exc
+    normalized = _normalize_stage_four(parsed)
+    normalized.update({
+        "schema": "villagelens.reader.v1", "stage": 4, "reader": "independent_validator",
+        "model": GEMINI_MODEL, "analysis_version": GEMINI_ANALYSIS_VERSION,
+        "latency_ms": round((time.monotonic() - started) * 1000),
+        "image_size": {"width": width, "height": height},
+    })
+    return normalized
+
+
+def _openai_question(
+    data: bytes, media_type: str, width: int, height: int, question: str,
+) -> dict[str, Any]:
+    api_key = os.environ.get("OPENAI_API_KEY", "").strip()
+    if not api_key:
+        raise RuntimeError("OPENAI_READER_NOT_CONFIGURED")
+    box_schema = {"type": "array", "items": {"type": "number"}, "minItems": 4, "maxItems": 4}
+    schema = {
+        "type": "object", "additionalProperties": False,
+        "required": ["answer_kn", "warning_kn", "uncertainty_kn", "evidence_box"],
+        "properties": {
+            "answer_kn": {"type": "string"}, "warning_kn": {"type": "string"},
+            "uncertainty_kn": {"type": "string"}, "evidence_box": box_schema,
+        },
+    }
+    payload = {
+        "model": OPENAI_MODEL, "store": False, "reasoning": {"effort": "none"},
+        "max_output_tokens": 1200,
+        "input": [{"role": "user", "content": [
+            {"type": "input_text", "text": (
+                "Answer the user's spoken question about this image in simple natural Kannada. "
+                "Use only visible or strongly supported facts, preserve numbers and units, state uncertainty, "
+                "and include a safety warning when relevant. evidence_box is the single most relevant image "
+                "region [left,top,width,height] normalized 0 to 1000. Question: " + question
+            )},
+            {"type": "input_image", "image_url": (
+                f"data:{media_type};base64,{base64.b64encode(data).decode('ascii')}"
+            ), "detail": "high"},
+        ]}],
+        "text": {"verbosity": "low", "format": {
+            "type": "json_schema", "name": "villagelens_answer", "strict": True, "schema": schema,
+        }},
+    }
+    response = requests.post(
+        "https://api.openai.com/v1/responses", json=payload,
+        headers={"Authorization": f"Bearer {api_key}"}, timeout=75,
+    )
+    if response.status_code != 200:
+        raise RuntimeError("OPENAI_QUESTION_FAILED")
+    parsed = json.loads(_openai_output_text(response.json()))
+    answer = str(parsed.get("answer_kn", "")).strip()
+    if not _valid_kannada_text(answer):
+        raise RuntimeError("OPENAI_QUESTION_INVALID_RESPONSE")
+    result = {
+        "answer_kn": answer,
+        "warning_kn": str(parsed.get("warning_kn", "")).strip(),
+        "uncertainty_kn": str(parsed.get("uncertainty_kn", "")).strip(),
+        "evidence": [{"box": _context_box(parsed.get("evidence_box"))}],
+        "image_size": {"width": width, "height": height},
+    }
+    _scale_context_boxes({"spoken_sections": result["evidence"]}, width, height)
+    return result
 
 
 def _storage_bucket() -> Any:
@@ -765,7 +1001,9 @@ def _stored_json(bucket: Any, name: str) -> dict[str, Any] | None:
         return None
 
 
-def _process_stored_capture(capture_id: str, tester_id: str) -> tuple[dict[int, dict[str, Any]], dict[int, str]]:
+def _process_stored_capture(
+    capture_id: str, tester_id: str, include_stage_four: bool = True,
+) -> tuple[dict[int, dict[str, Any]], dict[int, str]]:
     bucket = _storage_bucket()
     if bucket is None:
         raise FileNotFoundError
@@ -777,18 +1015,25 @@ def _process_stored_capture(capture_id: str, tester_id: str) -> tuple[dict[int, 
             raise FileNotFoundError
 
         stages = {
-            stage: value for stage in (2, 3)
+            stage: value for stage in (2, 3, 4)
             if (value := _stored_json(bucket, f"captures/{capture_id}/stage-{stage}.json")) is not None
             and (stage != 3 or _current_stage_three(value))
+            and (stage != 4 or _current_stage_four(value))
         }
         if 3 in stages:
             stages[3] = _normalize_stage_three(stages[3])
+        if 4 in stages:
+            stages[4] = _normalize_stage_four(stages[4])
         missing = [stage for stage in (2, 3) if stage not in stages]
         errors: dict[int, str] = {}
         if 3 in missing and not os.environ.get("OPENAI_API_KEY", "").strip():
             missing.remove(3)
             errors[3] = "OPENAI_READER_NOT_CONFIGURED"
-        if not missing:
+        needs_four = include_stage_four and 4 not in stages
+        if needs_four and not os.environ.get("GEMINI_API_KEY", "").strip():
+            errors[4] = "GEMINI_VALIDATOR_NOT_CONFIGURED"
+            needs_four = False
+        if not missing and not needs_four:
             return stages, errors
 
         source = bucket.blob(f"captures/{capture_id}/source")
@@ -810,15 +1055,34 @@ def _process_stored_capture(capture_id: str, tester_id: str) -> tuple[dict[int, 
             _store_reader_evidence(capture_id, stage, value)
             return value
 
-        with ThreadPoolExecutor(max_workers=len(missing)) as executor:
-            futures = {executor.submit(run, stage): stage for stage in missing}
-            for future in as_completed(futures):
-                stage = futures[future]
+        if missing:
+            with ThreadPoolExecutor(max_workers=len(missing)) as executor:
+                futures = {executor.submit(run, stage): stage for stage in missing}
+                for future in as_completed(futures):
+                    stage = futures[future]
+                    try:
+                        stages[stage] = future.result()
+                    except Exception as exc:
+                        app.logger.exception("Stored reader stage %s failed for capture %s", stage, capture_id)
+                        errors[stage] = str(exc) if isinstance(exc, RuntimeError) else f"STAGE_{stage}_UNAVAILABLE"
+        if needs_four:
+            if 3 not in stages:
+                errors[4] = "STAGE_3_REQUIRED"
+            else:
                 try:
-                    stages[stage] = future.result()
+                    value = _gemini_validator(
+                        data, "image/png", image.width, image.height, stages[3],
+                    )
+                    owner_id = str(capture.get("tester_id", "")).strip().lower()
+                    value["tester_id"] = (
+                        owner_id if TESTER_ID_PATTERN.fullmatch(owner_id)
+                        else tester_id or "unassigned"
+                    )
+                    _store_reader_evidence(capture_id, 4, value)
+                    stages[4] = value
                 except Exception as exc:
-                    app.logger.exception("Stored reader stage %s failed for capture %s", stage, capture_id)
-                    errors[stage] = str(exc) if isinstance(exc, RuntimeError) else f"STAGE_{stage}_UNAVAILABLE"
+                    app.logger.exception("Stored reader stage 4 failed for capture %s", capture_id)
+                    errors[4] = str(exc) if isinstance(exc, RuntimeError) else "STAGE_4_UNAVAILABLE"
         return stages, errors
 
 
@@ -918,7 +1182,7 @@ def gallery() -> tuple[Response, int]:
                 (parts[1], int(match.group(1))): blob
                 for blob in blobs
                 if len(parts := blob.name.split("/")) == 3
-                and (match := re.fullmatch(r"stage-([23])\.json", parts[2]))
+                and (match := re.fullmatch(r"stage-([234])\.json", parts[2]))
                 and _valid_capture_id(parts[1])
             }
             requested_tester_id = _tester_id()
@@ -946,15 +1210,18 @@ def gallery() -> tuple[Response, int]:
                     "tester_id": owner_id or "unassigned",
                     "tester_name": TESTER_NAMES.get(owner_id, ""),
                 }
-                for stage in (2, 3):
+                for stage in (2, 3, 4):
                     if evidence_blob := evidence.get((capture_id, stage)):
                         try:
                             stage_value = json.loads(
                                 evidence_blob.download_as_text(encoding="utf-8")
                             )
-                            if stage != 3 or _current_stage_three(stage_value):
+                            if ((stage != 3 or _current_stage_three(stage_value))
+                                    and (stage != 4 or _current_stage_four(stage_value))):
                                 item[f"stage{stage}"] = (
-                                    _normalize_stage_three(stage_value) if stage == 3 else stage_value
+                                    _normalize_stage_three(stage_value) if stage == 3
+                                    else _normalize_stage_four(stage_value) if stage == 4
+                                    else stage_value
                                 )
                         except (TypeError, ValueError, json.JSONDecodeError):
                             app.logger.warning(
@@ -999,13 +1266,16 @@ def process_captured_image(capture_id: str) -> tuple[Response, int]:
     if not _valid_capture_id(capture_id):
         return jsonify(error="CAPTURE_NOT_FOUND"), 404
     try:
-        stages, errors = _process_stored_capture(capture_id, _tester_id())
+        include_stage_four = request.args.get("through") != "3"
+        stages, errors = _process_stored_capture(
+            capture_id, _tester_id(), include_stage_four=include_stage_four,
+        )
         return jsonify(
             schema="villagelens.processing.v1",
             capture_id=capture_id,
             stages={str(stage): value for stage, value in stages.items()},
             errors={str(stage): error for stage, error in errors.items()},
-            complete=all(stage in stages for stage in (2, 3)),
+            complete=all(stage in stages for stage in ((2, 3, 4) if include_stage_four else (2, 3))),
         ), 200
     except FileNotFoundError:
         return jsonify(error="CAPTURE_NOT_FOUND"), 404
@@ -1014,6 +1284,71 @@ def process_captured_image(capture_id: str) -> tuple[Response, int]:
     except Exception:
         app.logger.exception("Stored capture processing failed for %s", capture_id)
         return jsonify(error="CAPTURE_PROCESSING_UNAVAILABLE"), 503
+
+
+@app.post("/api/captures/<capture_id>/ask")
+def ask_about_capture(capture_id: str) -> tuple[Response, int]:
+    if not _valid_capture_id(capture_id):
+        return jsonify(error="CAPTURE_NOT_FOUND"), 404
+    payload = request.get_json(silent=True)
+    question = re.sub(r"\s+", " ", str(payload.get("question", ""))).strip() if isinstance(payload, dict) else ""
+    if not question:
+        return jsonify(error="QUESTION_REQUIRED"), 400
+    if len(question) > MAX_QUESTION_CHARACTERS:
+        return jsonify(error="QUESTION_TOO_LONG"), 400
+    try:
+        bucket = _storage_bucket()
+        if bucket is None:
+            raise FileNotFoundError
+        capture = _stored_json(bucket, f"captures/{capture_id}/result.json")
+        tester_id = _tester_id()
+        if capture is None or (
+            tester_id and not _is_reviewer(tester_id) and capture.get("tester_id") != tester_id
+        ):
+            raise FileNotFoundError
+        source = bucket.blob(f"captures/{capture_id}/source")
+        if not source.exists():
+            raise FileNotFoundError
+        image, _ = _normalized_image(source.download_as_bytes())
+        normalized = io.BytesIO()
+        image.save(normalized, format="PNG")
+        return jsonify(_openai_question(
+            normalized.getvalue(), "image/png", image.width, image.height, question,
+        )), 200
+    except FileNotFoundError:
+        return jsonify(error="CAPTURE_NOT_FOUND"), 404
+    except Exception as exc:
+        app.logger.exception("Spoken image question failed for %s", capture_id)
+        error = str(exc) if isinstance(exc, RuntimeError) else "QUESTION_UNAVAILABLE"
+        return jsonify(error=error), 503
+
+
+@app.post("/api/events")
+def usage_events() -> tuple[Response, int]:
+    payload = request.get_json(silent=True)
+    events = payload.get("events", []) if isinstance(payload, dict) else []
+    if not isinstance(events, list) or not events or len(events) > 20:
+        return jsonify(error="EVENTS_INVALID"), 400
+    accepted = []
+    for item in events:
+        if not isinstance(item, dict) or item.get("name") not in USAGE_EVENTS:
+            continue
+        try:
+            elapsed_ms = int(item.get("elapsed_ms", 0) or 0)
+        except (TypeError, ValueError):
+            elapsed_ms = 0
+        accepted.append({
+            "name": item["name"],
+            "capture_id": item.get("capture_id") if _valid_capture_id(str(item.get("capture_id", ""))) else "",
+            "ok": bool(item.get("ok", True)),
+            "elapsed_ms": max(0, min(300_000, elapsed_ms)),
+        })
+    if not accepted:
+        return jsonify(error="EVENTS_INVALID"), 400
+    app.logger.info("villagelens_usage %s", json.dumps({
+        "tester_id": _tester_id() or "unassigned", "events": accepted,
+    }, separators=(",", ":")))
+    return jsonify(accepted=len(accepted)), 202
 
 
 @app.post("/api/capture")
