@@ -6,6 +6,7 @@ import subprocess
 import unittest
 from unittest.mock import MagicMock, patch
 
+import requests
 from PIL import Image
 
 from api.app import (
@@ -680,7 +681,27 @@ class ApiTests(unittest.TestCase):
         self.assertFalse(value["quality_validated"])
         self.assertEqual(provider.call_count, 2)
         sleep.assert_called_once_with(1)
-        self.assertEqual(provider.call_args.kwargs["timeout"], 20)
+        self.assertEqual(provider.call_args.kwargs["timeout"], 30)
+
+    @patch("api.app.time.sleep")
+    @patch("api.app.requests.post")
+    def test_gemini_retries_network_timeout(self, provider: object, sleep: object) -> None:
+        recovered = MagicMock(status_code=200)
+        recovered.json.return_value = {"candidates": [{"content": {"parts": [{
+            "text": json.dumps({
+                "agreement": "low", "confidence": "low",
+                "validated_brief_kn": "ಇದು ಚಿತ್ರ.",
+                "validated_detailed_kn": "ಚಿತ್ರದ ವಿವರ ಖಚಿತವಾಗಿಲ್ಲ.",
+                "corrections_kn": [], "warning_kn": "", "uncertainty_kn": "ಅಸ್ಪಷ್ಟವಾಗಿದೆ.",
+            }),
+        }]}}]}
+        provider.side_effect = [requests.ReadTimeout(), recovered]
+        with patch.dict("os.environ", {"GEMINI_API_KEY": "test-key"}):
+            value = _gemini_validator(image_bytes(), "image/jpeg", 320, 120, {})
+
+        self.assertEqual(value["agreement"], "low")
+        self.assertEqual(provider.call_count, 2)
+        sleep.assert_called_once_with(1)
 
     @patch("api.app.requests.post")
     def test_spoken_question_returns_scaled_evidence_without_storage(self, provider: object) -> None:

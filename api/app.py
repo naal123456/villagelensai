@@ -871,18 +871,27 @@ def _gemini_validator(
                 "responseJsonSchema": schema,
             },
         },
-        "timeout": 20,
+        "timeout": 30,
     }
     response = None
-    for attempt in range(3):
-        response = requests.post(
-            f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent",
-            **request_kwargs,
-        )
-        if response.status_code not in {429, 500, 502, 503, 504} or attempt == 2:
+    last_request_error: requests.RequestException | None = None
+    for attempt in range(2):
+        try:
+            response = requests.post(
+                f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent",
+                **request_kwargs,
+            )
+        except requests.RequestException as exc:
+            last_request_error = exc
+            if attempt == 1:
+                raise RuntimeError("GEMINI_VALIDATOR_FAILED") from exc
+            time.sleep(1)
+            continue
+        if response.status_code not in {429, 500, 502, 503, 504} or attempt == 1:
             break
-        time.sleep(1 + attempt * 2)
-    assert response is not None
+        time.sleep(1)
+    if response is None:
+        raise RuntimeError("GEMINI_VALIDATOR_FAILED") from last_request_error
     if response.status_code != 200:
         app.logger.warning("Gemini validator failed with HTTP %s", response.status_code)
         raise RuntimeError("GEMINI_VALIDATOR_FAILED")
