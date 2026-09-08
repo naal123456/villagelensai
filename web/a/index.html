@@ -21,11 +21,10 @@
     button.working { border-color: #62d7ff; background: #174b5f; animation: working 1s infinite alternate; }
     @keyframes working { to { box-shadow: 0 0 15px #62d7ff; } }
     button:focus-visible { outline: 4px solid #65d6ff; outline-offset: 2px; }
-    .quality { display: grid; grid-template-columns: repeat(4, 1fr) auto; gap: 6px; align-items: center; }
+    .quality { display: grid; grid-template-columns: repeat(3, 1fr) auto; gap: 6px; align-items: center; }
     .bar { height: 14px; border: 1px solid #64717d; border-radius: 5px; background: #46515b; }
     #quality-1.ready { background: #e5bc27; border-color: #ffe071; }
     #quality-2.ready { background: #9adfae; } #quality-3.ready { background: #39ad68; }
-    #quality-4.ready { background: #087238; box-shadow: 0 0 7px #3fbd70; }
     .bar.failed { border-color: #9b7048; background: #5c4c3e; }
     #quality-timer { min-width: 2.6em; color: #c7d1da; font-variant-numeric: tabular-nums; font-size: .85rem; }
     .gallery { display: grid; grid-template-columns: 42px 1fr 42px; align-items: center; gap: 4px; margin-top: 7px; }
@@ -72,7 +71,7 @@
       </nav>
       <div class="quality" aria-label="Reading confidence">
         <span class="bar" id="quality-1"></span><span class="bar" id="quality-2"></span>
-        <span class="bar" id="quality-3"></span><span class="bar" id="quality-4"></span>
+        <span class="bar" id="quality-3"></span>
         <span id="quality-timer">—</span>
       </div>
       <button id="ask" aria-label="Ask a spoken question about this image">🎤 ಚಿತ್ರದ ಬಗ್ಗೆ ಕೇಳಿ</button>
@@ -162,7 +161,7 @@
       ['play-words','play-sentences','infer-global','ask'].forEach(id=>working(id,false));
     }
     function resetQuality() {
-      for (let n=1;n<=4;n++) $('quality-'+n).classList.remove('ready','failed');
+      for (let n=1;n<=3;n++) $('quality-'+n).classList.remove('ready','failed');
       clearInterval(timerId); timerOwner=null; timer.textContent='—';
     }
     function beginTimer(owner,originalStart=Date.now()) {
@@ -360,7 +359,8 @@
         if (translation) { status.textContent='ಇಂಗ್ಲಿಷ್ ಪದದ ಕನ್ನಡ ಅರ್ಥ'; track('translate'); await speak(translation); return; }
         status.textContent='ಈ ಪದದ ಕನ್ನಡ ಅರ್ಥ ಇನ್ನೂ ಸಿದ್ಧವಾಗಿಲ್ಲ.'; track('translate',false); return;
       }
-      const target=mode==='sentence' ? lineForWord(word) : word;
+      const semanticGroup=groupedWords(result.words||[]).find(item=>item.ids&&item.ids.includes(word.id));
+      const target=mode==='sentence' ? lineForWord(word) : (semanticGroup||word);
       if (!target) return; activate(target,target.text); track(mode==='sentence'?'line':'word'); await speak(target.text);
     }
     function addUnderline(target,box) {
@@ -502,6 +502,11 @@
         const first=items[index], sameLine=next=>next&&next.line_id===first.line_id;
         const second=items[index+1],third=items[index+2],fourth=items[index+3];
         if (/^\d+(?:\.\d+)?$/.test(first.text)&&sameLine(second)&&second.text==='/'&&sameLine(third)&&
+            /^\d+(?:\.\d+)?(?:V|HP|Hz|A|W|kW)$/i.test(third.text)) {
+          output.push({id:first.id,ids:[first.id,second.id,third.id],text:`${first.text}/${third.text}`,
+            box:unionBoxes([first.box,second.box,third.box])}); index+=2; continue;
+        }
+        if (/^\d+(?:\.\d+)?$/.test(first.text)&&sameLine(second)&&second.text==='/'&&sameLine(third)&&
             /^\d+(?:\.\d+)?$/.test(third.text)&&sameLine(fourth)&&/^(?:V|HP|Hz|A|W|kW)$/i.test(fourth.text)) {
           output.push({id:first.id,ids:[first.id,second.id,third.id,fourth.id],text:`${first.text}/${third.text}${fourth.text}`,
             box:unionBoxes([first.box,second.box,third.box,fourth.box])}); index+=3; continue;
@@ -585,7 +590,7 @@
             const cached=readCachedStage(item,stageNumber);
             return Boolean(cached);
           }).length;
-          status.textContent=ready ? `${1+ready}/4 reading stages ready.` : 'ಮೊದಲ ಓದುವಿಕೆ ಸಿದ್ಧವಾಗಿದೆ. Cloud reading is busy; try again later.';
+          status.textContent=ready ? `${1+ready}/3 reading stages ready.` : 'ಮೊದಲ ಓದುವಿಕೆ ಸಿದ್ಧವಾಗಿದೆ. Cloud reading is busy; try again later.';
         }
       } catch (_) {
         if (gallery[galleryIndex]===item) status.textContent='ಮೊದಲ ಓದುವಿಕೆ ಸಿದ್ಧವಾಗಿದೆ. Slow connection; cloud reading was not completed.';
