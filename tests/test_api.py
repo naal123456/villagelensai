@@ -6,11 +6,10 @@ import subprocess
 import unittest
 from unittest.mock import MagicMock, patch
 
-import requests
 from PIL import Image
 
 from api.app import (
-    _access_token, _filter_local_regions, _gemini_validator, _normalize_stage_three,
+    _access_token, _filter_local_regions, _normalize_stage_three,
     _openai_question, _parse_tsv, _process_stored_capture, _tester_link_token, app,
 )
 
@@ -67,8 +66,7 @@ class ApiTests(unittest.TestCase):
         self.assertIn(b'function playKannada', response.data)
         self.assertIn(b'speechAudioCache', response.data)
         self.assertIn(b'keepalive:true', response.data)
-        self.assertIn(b'/process${query}`', response.data)
-        self.assertIn(b"requestProcess('?through=3')", response.data)
+        self.assertIn(b'/process`', response.data)
         self.assertNotIn(b'Speech Services', response.data)
         self.assertIn(b'function translatedWord', response.data)
         self.assertIn(b'function loadSharedImage', response.data)
@@ -76,7 +74,6 @@ class ApiTests(unittest.TestCase):
         self.assertIn(b'id="install"', response.data)
         self.assertIn(b"result.detailed_spoken_kn", response.data)
         self.assertIn(b"analysisVersion='context-v2'", response.data)
-        self.assertIn(b"validatorVersion='consensus-v1'", response.data)
         self.assertIn(b"function groupedWords", response.data)
         self.assertIn(b"function renderObjects", response.data)
         self.assertIn(b"function addFocus", response.data)
@@ -577,16 +574,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.get_json()["stages"]["2"]["stage"], 2)
         self.assertEqual(response.get_json()["errors"]["3"], "READER_FAILED")
         self.assertFalse(response.get_json()["complete"])
-        process.assert_called_once_with(capture_id, "a5", include_stage_four=True)
-
-        process.reset_mock()
-        process.return_value = ({2: {"stage": 2}, 3: {"stage": 3}}, {})
-        fast = self.client.post(
-            f"/api/captures/{capture_id}/process?through=3",
-            headers={"X-VillageLens-Tester-ID": "A5"},
-        )
-        self.assertTrue(fast.get_json()["complete"])
-        process.assert_called_once_with(capture_id, "a5", include_stage_four=False)
+        process.assert_called_once_with(capture_id, "a5")
 
     @patch("api.app._openai_reader")
     @patch("api.app._vision_reader")
@@ -605,12 +593,6 @@ class ApiTests(unittest.TestCase):
                 "translations": [{"source": "book", "translation_kn": "ಪುಸ್ತಕ"}],
                 "summary_kn": "ಪುಸ್ತಕ",
             },
-            f"captures/{capture_id}/stage-4.json": {
-                "stage": 4, "analysis_version": "consensus-v1", "agreement": "high",
-                "confidence": "high", "validated_brief_kn": "ಇದು ಪುಸ್ತಕ.",
-                "validated_detailed_kn": "ಇದು ಓದುವ ಪುಸ್ತಕವಾಗಿದೆ.", "corrections_kn": [],
-                "warning_kn": "", "uncertainty_kn": "",
-            },
         }
 
         def blob_for(name: str) -> MagicMock:
@@ -623,85 +605,14 @@ class ApiTests(unittest.TestCase):
 
         stages, errors = _process_stored_capture(capture_id, "a3")
 
-        self.assertEqual(set(stages), {2, 3, 4})
+        self.assertEqual(set(stages), {2, 3})
         self.assertTrue(stages[3]["quality_validated"])
-        self.assertTrue(stages[4]["quality_validated"])
         self.assertEqual(errors, {})
         vision.assert_not_called()
         openai.assert_not_called()
 
         with self.assertRaises(FileNotFoundError):
             _process_stored_capture(capture_id, "a4")
-
-    @patch("api.app.requests.post")
-    def test_gemini_stage_four_requires_high_independent_agreement(self, provider: object) -> None:
-        provider.return_value.status_code = 200
-        provider.return_value.json.return_value = {"candidates": [{"content": {"parts": [{
-            "text": json.dumps({
-                "agreement": "high", "confidence": "high",
-                "validated_brief_kn": "ಇದು ಪುಸ್ತಕ.",
-                "validated_detailed_kn": "ಇದು ಓದಲು ಬಳಸುವ ಪುಸ್ತಕವಾಗಿದೆ.",
-                "corrections_kn": [], "warning_kn": "", "uncertainty_kn": "",
-            }),
-        }]}}]}
-        with patch.dict("os.environ", {"GEMINI_API_KEY": "test-key"}):
-            value = _gemini_validator(
-                image_bytes(), "image/jpeg", 320, 120,
-                {"scene_type": "book", "brief_spoken_kn": "ಇದು ಪುಸ್ತಕ."},
-            )
-
-        self.assertEqual(value["stage"], 4)
-        self.assertEqual(value["analysis_version"], "consensus-v1")
-        self.assertTrue(value["quality_validated"])
-        payload = provider.call_args.kwargs["json"]
-        self.assertEqual(payload["generationConfig"]["responseMimeType"], "application/json")
-        self.assertIn("inlineData", payload["contents"][0]["parts"][1])
-        self.assertNotIn("test-key", json.dumps(payload))
-
-    @patch("api.app.time.sleep")
-    @patch("api.app.requests.post")
-    def test_gemini_retries_transient_provider_failure(
-        self, provider: object, sleep: object,
-    ) -> None:
-        unavailable = MagicMock(status_code=503)
-        recovered = MagicMock(status_code=200)
-        recovered.json.return_value = {"candidates": [{"content": {"parts": [{
-            "text": json.dumps({
-                "agreement": "partial", "confidence": "medium",
-                "validated_brief_kn": "ಇದು ಚಿತ್ರ.",
-                "validated_detailed_kn": "ಇದು ಪಠ್ಯವಿರುವ ಚಿತ್ರವಾಗಿದೆ.",
-                "corrections_kn": ["ಹೆಚ್ಚು ಸ್ಪಷ್ಟತೆ ಬೇಕು."],
-                "warning_kn": "", "uncertainty_kn": "ಕೆಲವು ಅಂಶಗಳು ಅಸ್ಪಷ್ಟವಾಗಿವೆ.",
-            }),
-        }]}}]}
-        provider.side_effect = [unavailable, recovered]
-        with patch.dict("os.environ", {"GEMINI_API_KEY": "test-key"}):
-            value = _gemini_validator(image_bytes(), "image/jpeg", 320, 120, {})
-
-        self.assertFalse(value["quality_validated"])
-        self.assertEqual(provider.call_count, 2)
-        sleep.assert_called_once_with(1)
-        self.assertEqual(provider.call_args.kwargs["timeout"], 30)
-
-    @patch("api.app.time.sleep")
-    @patch("api.app.requests.post")
-    def test_gemini_retries_network_timeout(self, provider: object, sleep: object) -> None:
-        recovered = MagicMock(status_code=200)
-        recovered.json.return_value = {"candidates": [{"content": {"parts": [{
-            "text": json.dumps({
-                "agreement": "low", "confidence": "low",
-                "validated_brief_kn": "ಇದು ಚಿತ್ರ.",
-                "validated_detailed_kn": "ಚಿತ್ರದ ವಿವರ ಖಚಿತವಾಗಿಲ್ಲ.",
-                "corrections_kn": [], "warning_kn": "", "uncertainty_kn": "ಅಸ್ಪಷ್ಟವಾಗಿದೆ.",
-            }),
-        }]}}]}
-        provider.side_effect = [requests.ReadTimeout(), recovered]
-        with patch.dict("os.environ", {"GEMINI_API_KEY": "test-key"}):
-            value = _gemini_validator(image_bytes(), "image/jpeg", 320, 120, {})
-
-        self.assertEqual(value["agreement"], "low")
-        self.assertEqual(provider.call_count, 2)
-        sleep.assert_called_once_with(1)
 
     @patch("api.app.requests.post")
     def test_spoken_question_returns_scaled_evidence_without_storage(self, provider: object) -> None:

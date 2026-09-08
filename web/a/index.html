@@ -107,7 +107,7 @@
     const meaningFields=['summary_kn','brief_spoken_kn','detailed_spoken_kn','scene_type','objects',
       'what_is_it_kn','what_it_does_kn','important_points_kn','action_needed_kn','warning_kn','uncertainty_kn',
       'transcription_kn','spoken_sections','confidence','needs_independent_review'];
-    const analysisVersion='context-v2', validatorVersion='consensus-v1';
+    const analysisVersion='context-v2';
     let speechVoices=[];
     const testerId=configureTesterId();
 
@@ -180,7 +180,6 @@
       let value=item[`stage${stageNumber}`]||null;
       try { value=value||JSON.parse(localStorage.getItem(cacheKey(item,stageNumber))||'null'); } catch (_) { value=null; }
       if (stageNumber===3&&value&&value.analysis_version!==analysisVersion) return null;
-      if (stageNumber===4&&value&&value.analysis_version!==validatorVersion) return null;
       return value;
     }
     function saveCachedStage(item,stageNumber,value) {
@@ -201,7 +200,6 @@
       if (!target||!source) return;
       for (const key of meaningFields) if (source[key]!==undefined) target[key]=source[key];
       if (source.translations!==undefined) target.translations=source.translations;
-      if (source.stage4!==undefined) target.stage4=source.stage4;
     }
     function applyReaderResult(item,stageNumber,value) {
       saveCachedStage(item,stageNumber,value);
@@ -212,12 +210,8 @@
         copyMeaning(item,value);
         if (item.result) copyMeaning(item.result,item);
       }
-      if (stageNumber===4) {
-        item.stage4=value;
-        if (item.result) item.result.stage4=value;
-      }
       if (gallery[galleryIndex]===item) {
-        const validated=stageNumber!==4||value.quality_validated===true;
+        const validated=true;
         $('quality-'+stageNumber).classList.toggle('ready',validated);
         $('quality-'+stageNumber).classList.toggle('failed',!validated);
         if (stageNumber===2&&(value.words||[]).length&&item.id!=='demo-i2') render(item.result,false);
@@ -227,7 +221,6 @@
           status.textContent=count?`ಓದುವಿಕೆ, ಅರ್ಥ ಮತ್ತು ${count} ವಸ್ತುಗಳು ಸಿದ್ಧವಾಗಿವೆ.`:'ಓದುವಿಕೆ ಮತ್ತು ಅರ್ಥ ಸಿದ್ಧವಾಗಿದೆ.';
           renderContextRegions(); track('stage_3',value.quality_validated===true,value.latency_ms||0);
         }
-        if (stageNumber===4) track('stage_4',validated,value.latency_ms||0);
       }
     }
     function normalizedSpeech(text) {
@@ -339,13 +332,10 @@
     async function explainGlobal() {
       stop(); working('infer-global',true); $('infer-global').classList.add('active'); const began=Date.now();
       try {
-        const validator=result&&result.stage4;
-        const validated=validator&&validator.quality_validated===true;
         const sections=result&&(result.spoken_sections||[]);
-        const fallback=validated?(validator.validated_detailed_kn||validator.validated_brief_kn):
-          result&&(result.detailed_spoken_kn||result.brief_spoken_kn||result.summary_kn);
+        const fallback=result&&(result.detailed_spoken_kn||result.brief_spoken_kn||result.summary_kn);
         if (sections.length) {
-          status.textContent=validated?'ದ್ವಿತೀಯ ಪರಿಶೀಲನೆಯ ಚಿತ್ರದ ಅರ್ಥ':'ಚಿತ್ರದ ಅರ್ಥ';
+          status.textContent='ಚಿತ್ರದ ಅರ್ಥ';
           for (const section of sections) { activate(section,section.text_kn); if (!await speak(section.text_kn)) break; }
         } else if (fallback) { current.textContent=fallback; status.textContent='ಚಿತ್ರದ ಅರ್ಥ'; await speak(fallback); }
         else { current.textContent='Inference is still being prepared.'; status.textContent='ಅರ್ಥ ಇನ್ನೂ ಸಿದ್ಧವಾಗಿಲ್ಲ.'; }
@@ -489,12 +479,12 @@
       try {
         const loaded=await loadItem(item); if (navigation!==navigationGeneration) return;
         render(loaded);
-        for (const stageNumber of [2,3,4]) {
+        for (const stageNumber of [2,3]) {
           const cached=readCachedStage(item,stageNumber);
           if (cached) applyReaderResult(item,stageNumber,cached);
         }
-        timer.textContent=[2,3,4].some(stageNumber=>readCachedStage(item,stageNumber))?'saved':'local';
-        if (item.kind==='capture'&&[2,3,4].some(stageNumber=>!readCachedStage(item,stageNumber))) {
+        timer.textContent=[2,3].some(stageNumber=>readCachedStage(item,stageNumber))?'saved':'local';
+        if (item.kind==='capture'&&[2,3].some(stageNumber=>!readCachedStage(item,stageNumber))) {
           startCloudReaders(item);
         }
       }
@@ -554,30 +544,24 @@
       } catch (error) { saveFailure(item,stageNumber); return {ok:false,error:error.message||'READER_FAILED'}; }
     }
     async function processStoredReaders(item,requested) {
-      const outcomes=new Map();
-      async function requestProcess(query='') {
-        const response=await fetch(`/api/captures/${item.id}/process${query}`,{
-          method:'POST',headers:testerHeaders(),credentials:'same-origin',keepalive:true,
-        });
-        if (response.status===401) { location.href='/access'; throw new Error('ACCESS_REQUIRED'); }
-        const value=await response.json(); if (!response.ok) throw new Error(value.error||'PROCESSING_FAILED');
-        const errors=value.errors||{}, stages=value.stages||{};
-        for (const stageNumber of requested) {
-          const stageValue=stages[String(stageNumber)];
-          if (stageValue) { applyReaderResult(item,stageNumber,stageValue); outcomes.set(stageNumber,{ok:true}); }
-          else if (errors[String(stageNumber)]) outcomes.set(stageNumber,{ok:false,error:errors[String(stageNumber)]});
-        }
+      const response=await fetch(`/api/captures/${item.id}/process`,{
+        method:'POST',headers:testerHeaders(),credentials:'same-origin',keepalive:true,
+      });
+      if (response.status===401) { location.href='/access'; return requested.map(()=>({ok:false,error:'ACCESS_REQUIRED'})); }
+      const value=await response.json(); if (!response.ok) throw new Error(value.error||'PROCESSING_FAILED');
+      const outcomes=new Map(), errors=value.errors||{}, stages=value.stages||{};
+      for (const stageNumber of requested) {
+        const stageValue=stages[String(stageNumber)];
+        if (stageValue) { applyReaderResult(item,stageNumber,stageValue); outcomes.set(stageNumber,{ok:true}); }
+        else if (errors[String(stageNumber)]) outcomes.set(stageNumber,{ok:false,error:errors[String(stageNumber)]});
       }
-      if (requested.some(stageNumber=>stageNumber<4)) await requestProcess('?through=3');
-      if (requested.includes(4)&&!outcomes.get(4)?.ok) await requestProcess();
       return requested.map(stageNumber=>{
         const outcome=outcomes.get(stageNumber)||{ok:false,error:'READER_FAILED'};
         if (!outcome.ok) saveFailure(item,stageNumber); return outcome;
       });
     }
     async function startCloudReaders(item,blob) {
-      const stages=item.retained||item.result&&item.result.retained?[2,3,4]:[2,3];
-      const missing=stages.filter(stageNumber=>!readCachedStage(item,stageNumber));
+      const missing=[2,3].filter(stageNumber=>!readCachedStage(item,stageNumber));
       const cooling=missing.filter(stageNumber=>coolingDown(item,stageNumber));
       cooling.forEach(stageNumber=>$('quality-'+stageNumber).classList.add('failed'));
       const requested=missing.filter(stageNumber=>!cooling.includes(stageNumber));
@@ -597,9 +581,9 @@
         }
         if (gallery[galleryIndex]===item) {
           outcomes.forEach((outcome,index)=>{ if (!outcome.ok) $('quality-'+requested[index]).classList.add('failed'); });
-          const ready=[2,3,4].filter(stageNumber=>{
+          const ready=[2,3].filter(stageNumber=>{
             const cached=readCachedStage(item,stageNumber);
-            return cached&&(stageNumber!==4||cached.quality_validated===true);
+            return Boolean(cached);
           }).length;
           status.textContent=ready ? `${1+ready}/4 reading stages ready.` : 'ಮೊದಲ ಓದುವಿಕೆ ಸಿದ್ಧವಾಗಿದೆ. Cloud reading is busy; try again later.';
         }

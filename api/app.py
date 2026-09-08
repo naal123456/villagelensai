@@ -41,8 +41,6 @@ ALLOWED_MEDIA_TYPES = {"image/jpeg", "image/png", "image/webp"}
 CAPTURE_BUCKET = os.environ.get("VILLAGELENS_CAPTURE_BUCKET", "")
 OPENAI_MODEL = os.environ.get("VILLAGELENS_OPENAI_MODEL", "gpt-5.6-sol")
 OPENAI_ANALYSIS_VERSION = "context-v2"
-GEMINI_MODEL = os.environ.get("VILLAGELENS_GEMINI_MODEL", "gemini-3.8-flash")
-GEMINI_ANALYSIS_VERSION = "consensus-v1"
 KANNADA_TTS_VOICE = os.environ.get("VILLAGELENS_KANNADA_TTS_VOICE", "kn-IN-Standard-A")
 ACCESS_COOKIE_NAME = "villagelens_access_v2"
 TESTER_COOKIE_NAME = "villagelens_tester_v1"
@@ -642,10 +640,6 @@ def _current_stage_three(value: dict[str, Any] | None) -> bool:
     return bool(value and value.get("analysis_version") == OPENAI_ANALYSIS_VERSION)
 
 
-def _current_stage_four(value: dict[str, Any] | None) -> bool:
-    return bool(value and value.get("analysis_version") == GEMINI_ANALYSIS_VERSION)
-
-
 def _context_box(value: Any) -> list[float] | dict[str, float] | None:
     if isinstance(value, dict):
         try:
@@ -806,110 +800,6 @@ def _openai_reader(data: bytes, media_type: str, width: int, height: int) -> dic
             "quality_validated": quality_validated and context_validated}
 
 
-def _normalize_stage_four(value: dict[str, Any]) -> dict[str, Any]:
-    normalized = dict(value)
-    normalized["agreement"] = str(value.get("agreement", "low")).strip().lower()
-    normalized["confidence"] = str(value.get("confidence", "low")).strip().lower()
-    for key in ("validated_brief_kn", "validated_detailed_kn", "warning_kn", "uncertainty_kn"):
-        normalized[key] = str(value.get(key, "")).strip()
-    corrections = value.get("corrections_kn", [])
-    normalized["corrections_kn"] = [
-        str(item).strip() for item in corrections if _valid_kannada_text(item)
-    ] if isinstance(corrections, list) else []
-    normalized["quality_validated"] = bool(
-        normalized["agreement"] == "high"
-        and _valid_kannada_text(normalized["validated_brief_kn"])
-        and _valid_kannada_text(normalized["validated_detailed_kn"])
-    )
-    return normalized
-
-
-def _gemini_validator(
-    data: bytes, media_type: str, width: int, height: int, stage_three: dict[str, Any],
-) -> dict[str, Any]:
-    api_key = os.environ.get("GEMINI_API_KEY", "").strip()
-    if not api_key:
-        raise RuntimeError("GEMINI_VALIDATOR_NOT_CONFIGURED")
-    started = time.monotonic()
-    schema = {
-        "type": "object", "additionalProperties": False,
-        "required": ["agreement", "confidence", "validated_brief_kn",
-                     "validated_detailed_kn", "corrections_kn", "warning_kn", "uncertainty_kn"],
-        "properties": {
-            "agreement": {"type": "string", "enum": ["high", "partial", "low"]},
-            "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
-            "validated_brief_kn": {"type": "string"},
-            "validated_detailed_kn": {"type": "string"},
-            "corrections_kn": {"type": "array", "items": {"type": "string"}},
-            "warning_kn": {"type": "string"},
-            "uncertainty_kn": {"type": "string"},
-        },
-    }
-    proposed = {
-        key: stage_three.get(key)
-        for key in ("scene_type", "objects", "transcription_kn", "important_points_kn",
-                    "brief_spoken_kn", "detailed_spoken_kn", "warning_kn", "uncertainty_kn")
-    }
-    prompt = (
-        "Independently inspect this image, then validate the proposed Kannada interpretation below. "
-        "Check object identity, handwritten Kannada, every important number and unit, purpose, and safety. "
-        "Do not agree merely because the proposal is fluent. Use agreement=high only when all important "
-        "claims are visibly supported and no material correction is needed. Preserve uncertainty and never "
-        "invent a diagnosis, wiring instruction, or unseen fact. Return a concise and detailed natural spoken "
-        "Kannada result, corrections, warning, and uncertainty. Proposed interpretation:\n"
-        + json.dumps(proposed, ensure_ascii=False, separators=(",", ":"))
-    )
-    request_kwargs = {
-        "headers": {"x-goog-api-key": api_key, "Content-Type": "application/json"},
-        "json": {
-            "contents": [{"role": "user", "parts": [
-                {"text": prompt},
-                {"inlineData": {"mimeType": media_type, "data": base64.b64encode(data).decode("ascii")}},
-            ]}],
-            "generationConfig": {
-                "temperature": 0.1, "responseMimeType": "application/json",
-                "responseJsonSchema": schema,
-            },
-        },
-        "timeout": 30,
-    }
-    response = None
-    last_request_error: requests.RequestException | None = None
-    for attempt in range(2):
-        try:
-            response = requests.post(
-                f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent",
-                **request_kwargs,
-            )
-        except requests.RequestException as exc:
-            last_request_error = exc
-            if attempt == 1:
-                raise RuntimeError("GEMINI_VALIDATOR_FAILED") from exc
-            time.sleep(1)
-            continue
-        if response.status_code not in {429, 500, 502, 503, 504} or attempt == 1:
-            break
-        time.sleep(1)
-    if response is None:
-        raise RuntimeError("GEMINI_VALIDATOR_FAILED") from last_request_error
-    if response.status_code != 200:
-        app.logger.warning("Gemini validator failed with HTTP %s", response.status_code)
-        raise RuntimeError("GEMINI_VALIDATOR_FAILED")
-    try:
-        text = response.json()["candidates"][0]["content"]["parts"][0]["text"]
-        parsed = json.loads(text)
-    except (KeyError, IndexError, TypeError, json.JSONDecodeError) as exc:
-        raise RuntimeError("GEMINI_VALIDATOR_INVALID_RESPONSE") from exc
-    normalized = _normalize_stage_four(parsed)
-    normalized.update({
-        "schema": "villagelens.reader.v1", "stage": 4, "reader": "independent_validator",
-        "model": GEMINI_MODEL, "analysis_version": GEMINI_ANALYSIS_VERSION,
-        "latency_ms": round((time.monotonic() - started) * 1000),
-        "image_size": {"width": width, "height": height},
-    })
-    return normalized
-
-
 def _openai_question(
     data: bytes, media_type: str, width: int, height: int, question: str,
 ) -> dict[str, Any]:
@@ -1010,9 +900,7 @@ def _stored_json(bucket: Any, name: str) -> dict[str, Any] | None:
         return None
 
 
-def _process_stored_capture(
-    capture_id: str, tester_id: str, include_stage_four: bool = True,
-) -> tuple[dict[int, dict[str, Any]], dict[int, str]]:
+def _process_stored_capture(capture_id: str, tester_id: str) -> tuple[dict[int, dict[str, Any]], dict[int, str]]:
     bucket = _storage_bucket()
     if bucket is None:
         raise FileNotFoundError
@@ -1024,25 +912,18 @@ def _process_stored_capture(
             raise FileNotFoundError
 
         stages = {
-            stage: value for stage in (2, 3, 4)
+            stage: value for stage in (2, 3)
             if (value := _stored_json(bucket, f"captures/{capture_id}/stage-{stage}.json")) is not None
             and (stage != 3 or _current_stage_three(value))
-            and (stage != 4 or _current_stage_four(value))
         }
         if 3 in stages:
             stages[3] = _normalize_stage_three(stages[3])
-        if 4 in stages:
-            stages[4] = _normalize_stage_four(stages[4])
         missing = [stage for stage in (2, 3) if stage not in stages]
         errors: dict[int, str] = {}
         if 3 in missing and not os.environ.get("OPENAI_API_KEY", "").strip():
             missing.remove(3)
             errors[3] = "OPENAI_READER_NOT_CONFIGURED"
-        needs_four = include_stage_four and 4 not in stages
-        if needs_four and not os.environ.get("GEMINI_API_KEY", "").strip():
-            errors[4] = "GEMINI_VALIDATOR_NOT_CONFIGURED"
-            needs_four = False
-        if not missing and not needs_four:
+        if not missing:
             return stages, errors
 
         source = bucket.blob(f"captures/{capture_id}/source")
@@ -1074,24 +955,6 @@ def _process_stored_capture(
                     except Exception as exc:
                         app.logger.exception("Stored reader stage %s failed for capture %s", stage, capture_id)
                         errors[stage] = str(exc) if isinstance(exc, RuntimeError) else f"STAGE_{stage}_UNAVAILABLE"
-        if needs_four:
-            if 3 not in stages:
-                errors[4] = "STAGE_3_REQUIRED"
-            else:
-                try:
-                    value = _gemini_validator(
-                        data, "image/png", image.width, image.height, stages[3],
-                    )
-                    owner_id = str(capture.get("tester_id", "")).strip().lower()
-                    value["tester_id"] = (
-                        owner_id if TESTER_ID_PATTERN.fullmatch(owner_id)
-                        else tester_id or "unassigned"
-                    )
-                    _store_reader_evidence(capture_id, 4, value)
-                    stages[4] = value
-                except Exception as exc:
-                    app.logger.exception("Stored reader stage 4 failed for capture %s", capture_id)
-                    errors[4] = str(exc) if isinstance(exc, RuntimeError) else "STAGE_4_UNAVAILABLE"
         return stages, errors
 
 
@@ -1191,7 +1054,7 @@ def gallery() -> tuple[Response, int]:
                 (parts[1], int(match.group(1))): blob
                 for blob in blobs
                 if len(parts := blob.name.split("/")) == 3
-                and (match := re.fullmatch(r"stage-([234])\.json", parts[2]))
+                and (match := re.fullmatch(r"stage-([23])\.json", parts[2]))
                 and _valid_capture_id(parts[1])
             }
             requested_tester_id = _tester_id()
@@ -1219,18 +1082,15 @@ def gallery() -> tuple[Response, int]:
                     "tester_id": owner_id or "unassigned",
                     "tester_name": TESTER_NAMES.get(owner_id, ""),
                 }
-                for stage in (2, 3, 4):
+                for stage in (2, 3):
                     if evidence_blob := evidence.get((capture_id, stage)):
                         try:
                             stage_value = json.loads(
                                 evidence_blob.download_as_text(encoding="utf-8")
                             )
-                            if ((stage != 3 or _current_stage_three(stage_value))
-                                    and (stage != 4 or _current_stage_four(stage_value))):
+                            if stage != 3 or _current_stage_three(stage_value):
                                 item[f"stage{stage}"] = (
-                                    _normalize_stage_three(stage_value) if stage == 3
-                                    else _normalize_stage_four(stage_value) if stage == 4
-                                    else stage_value
+                                    _normalize_stage_three(stage_value) if stage == 3 else stage_value
                                 )
                         except (TypeError, ValueError, json.JSONDecodeError):
                             app.logger.warning(
@@ -1275,16 +1135,13 @@ def process_captured_image(capture_id: str) -> tuple[Response, int]:
     if not _valid_capture_id(capture_id):
         return jsonify(error="CAPTURE_NOT_FOUND"), 404
     try:
-        include_stage_four = request.args.get("through") != "3"
-        stages, errors = _process_stored_capture(
-            capture_id, _tester_id(), include_stage_four=include_stage_four,
-        )
+        stages, errors = _process_stored_capture(capture_id, _tester_id())
         return jsonify(
             schema="villagelens.processing.v1",
             capture_id=capture_id,
             stages={str(stage): value for stage, value in stages.items()},
             errors={str(stage): error for stage, error in errors.items()},
-            complete=all(stage in stages for stage in ((2, 3, 4) if include_stage_four else (2, 3))),
+            complete=all(stage in stages for stage in (2, 3)),
         ), 200
     except FileNotFoundError:
         return jsonify(error="CAPTURE_NOT_FOUND"), 404
