@@ -733,10 +733,14 @@
       }
       stop();
       const item=gallery[galleryIndex];
-      if (!item||!item.retained||!/^[0-9a-f]{32}$/.test(item.id)) {
-        status.textContent='ಉಳಿಸಿದ ಚಿತ್ರಕ್ಕೆ ಮಾತ್ರ ಪ್ರಶ್ನೆ ಕೇಳಬಹುದು. · Ask works on saved photos.'; track('question',false); return;
+      const retained=item&&(item.retained||item.result&&item.result.retained);
+      if (!retained||!/^[0-9a-f]{32}$/.test(item.id)) {
+        current.textContent='🎤 ✕';
+        status.textContent='ಉಳಿಸಿದ ಚಿತ್ರಕ್ಕೆ ಮಾತ್ರ ಪ್ರಶ್ನೆ ಕೇಳಬಹುದು. · Ask works on saved photos, not I1 or I2.';
+        track('question',false); return;
       }
       if (!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia||typeof MediaRecorder==='undefined') {
+        current.textContent='🎤 ✕';
         status.textContent='ಈ ಫೋನ್‌ನಲ್ಲಿ ಧ್ವನಿ ರೆಕಾರ್ಡಿಂಗ್ ಲಭ್ಯವಿಲ್ಲ. · Microphone recording is unavailable.';
         track('question',false); return;
       }

@@ -98,6 +98,8 @@ class ApiTests(unittest.TestCase):
         self.assertIn(b"new MediaRecorder", response.data)
         self.assertIn(b'/ask-audio`', response.data)
         self.assertNotIn(b'webkitSpeechRecognition', response.data)
+        self.assertIn(b'item.retained||item.result&&item.result.retained', response.data)
+        self.assertIn(b'not I1 or I2', response.data)
         self.assertIn(b"fetch('/api/events'", response.data)
         self.assertIn(b"Add to Home Screen", response.data)
         self.assertNotIn(b'id="mode-meaning"', response.data)
