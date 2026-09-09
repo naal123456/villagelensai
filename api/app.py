@@ -71,6 +71,7 @@ TESTER_NAMES = {
 USAGE_EVENTS = {
     "capture", "word", "line", "translate", "object", "infer", "question",
     "question_tap", "question_permission", "question_recording", "question_upload",
+    "camera_open", "camera_fallback", "camera_cancel", "camera_auto", "camera_manual",
     "audio_ok", "audio_failed", "stage_1", "stage_2", "stage_3", "stage_4",
 }
 DEMO_ASSETS = {
@@ -1121,6 +1122,26 @@ def _valid_capture_id(capture_id: str) -> bool:
     return bool(re.fullmatch(r"[0-9a-f]{32}", capture_id))
 
 
+def _capture_quality_header() -> dict[str, Any]:
+    raw = request.headers.get("X-VillageLens-Capture-Quality", "")
+    if not raw or len(raw) > 1000:
+        return {}
+    try:
+        supplied = json.loads(raw)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return {}
+    if not isinstance(supplied, dict):
+        return {}
+    quality: dict[str, Any] = {}
+    for key in ("brightness", "dark_percent", "glare_percent", "sharpness", "motion"):
+        value = supplied.get(key)
+        if isinstance(value, (int, float)) and not isinstance(value, bool) and value == value:
+            quality[key] = round(max(0.0, min(1000.0, float(value))), 2)
+    if isinstance(supplied.get("auto_captured"), bool):
+        quality["auto_captured"] = supplied["auto_captured"]
+    return quality
+
+
 def _speech_cache_name(text: str) -> str:
     identity = f"v1\0{KANNADA_TTS_VOICE}\0{text}".encode("utf-8")
     return f"speech/v1/{hashlib.sha256(identity).hexdigest()}.mp3"
@@ -1251,6 +1272,7 @@ def gallery() -> tuple[Response, int]:
                 item = {
                     "id": capture_id,
                     "label": value.get("label") or "Captured page",
+                    "capture_code": f"{(owner_id or 'UN').upper()}-{capture_id[:6].upper()}",
                     "kind": "capture",
                     "retained": True,
                     "captured_at": value.get("captured_at"),
@@ -1266,9 +1288,12 @@ def gallery() -> tuple[Response, int]:
                                 evidence_blob.download_as_text(encoding="utf-8")
                             )
                             if stage != 3 or _current_stage_three(stage_value):
-                                item[f"stage{stage}"] = (
-                                    _normalize_stage_three(stage_value) if stage == 3 else stage_value
-                                )
+                                normalized = _normalize_stage_three(stage_value) if stage == 3 else stage_value
+                                item[f"stage{stage}"] = normalized
+                                if stage == 3:
+                                    scene_type = str(normalized.get("scene_type", "")).strip()
+                                    if scene_type:
+                                        item["label"] = scene_type[:60]
                         except (TypeError, ValueError, json.JSONDecodeError):
                             app.logger.warning(
                                 "Ignoring invalid stage %s evidence for capture %s",
@@ -1514,9 +1539,16 @@ def capture() -> tuple[Response, int]:
     requested_id = request.headers.get("X-VillageLens-Capture-ID", "")
     capture_id = requested_id if _valid_capture_id(requested_id) else uuid.uuid4().hex
     tester_id = _tester_id()
+    capture_source = request.headers.get("X-VillageLens-Capture-Source", "").strip().lower()
+    if capture_source not in {"guided-camera-v1", "file-camera", "shared-image"}:
+        capture_source = "file-camera"
+    capture_quality = _capture_quality_header()
+    capture_code = f"{(tester_id or 'UN').upper()}-{capture_id[:6].upper()}"
     result = {
         "schema": "villagelens.capture.v1", "capture_id": capture_id,
-        "captured_at": datetime.now(timezone.utc).isoformat(), "label": "Captured page",
+        "captured_at": datetime.now(timezone.utc).isoformat(), "label": "Captured photo",
+        "capture_code": capture_code, "capture_source": capture_source,
+        "capture_quality": capture_quality,
         "source_sha256": source_sha256,
         "image_size": {"width": image.width, "height": image.height},
         "image_normalized": normalized, "stage": 1, "stage_state": "initial_reading",

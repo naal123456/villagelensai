@@ -78,6 +78,14 @@ class ApiTests(unittest.TestCase):
         self.assertIn(b'id="ask"', action_toolbar)
         self.assertIn(b'id="install"', action_toolbar)
         self.assertIn(b'id="camera"', response.data)
+        self.assertIn(b'id="camera-guide"', response.data)
+        self.assertIn(b'id="camera-preview"', response.data)
+        self.assertIn(b'id="camera-capture"', response.data)
+        self.assertIn(b'function analyzeCameraFrame', response.data)
+        self.assertIn(b'function captureGuidedPhoto', response.data)
+        self.assertIn(b"facingMode:{ideal:'environment'}", response.data)
+        self.assertIn(b"source:'guided-camera-v1'", response.data)
+        self.assertIn(b"X-VillageLens-Capture-Quality", response.data)
         self.assertIn(b'function selectableObjects', response.data)
         self.assertIn(b"?'saved \xe2\x9c\x93'", response.data)
         self.assertIn(b'function clearControls', response.data)
@@ -504,6 +512,36 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(value["reader"]["input_size"], {"width": 320, "height": 120})
         self.assertIn("eng+kan", run.call_args.args[0])
         self.assertEqual(response.headers["Cache-Control"], "no-store")
+
+    @patch("api.app._store_capture", return_value=False)
+    @patch("api.app.subprocess.run")
+    def test_guided_capture_stores_bounded_quality_and_durable_code(
+        self, run: object, store: object,
+    ) -> None:
+        run.return_value = subprocess.CompletedProcess([], 0, stdout=TSV, stderr="")
+        response = self.client.post(
+            "/api/capture", data=image_bytes(), content_type="image/jpeg",
+            headers={
+                "X-VillageLens-Tester-ID": "A2",
+                "X-VillageLens-Capture-ID": "f" * 32,
+                "X-VillageLens-Capture-Source": "guided-camera-v1",
+                "X-VillageLens-Capture-Quality": json.dumps({
+                    "brightness": 121.238, "sharpness": 14.126,
+                    "motion": 2.5, "glare_percent": 3.1,
+                    "auto_captured": True, "private_note": "discard me",
+                }),
+            },
+        )
+
+        value = response.get_json()
+        self.assertEqual(value["capture_code"], "A2-FFFFFF")
+        self.assertEqual(value["capture_source"], "guided-camera-v1")
+        self.assertEqual(value["capture_quality"], {
+            "brightness": 121.24, "sharpness": 14.13, "motion": 2.5,
+            "glare_percent": 3.1, "auto_captured": True,
+        })
+        self.assertNotIn("private_note", value["capture_quality"])
+        self.assertEqual(store.call_args.args[2]["capture_code"], "A2-FFFFFF")
 
     @patch("api.app._store_capture", return_value=False)
     @patch("api.app.subprocess.run")
