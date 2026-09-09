@@ -275,6 +275,27 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.get_json()["status"], "ok")
 
+    @patch("api.app._storage_bucket")
+    def test_named_tester_roster_is_reported_to_reviewer(self, storage_bucket: object) -> None:
+        values = []
+        for tester_id in ("a4", "a5", "a6", "a7"):
+            blob = MagicMock()
+            blob.name = f"captures/{tester_id * 16}/result.json"
+            blob.download_as_text.return_value = json.dumps({
+                "capture_id": tester_id * 16, "captured_at": tester_id,
+                "label": "Captured page", "tester_id": tester_id,
+            })
+            values.append(blob)
+        storage_bucket.return_value.list_blobs.return_value = values
+
+        items = self.client.get(
+            "/api/gallery", headers={"X-VillageLens-Tester-ID": "a3"},
+        ).get_json()["items"][2:]
+
+        self.assertEqual({item["tester_id"]: item["tester_name"] for item in items}, {
+            "a4": "Selvan", "a5": "Kiran", "a6": "Rupa", "a7": "Akul",
+        })
+
     @patch("api.app._store_capture", return_value=False)
     @patch("api.app.subprocess.run")
     def test_tester_roster_accepts_a10_and_rejects_a11(

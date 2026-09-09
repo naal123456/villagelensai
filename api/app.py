@@ -59,6 +59,9 @@ TESTER_NAMES = {
     "a2": "Umesh",
     "a3": "Reviewer",
     "a4": "Selvan",
+    "a5": "Kiran",
+    "a6": "Rupa",
+    "a7": "Akul",
 }
 USAGE_EVENTS = {
     "capture", "word", "line", "translate", "object", "infer", "question",
