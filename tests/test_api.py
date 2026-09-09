@@ -10,8 +10,8 @@ from PIL import Image
 
 from api.app import (
     _access_token, _filter_local_regions, _normalize_stage_three,
-    _openai_question, _openai_translate, _parse_tsv, _process_stored_capture,
-    _tester_link_token, app,
+    _openai_question, _openai_transcribe, _openai_translate, _parse_tsv,
+    _process_stored_capture, _tester_link_token, app,
 )
 
 
@@ -94,6 +94,10 @@ class ApiTests(unittest.TestCase):
         self.assertIn(b"function renderObjects", response.data)
         self.assertIn(b"function addFocus", response.data)
         self.assertIn(b"function askImageQuestion", response.data)
+        self.assertIn(b'navigator.mediaDevices.getUserMedia', response.data)
+        self.assertIn(b"new MediaRecorder", response.data)
+        self.assertIn(b'/ask-audio`', response.data)
+        self.assertNotIn(b'webkitSpeechRecognition', response.data)
         self.assertIn(b"fetch('/api/events'", response.data)
         self.assertIn(b"Add to Home Screen", response.data)
         self.assertNotIn(b'id="mode-meaning"', response.data)
@@ -716,6 +720,46 @@ class ApiTests(unittest.TestCase):
         payload = provider.call_args.kwargs["json"]
         self.assertFalse(payload["store"])
         self.assertIn("ಇದು ಏನು?", payload["input"][0]["content"][0]["text"])
+
+    @patch("api.app.requests.post")
+    def test_openai_transcription_uses_audio_endpoint(self, provider: object) -> None:
+        provider.return_value.status_code = 200
+        provider.return_value.json.return_value = {"text": "ಈ ಚಿತ್ರದಲ್ಲಿ ಏನು ಇದೆ?"}
+
+        with patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"}):
+            transcript = _openai_transcribe(b"audio", "question.m4a", "audio/mp4")
+
+        self.assertEqual(transcript, "ಈ ಚಿತ್ರದಲ್ಲಿ ಏನು ಇದೆ?")
+        self.assertEqual(provider.call_args.args[0], "https://api.openai.com/v1/audio/transcriptions")
+        self.assertEqual(provider.call_args.kwargs["data"]["model"], "gpt-4o-mini-transcribe")
+        self.assertEqual(provider.call_args.kwargs["files"]["file"], (
+            "question.m4a", b"audio", "audio/mp4",
+        ))
+
+    @patch("api.app._openai_question", return_value={"answer_kn": "ಇದು ಒಂದು ಚಿತ್ರ."})
+    @patch("api.app._openai_transcribe", return_value="ಇದು ಏನು?")
+    @patch("api.app._stored_json", return_value={"tester_id": "a1"})
+    @patch("api.app._storage_bucket")
+    def test_recorded_question_endpoint_transcribes_then_answers(
+        self, storage_bucket: object, stored_json: object,
+        transcribe: object, question: object,
+    ) -> None:
+        source = storage_bucket.return_value.blob.return_value
+        source.exists.return_value = True
+        source.download_as_bytes.return_value = image_bytes()
+        capture_id = "f" * 32
+
+        response = self.client.post(
+            f"/api/captures/{capture_id}/ask-audio",
+            data={"audio": (io.BytesIO(b"recorded-audio"), "question.webm", "audio/webm")},
+            headers={"X-VillageLens-Tester-ID": "a1"},
+            content_type="multipart/form-data",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["answer_kn"], "ಇದು ಒಂದು ಚಿತ್ರ.")
+        transcribe.assert_called_once_with(b"recorded-audio", "question.webm", "audio/webm")
+        self.assertEqual(question.call_args.args[-1], "ಇದು ಏನು?")
 
     def test_usage_events_accept_only_privacy_safe_aggregates(self) -> None:
         with self.assertLogs("api.app", level="INFO") as logs:

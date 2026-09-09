@@ -104,7 +104,7 @@
     let gallery=[], galleryIndex=0, result=null, mode='word', timerId=0, started=0, timerOwner=null;
     let navigationGeneration=0;
     let playbackGeneration=0, speechGeneration=0, pointerStart=null, suppressTap=false, activeControl='mode-word';
-    let audioContext=null, activeAudioSource=null;
+    let audioContext=null, activeAudioSource=null, activeRecorder=null, recordingTimer=0;
     const speechAudioCache=new Map();
     const translationCache=new Map();
     const controlIds=['mode-word','mode-sentence','mode-translate','camera','play-words','play-sentences',
@@ -169,6 +169,8 @@
     }
     function stop(keepControl=false) {
       playbackGeneration++; speechGeneration++;
+      clearTimeout(recordingTimer); recordingTimer=0;
+      if (activeRecorder&&activeRecorder.state!=='inactive') { try { activeRecorder.stop(); } catch (_) {} }
       if ('speechSynthesis' in window) speechSynthesis.cancel();
       if (activeAudioSource) { try { activeAudioSource.stop(); } catch (_) {} activeAudioSource=null; }
       stage.classList.remove('playing');
@@ -724,29 +726,61 @@
       finally { input.value=''; if (image.src!==objectUrl) URL.revokeObjectURL(objectUrl); }
     }
     async function askImageQuestion() {
-      if (activeControl==='ask') { stop(); return; }
+      if (activeRecorder&&activeRecorder.state!=='inactive') {
+        clearTimeout(recordingTimer); recordingTimer=0;
+        status.textContent='ಪ್ರಶ್ನೆಯನ್ನು ಸಿದ್ಧಪಡಿಸುತ್ತಿದೆ… · Preparing question…';
+        activeRecorder.stop(); return;
+      }
       stop();
-      const Recognition=window.SpeechRecognition||window.webkitSpeechRecognition;
-      if (!Recognition) { status.textContent='ಈ ಫೋನ್‌ನಲ್ಲಿ ಮಾತಿನ ಪ್ರಶ್ನೆ ಲಭ್ಯವಿಲ್ಲ.'; track('question',false); return; }
       const item=gallery[galleryIndex];
       if (!item||!item.retained||!/^[0-9a-f]{32}$/.test(item.id)) {
-        status.textContent='ಉಳಿಸಿದ ಚಿತ್ರಕ್ಕೆ ಮಾತ್ರ ಪ್ರಶ್ನೆ ಕೇಳಬಹುದು.'; track('question',false); return;
+        status.textContent='ಉಳಿಸಿದ ಚಿತ್ರಕ್ಕೆ ಮಾತ್ರ ಪ್ರಶ್ನೆ ಕೇಳಬಹುದು. · Ask works on saved photos.'; track('question',false); return;
+      }
+      if (!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia||typeof MediaRecorder==='undefined') {
+        status.textContent='ಈ ಫೋನ್‌ನಲ್ಲಿ ಧ್ವನಿ ರೆಕಾರ್ಡಿಂಗ್ ಲಭ್ಯವಿಲ್ಲ. · Microphone recording is unavailable.';
+        track('question',false); return;
       }
       if (!startAction('ask')) return;
-      status.textContent='ನಿಮ್ಮ ಪ್ರಶ್ನೆಯನ್ನು ಕೇಳುತ್ತಿದ್ದೇನೆ… · Listening…'; const began=Date.now();
+      const generation=playbackGeneration, began=Date.now(); let stream=null,recorder=null;
       try {
-        const question=await new Promise((resolve,reject)=>{
-          const recognition=new Recognition(); recognition.lang='kn-IN'; recognition.interimResults=false; recognition.maxAlternatives=1;
-          recognition.onresult=event=>resolve(event.results[0][0].transcript); recognition.onerror=()=>reject(new Error('RECOGNITION_FAILED'));
-          recognition.onend=()=>setTimeout(()=>reject(new Error('NO_QUESTION')),0); recognition.start();
+        status.textContent='ಮೈಕ್ ಅನುಮತಿ ನೀಡಿ. · Allow microphone access.';
+        stream=await navigator.mediaDevices.getUserMedia({audio:true});
+        if (generation!==playbackGeneration||activeControl!=='ask') return;
+        const types=['audio/mp4','audio/webm;codecs=opus','audio/webm'];
+        const mimeType=types.find(type=>MediaRecorder.isTypeSupported&&MediaRecorder.isTypeSupported(type))||'';
+        recorder=mimeType?new MediaRecorder(stream,{mimeType}):new MediaRecorder(stream);
+        const chunks=[];
+        const recorded=new Promise((resolve,reject)=>{
+          recorder.ondataavailable=event=>{ if (event.data&&event.data.size) chunks.push(event.data); };
+          recorder.onerror=()=>reject(new Error('RECORDING_FAILED'));
+          recorder.onstop=()=>resolve(new Blob(chunks,{type:recorder.mimeType||mimeType||'audio/webm'}));
         });
-        status.textContent='ಉತ್ತರವನ್ನು ಸಿದ್ಧಪಡಿಸುತ್ತಿದೆ…';
-        const response=await fetch(`/api/captures/${item.id}/ask`,{method:'POST',headers:testerHeaders({'Content-Type':'application/json'}),body:JSON.stringify({question})});
+        activeRecorder=recorder; recorder.start();
+        current.textContent='🎤';
+        status.textContent='ಈಗ ಮಾತನಾಡಿ. ಮುಗಿದಾಗ 🎤 ಮತ್ತೆ ಒತ್ತಿ. · Speak now; tap 🎤 again when finished.';
+        recordingTimer=setTimeout(()=>{ if (recorder.state!=='inactive') recorder.stop(); },15000);
+        const audio=await recorded; clearTimeout(recordingTimer); recordingTimer=0; activeRecorder=null;
+        stream.getTracks().forEach(track=>track.stop()); stream=null;
+        if (generation!==playbackGeneration||activeControl!=='ask') return;
+        if (!audio.size) throw new Error('EMPTY_RECORDING');
+        status.textContent='ಉತ್ತರವನ್ನು ಸಿದ್ಧಪಡಿಸುತ್ತಿದೆ… · Preparing answer…';
+        const extension=audio.type.includes('mp4')?'m4a':(audio.type.includes('webm')?'webm':'audio');
+        const form=new FormData(); form.append('audio',audio,`question.${extension}`);
+        const response=await fetch(`/api/captures/${item.id}/ask-audio`,{
+          method:'POST',headers:testerHeaders(),body:form,
+        });
         const answer=await response.json(); if (!response.ok) throw new Error(answer.error||'QUESTION_FAILED');
         if (answer.evidence&&answer.evidence[0]) addFocus(answer.evidence[0].box);
         current.textContent=answer.answer_kn; status.textContent='ಚಿತ್ರದ ಪ್ರಶ್ನೆಗೆ ಉತ್ತರ'; await speak(answer.answer_kn); track('question',true,Date.now()-began);
-      } catch (_) { status.textContent='ಪ್ರಶ್ನೆಯನ್ನು ಕೇಳಲಾಗಲಿಲ್ಲ. ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.'; track('question',false,Date.now()-began); }
-      finally { finishAction('ask'); }
+      } catch (_) {
+        status.textContent='ಪ್ರಶ್ನೆಯನ್ನು ಕೇಳಲಾಗಲಿಲ್ಲ. ಮೈಕ್ ಅನುಮತಿ ನೀಡಿ ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ. · Could not hear the question.';
+        track('question',false,Date.now()-began);
+      } finally {
+        clearTimeout(recordingTimer); recordingTimer=0;
+        if (activeRecorder===recorder) activeRecorder=null;
+        if (stream) stream.getTracks().forEach(track=>track.stop());
+        finishAction('ask');
+      }
     }
     $('mode-word').onclick=()=>setMode('word','mode-word'); $('mode-sentence').onclick=()=>setMode('sentence','mode-sentence');
     $('mode-translate').onclick=()=>setMode('translate','mode-translate'); $('camera').onclick=()=>{ stop(); activeControl='camera'; $('camera').classList.add('active'); input.click(); };

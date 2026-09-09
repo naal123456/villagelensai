@@ -48,6 +48,10 @@ TESTER_COOKIE_NAME = "villagelens_tester_v1"
 LEGACY_ACCESS_COOKIE_NAMES = ("villagelens_access",)
 ACCESS_COOKIE_TTL_SECONDS = 30 * 24 * 60 * 60
 MAX_QUESTION_CHARACTERS = 500
+MAX_QUESTION_AUDIO_BYTES = 4 * 1024 * 1024
+OPENAI_TRANSCRIPTION_MODEL = os.environ.get(
+    "VILLAGELENS_TRANSCRIPTION_MODEL", "gpt-4o-mini-transcribe"
+)
 MODEL_SHA256 = {
     "kan": "bd31e6b6ae93271e3bcf5383d306d8eefbb91542937cd6d735a5930c970e61d8",
     "eng": "7d4322bd2a7749724879683fc3912cb542f19906c83bcc1a52132556427170b2",
@@ -881,6 +885,30 @@ def _openai_question(
     return result
 
 
+def _openai_transcribe(audio: bytes, filename: str, media_type: str) -> str:
+    api_key = os.environ.get("OPENAI_API_KEY", "").strip()
+    if not api_key:
+        raise RuntimeError("OPENAI_READER_NOT_CONFIGURED")
+    response = requests.post(
+        "https://api.openai.com/v1/audio/transcriptions",
+        headers={"Authorization": f"Bearer {api_key}"},
+        data={
+            "model": OPENAI_TRANSCRIPTION_MODEL,
+            "response_format": "json",
+            "prompt": "The speaker may use Kannada, English, or both while asking about an image.",
+        },
+        files={"file": (filename or "question.webm", audio, media_type or "audio/webm")},
+        timeout=45,
+    )
+    if response.status_code != 200:
+        app.logger.warning("OpenAI transcription failed with HTTP %s", response.status_code)
+        raise RuntimeError("OPENAI_TRANSCRIPTION_FAILED")
+    transcript = re.sub(r"\s+", " ", str(response.json().get("text", ""))).strip()
+    if not transcript:
+        raise RuntimeError("OPENAI_TRANSCRIPTION_EMPTY")
+    return transcript[:MAX_QUESTION_CHARACTERS]
+
+
 def _openai_translate(text: str) -> dict[str, str]:
     api_key = os.environ.get("OPENAI_API_KEY", "").strip()
     if not api_key:
@@ -1268,6 +1296,48 @@ def ask_about_capture(capture_id: str) -> tuple[Response, int]:
         return jsonify(error="CAPTURE_NOT_FOUND"), 404
     except Exception as exc:
         app.logger.exception("Spoken image question failed for %s", capture_id)
+        error = str(exc) if isinstance(exc, RuntimeError) else "QUESTION_UNAVAILABLE"
+        return jsonify(error=error), 503
+
+
+@app.post("/api/captures/<capture_id>/ask-audio")
+def ask_about_capture_audio(capture_id: str) -> tuple[Response, int]:
+    if not _valid_capture_id(capture_id):
+        return jsonify(error="CAPTURE_NOT_FOUND"), 404
+    uploaded = request.files.get("audio")
+    if uploaded is None:
+        return jsonify(error="QUESTION_AUDIO_REQUIRED"), 400
+    audio = uploaded.read(MAX_QUESTION_AUDIO_BYTES + 1)
+    if not audio:
+        return jsonify(error="QUESTION_AUDIO_REQUIRED"), 400
+    if len(audio) > MAX_QUESTION_AUDIO_BYTES:
+        return jsonify(error="QUESTION_AUDIO_TOO_LARGE"), 413
+    try:
+        bucket = _storage_bucket()
+        if bucket is None:
+            raise FileNotFoundError
+        capture = _stored_json(bucket, f"captures/{capture_id}/result.json")
+        tester_id = _tester_id()
+        if capture is None or (
+            tester_id and not _is_reviewer(tester_id) and capture.get("tester_id") != tester_id
+        ):
+            raise FileNotFoundError
+        source = bucket.blob(f"captures/{capture_id}/source")
+        if not source.exists():
+            raise FileNotFoundError
+        question = _openai_transcribe(
+            audio, uploaded.filename or "question.webm", uploaded.mimetype or "audio/webm",
+        )
+        image, _ = _normalized_image(source.download_as_bytes())
+        normalized = io.BytesIO()
+        image.save(normalized, format="PNG")
+        return jsonify(_openai_question(
+            normalized.getvalue(), "image/png", image.width, image.height, question,
+        )), 200
+    except FileNotFoundError:
+        return jsonify(error="CAPTURE_NOT_FOUND"), 404
+    except Exception as exc:
+        app.logger.exception("Spoken audio question failed for %s", capture_id)
         error = str(exc) if isinstance(exc, RuntimeError) else "QUESTION_UNAVAILABLE"
         return jsonify(error=error), 503
 
