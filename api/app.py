@@ -69,6 +69,7 @@ TESTER_NAMES = {
 }
 USAGE_EVENTS = {
     "capture", "word", "line", "translate", "object", "infer", "question",
+    "question_tap", "question_permission", "question_recording", "question_upload",
     "audio_ok", "audio_failed", "stage_1", "stage_2", "stage_3", "stage_4",
 }
 DEMO_ASSETS = {
@@ -1364,9 +1365,12 @@ def usage_events() -> tuple[Response, int]:
         })
     if not accepted:
         return jsonify(error="EVENTS_INVALID"), 400
-    app.logger.info("villagelens_usage %s", json.dumps({
+    usage = {
         "tester_id": _tester_id() or "unassigned", "events": accepted,
-    }, separators=(",", ":")))
+    }
+    app.logger.info("villagelens_usage %s", json.dumps(usage, separators=(",", ":")))
+    if any(item["name"].startswith("question") for item in accepted):
+        app.logger.warning("villagelens_mic %s", json.dumps(usage, separators=(",", ":")))
     return jsonify(accepted=len(accepted)), 202
 
 

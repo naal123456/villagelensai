@@ -30,6 +30,11 @@
     #quality-2.ready { background: #9adfae; } #quality-3.ready { background: #39ad68; }
     .bar.failed { border-color: #9b7048; background: #5c4c3e; }
     #quality-timer { min-width: 2.6em; color: #c7d1da; font-variant-numeric: tabular-nums; font-size: .85rem; }
+    #mic-status { margin: 5px 0 0; padding: 7px 9px; border: 2px solid #62d7ff; border-radius: 8px;
+      background: #123b4a; color: white; font-size: .9rem; font-weight: 750; }
+    #mic-status[data-state="recording"] { border-color: #ff6b6b; background: #5b2020; }
+    #mic-status[data-state="blocked"] { border-color: #ffb052; background: #56310e; }
+    #mic-status[hidden] { display: none; }
     .gallery { display: grid; grid-template-columns: 42px 1fr 42px; align-items: center; gap: 4px; margin-top: 7px; }
     .gallery > button { min-height: 42px; padding: 0; }
     #position { color: #c7d1da; font-size: .9rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -52,6 +57,8 @@
     #current { font-size: clamp(1.3rem, 5vw, 2.35rem); }
     .note { color: #9fb3c8; font-size: .8rem; margin: 6px 0; }
     #install, #ask { background: #176c42; border-color: #55c98a; }
+    #ask.active, #ask.working { border-color: #62d7ff; background: #174b5f; }
+    #ask.recording { border-color: #ff8a8a; background: #7a2020; animation: working .6s infinite alternate; }
     #install[hidden] { display: none; }
     @media (hover:hover) { button:hover::after { content: attr(data-tip); position: absolute; transform: translate(-75%, 40px);
       background: #000; padding: 5px 8px; border-radius: 6px; font-size: .75rem; white-space: nowrap; z-index: 10; } }
@@ -79,6 +86,7 @@
         <span class="bar" id="quality-3"></span>
         <span id="quality-timer">—</span>
       </div>
+      <p id="mic-status" role="status" aria-live="assertive" hidden></p>
     </section>
     <div class="gallery" aria-label="Saved pages">
       <button id="previous" aria-label="Previous page" data-tip="Previous page">‹</button>
@@ -100,7 +108,7 @@
     const $ = id => document.getElementById(id);
     const input=$('camera-input'), image=$('source-image'), overlay=$('overlay'), stage=$('stage');
     const status=$('status'), current=$('current'), position=$('position'), timer=$('quality-timer');
-    const ownerBadge=$('owner-badge');
+    const ownerBadge=$('owner-badge'), micStatus=$('mic-status'), askButton=$('ask');
     let gallery=[], galleryIndex=0, result=null, mode='word', timerId=0, started=0, timerOwner=null;
     let navigationGeneration=0;
     let playbackGeneration=0, speechGeneration=0, pointerStart=null, suppressTap=false, activeControl='mode-word';
@@ -150,6 +158,9 @@
         body:JSON.stringify({events:[{name,capture_id:captureId(),ok,elapsed_ms:elapsedMs}]})}).catch(()=>{});
     }
     function working(id,on) { const node=$(id); node.classList.toggle('working',on); node.setAttribute('aria-busy',String(on)); }
+    function showMic(state,message) {
+      micStatus.hidden=false; micStatus.dataset.state=state; micStatus.textContent=message;
+    }
 
     function clearControls() {
       for (const id of controlIds) { $(id).classList.remove('active','working'); $(id).setAttribute('aria-busy','false'); }
@@ -728,27 +739,38 @@
     async function askImageQuestion() {
       if (activeRecorder&&activeRecorder.state!=='inactive') {
         clearTimeout(recordingTimer); recordingTimer=0;
+        askButton.textContent='⏳'; askButton.classList.remove('recording');
+        showMic('processing','ಧ್ವನಿಯನ್ನು ಕಳುಹಿಸಲಾಗುತ್ತಿದೆ… · Sending your voice…');
         status.textContent='ಪ್ರಶ್ನೆಯನ್ನು ಸಿದ್ಧಪಡಿಸುತ್ತಿದೆ… · Preparing question…';
         activeRecorder.stop(); return;
       }
+      askButton.textContent='…';
+      showMic('starting','ಮೈಕ್ ಪ್ರಾರಂಭವಾಗುತ್ತಿದೆ… · Starting microphone…');
+      track('question_tap');
       stop();
       const item=gallery[galleryIndex];
       const retained=item&&(item.retained||item.result&&item.result.retained);
       if (!retained||!/^[0-9a-f]{32}$/.test(item.id)) {
+        askButton.textContent='🎤'; showMic('blocked','ಮೊದಲು ಉಳಿಸಿದ ಚಿತ್ರ ಆಯ್ಕೆಮಾಡಿ. · Select a saved photo (not I1 or I2).');
         current.textContent='🎤 ✕';
         status.textContent='ಉಳಿಸಿದ ಚಿತ್ರಕ್ಕೆ ಮಾತ್ರ ಪ್ರಶ್ನೆ ಕೇಳಬಹುದು. · Ask works on saved photos, not I1 or I2.';
         track('question',false); return;
       }
       if (!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia||typeof MediaRecorder==='undefined') {
+        askButton.textContent='🎤';
+        showMic('blocked','ಈ ಬ್ರೌಸರ್‌ನಲ್ಲಿ ಮೈಕ್ ಲಭ್ಯವಿಲ್ಲ. · Microphone recording is unavailable in this browser.');
         current.textContent='🎤 ✕';
         status.textContent='ಈ ಫೋನ್‌ನಲ್ಲಿ ಧ್ವನಿ ರೆಕಾರ್ಡಿಂಗ್ ಲಭ್ಯವಿಲ್ಲ. · Microphone recording is unavailable.';
         track('question',false); return;
       }
-      if (!startAction('ask')) return;
-      const generation=playbackGeneration, began=Date.now(); let stream=null,recorder=null;
+      if (!startAction('ask')) { askButton.textContent='🎤'; return; }
+      askButton.textContent='…';
+      const generation=playbackGeneration, began=Date.now(); let stream=null,recorder=null,phase='permission';
       try {
         status.textContent='ಮೈಕ್ ಅನುಮತಿ ನೀಡಿ. · Allow microphone access.';
+        showMic('starting','ಮೈಕ್ ಅನುಮತಿ ನೀಡಿ. · Tap Allow for microphone access.');
         stream=await navigator.mediaDevices.getUserMedia({audio:true});
+        track('question_permission'); phase='recording';
         if (generation!==playbackGeneration||activeControl!=='ask') return;
         const types=['audio/mp4','audio/webm;codecs=opus','audio/webm'];
         const mimeType=types.find(type=>MediaRecorder.isTypeSupported&&MediaRecorder.isTypeSupported(type))||'';
@@ -759,14 +781,18 @@
           recorder.onerror=()=>reject(new Error('RECORDING_FAILED'));
           recorder.onstop=()=>resolve(new Blob(chunks,{type:recorder.mimeType||mimeType||'audio/webm'}));
         });
-        activeRecorder=recorder; recorder.start();
-        current.textContent='🎤';
+        activeRecorder=recorder; recorder.start(1000);
+        askButton.textContent='⏹'; askButton.classList.add('recording'); current.textContent='🎤';
+        showMic('recording','ಈಗ ಮಾತನಾಡಿ. ಮುಗಿದಾಗ ಕೆಂಪು ⏹ ಒತ್ತಿ. · Recording—speak, then tap red ⏹.');
         status.textContent='ಈಗ ಮಾತನಾಡಿ. ಮುಗಿದಾಗ 🎤 ಮತ್ತೆ ಒತ್ತಿ. · Speak now; tap 🎤 again when finished.';
         recordingTimer=setTimeout(()=>{ if (recorder.state!=='inactive') recorder.stop(); },15000);
         const audio=await recorded; clearTimeout(recordingTimer); recordingTimer=0; activeRecorder=null;
         stream.getTracks().forEach(track=>track.stop()); stream=null;
         if (generation!==playbackGeneration||activeControl!=='ask') return;
         if (!audio.size) throw new Error('EMPTY_RECORDING');
+        track('question_recording',true,Date.now()-began); phase='upload';
+        askButton.textContent='⏳'; askButton.classList.remove('recording');
+        showMic('processing','ಪ್ರಶ್ನೆಯನ್ನು ಅರ್ಥಮಾಡಿಕೊಳ್ಳುತ್ತಿದೆ… · Understanding your question…');
         status.textContent='ಉತ್ತರವನ್ನು ಸಿದ್ಧಪಡಿಸುತ್ತಿದೆ… · Preparing answer…';
         const extension=audio.type.includes('mp4')?'m4a':(audio.type.includes('webm')?'webm':'audio');
         const form=new FormData(); form.append('audio',audio,`question.${extension}`);
@@ -774,15 +800,31 @@
           method:'POST',headers:testerHeaders(),body:form,
         });
         const answer=await response.json(); if (!response.ok) throw new Error(answer.error||'QUESTION_FAILED');
+        track('question_upload',true,Date.now()-began); phase='answer';
         if (answer.evidence&&answer.evidence[0]) addFocus(answer.evidence[0].box);
+        showMic('ready','ಉತ್ತರ ಸಿದ್ಧವಾಗಿದೆ. · Answer ready.');
         current.textContent=answer.answer_kn; status.textContent='ಚಿತ್ರದ ಪ್ರಶ್ನೆಗೆ ಉತ್ತರ'; await speak(answer.answer_kn); track('question',true,Date.now()-began);
-      } catch (_) {
-        status.textContent='ಪ್ರಶ್ನೆಯನ್ನು ಕೇಳಲಾಗಲಿಲ್ಲ. ಮೈಕ್ ಅನುಮತಿ ನೀಡಿ ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ. · Could not hear the question.';
+      } catch (error) {
+        const code=String(error&&error.name||error&&error.message||'MIC_FAILED').replace(/[^A-Z0-9_-]/gi,'').slice(0,40);
+        if (phase==='permission'&&(code==='NotAllowedError'||code==='SecurityError')) {
+          showMic('blocked','ಮೈಕ್ ತಡೆಯಲಾಗಿದೆ. iPhone Settings → Apps → Safari/Chrome → Microphone ಅನ್ನು ON ಮಾಡಿ. · Microphone is blocked in iPhone Settings.');
+        } else if (phase==='permission'&&code==='NotFoundError') {
+          showMic('blocked','ಈ ಫೋನ್‌ನಲ್ಲಿ ಮೈಕ್ ಸಿಗಲಿಲ್ಲ. · No microphone was found.');
+        } else if (phase==='permission') {
+          showMic('blocked',`ಮೈಕ್ ತೆರೆಯಲಿಲ್ಲ (${code}). · Could not open microphone (${code}).`);
+        } else if (phase==='recording') {
+          showMic('blocked',`ಧ್ವನಿ ದಾಖಲಾಗಲಿಲ್ಲ (${code}). · Recording failed (${code}).`);
+        } else {
+          showMic('blocked',`ಪ್ರಶ್ನೆ ಕಳುಹಿಸಲಾಗಲಿಲ್ಲ (${code}). · Question upload failed (${code}).`);
+        }
+        track(phase==='permission'?'question_permission':phase==='recording'?'question_recording':'question_upload',false,Date.now()-began);
+        status.textContent='ಪ್ರಶ್ನೆಯನ್ನು ಕೇಳಲಾಗಲಿಲ್ಲ. ಮೇಲಿನ ಮೈಕ್ ಸಂದೇಶ ನೋಡಿ. · See the microphone message above.';
         track('question',false,Date.now()-began);
       } finally {
         clearTimeout(recordingTimer); recordingTimer=0;
         if (activeRecorder===recorder) activeRecorder=null;
         if (stream) stream.getTracks().forEach(track=>track.stop());
+        askButton.textContent='🎤'; askButton.classList.remove('recording');
         finishAction('ask');
       }
     }
