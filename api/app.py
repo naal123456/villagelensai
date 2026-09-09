@@ -49,6 +49,7 @@ LEGACY_ACCESS_COOKIE_NAMES = ("villagelens_access",)
 ACCESS_COOKIE_TTL_SECONDS = 30 * 24 * 60 * 60
 MAX_QUESTION_CHARACTERS = 500
 MAX_QUESTION_AUDIO_BYTES = 4 * 1024 * 1024
+MAX_QUESTION_HISTORY_TURNS = 6
 OPENAI_TRANSCRIPTION_MODEL = os.environ.get(
     "VILLAGELENS_TRANSCRIPTION_MODEL", "gpt-4o-mini-transcribe"
 )
@@ -834,6 +835,8 @@ def _openai_reader(data: bytes, media_type: str, width: int, height: int) -> dic
 
 def _openai_question(
     data: bytes, media_type: str, width: int, height: int, question: str,
+    history: list[dict[str, str]] | None = None,
+    focus_box: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     api_key = os.environ.get("OPENAI_API_KEY", "").strip()
     if not api_key:
@@ -847,15 +850,35 @@ def _openai_question(
             "uncertainty_kn": {"type": "string"}, "evidence_box": box_schema,
         },
     }
+    prior = (history or [])[-MAX_QUESTION_HISTORY_TURNS:]
+    normalized_focus = None
+    if focus_box:
+        normalized_focus = [
+            round(1000 * focus_box[key] / (width if key in {"x", "width"} else height))
+            for key in ("x", "y", "width", "height")
+        ]
+    context = json.dumps({
+        "prior_turns": prior,
+        "current_referent": {
+            "label": str((focus_box or {}).get("label", ""))[:120],
+            "box_normalized_0_1000": normalized_focus,
+        } if normalized_focus else None,
+        "current_question": question,
+    }, ensure_ascii=False)
     payload = {
         "model": OPENAI_MODEL, "store": False, "reasoning": {"effort": "none"},
         "max_output_tokens": 1200,
         "input": [{"role": "user", "content": [
             {"type": "input_text", "text": (
                 "Answer the user's spoken question about this image in simple natural Kannada. "
+                "This is one continuing conversation about the same unchanged image. Use prior turns and "
+                "the current referent region to resolve words such as this, it, that leaf, or this part. "
+                "Keep the subject consistent across follow-up questions, but correct an earlier answer if "
+                "the image contradicts it. For plant health questions, describe visible signs and uncertainty; "
+                "do not claim a disease diagnosis from an image alone. "
                 "Use only visible or strongly supported facts, preserve numbers and units, state uncertainty, "
                 "and include a safety warning when relevant. evidence_box is the single most relevant image "
-                "region [left,top,width,height] normalized 0 to 1000. Question: " + question
+                "region [left,top,width,height] normalized 0 to 1000. Conversation context JSON: " + context
             )},
             {"type": "input_image", "image_url": (
                 f"data:{media_type};base64,{base64.b64encode(data).decode('ascii')}"
@@ -884,6 +907,47 @@ def _openai_question(
     }
     _scale_context_boxes({"spoken_sections": result["evidence"]}, width, height)
     return result
+
+
+def _question_history(value: Any) -> list[dict[str, str]]:
+    try:
+        parsed = json.loads(value) if isinstance(value, str) else value
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return []
+    if not isinstance(parsed, list):
+        return []
+    turns = []
+    for item in parsed[-MAX_QUESTION_HISTORY_TURNS:]:
+        if not isinstance(item, dict):
+            continue
+        question = re.sub(r"\s+", " ", str(item.get("question", ""))).strip()
+        answer = re.sub(r"\s+", " ", str(item.get("answer_kn", ""))).strip()
+        if question and answer:
+            turns.append({
+                "question": question[:MAX_QUESTION_CHARACTERS],
+                "answer_kn": answer[:2000],
+            })
+    return turns
+
+
+def _question_focus(value: Any, width: int, height: int) -> dict[str, Any] | None:
+    try:
+        parsed = json.loads(value) if isinstance(value, str) else value
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    try:
+        x, y, box_width, box_height = (float(parsed[key]) for key in ("x", "y", "width", "height"))
+    except (KeyError, TypeError, ValueError):
+        return None
+    x, y = max(0.0, min(float(width), x)), max(0.0, min(float(height), y))
+    box_width = max(0.0, min(float(width) - x, box_width))
+    box_height = max(0.0, min(float(height) - y, box_height))
+    if box_width <= 0 or box_height <= 0:
+        return None
+    return {"x": x, "y": y, "width": box_width, "height": box_height,
+            "label": str(parsed.get("label", ""))[:120]}
 
 
 def _openai_transcribe(audio: bytes, filename: str, media_type: str) -> str:
@@ -1188,6 +1252,7 @@ def gallery() -> tuple[Response, int]:
                     "id": capture_id,
                     "label": value.get("label") or "Captured page",
                     "kind": "capture",
+                    "retained": True,
                     "captured_at": value.get("captured_at"),
                     "image_url": f"/api/captures/{capture_id}/image",
                     "result": value,
@@ -1290,9 +1355,13 @@ def ask_about_capture(capture_id: str) -> tuple[Response, int]:
         image, _ = _normalized_image(source.download_as_bytes())
         normalized = io.BytesIO()
         image.save(normalized, format="PNG")
-        return jsonify(_openai_question(
+        answer = _openai_question(
             normalized.getvalue(), "image/png", image.width, image.height, question,
-        )), 200
+            _question_history(payload.get("history")),
+            _question_focus(payload.get("focus_box"), image.width, image.height),
+        )
+        answer["question"] = question
+        return jsonify(answer), 200
     except FileNotFoundError:
         return jsonify(error="CAPTURE_NOT_FOUND"), 404
     except Exception as exc:
@@ -1332,13 +1401,51 @@ def ask_about_capture_audio(capture_id: str) -> tuple[Response, int]:
         image, _ = _normalized_image(source.download_as_bytes())
         normalized = io.BytesIO()
         image.save(normalized, format="PNG")
-        return jsonify(_openai_question(
+        answer = _openai_question(
             normalized.getvalue(), "image/png", image.width, image.height, question,
-        )), 200
+            _question_history(request.form.get("history")),
+            _question_focus(request.form.get("focus_box"), image.width, image.height),
+        )
+        answer["question"] = question
+        return jsonify(answer), 200
     except FileNotFoundError:
         return jsonify(error="CAPTURE_NOT_FOUND"), 404
     except Exception as exc:
         app.logger.exception("Spoken audio question failed for %s", capture_id)
+        error = str(exc) if isinstance(exc, RuntimeError) else "QUESTION_UNAVAILABLE"
+        return jsonify(error=error), 503
+
+
+@app.post("/api/demos/<demo_id>/ask-audio")
+def ask_about_demo_audio(demo_id: str) -> tuple[Response, int]:
+    demo_files = {"demo-i1": "i1.jpeg", "demo-i2": "i2.jpeg"}
+    filename = demo_files.get(demo_id)
+    if filename is None:
+        return jsonify(error="CAPTURE_NOT_FOUND"), 404
+    uploaded = request.files.get("audio")
+    if uploaded is None:
+        return jsonify(error="QUESTION_AUDIO_REQUIRED"), 400
+    audio = uploaded.read(MAX_QUESTION_AUDIO_BYTES + 1)
+    if not audio:
+        return jsonify(error="QUESTION_AUDIO_REQUIRED"), 400
+    if len(audio) > MAX_QUESTION_AUDIO_BYTES:
+        return jsonify(error="QUESTION_AUDIO_TOO_LARGE"), 413
+    try:
+        question = _openai_transcribe(
+            audio, uploaded.filename or "question.webm", uploaded.mimetype or "audio/webm",
+        )
+        image, _ = _normalized_image((DEMO_ROOT / filename).read_bytes())
+        normalized = io.BytesIO()
+        image.save(normalized, format="PNG")
+        answer = _openai_question(
+            normalized.getvalue(), "image/png", image.width, image.height, question,
+            _question_history(request.form.get("history")),
+            _question_focus(request.form.get("focus_box"), image.width, image.height),
+        )
+        answer["question"] = question
+        return jsonify(answer), 200
+    except Exception as exc:
+        app.logger.exception("Spoken audio question failed for demo %s", demo_id)
         error = str(exc) if isinstance(exc, RuntimeError) else "QUESTION_UNAVAILABLE"
         return jsonify(error=error), 503
 

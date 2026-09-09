@@ -99,8 +99,13 @@ class ApiTests(unittest.TestCase):
         self.assertIn(b'/ask-audio`', response.data)
         self.assertNotIn(b'webkitSpeechRecognition', response.data)
         self.assertIn(b'item.retained||item.result&&item.result.retained', response.data)
-        self.assertIn(b'not I1 or I2', response.data)
         self.assertIn(b'id="mic-status"', response.data)
+        self.assertIn(b'id="conversation"', response.data)
+        self.assertIn(b'function renderConversation', response.data)
+        self.assertIn(b'function startMicTimer', response.data)
+        self.assertIn(b"form.append('history'", response.data)
+        self.assertIn(b"form.append('focus_box'", response.data)
+        self.assertIn(b'/api/demos/${item.id}/ask-audio', response.data)
         self.assertIn(b"recorder.start(1000)", response.data)
         self.assertIn(b"track('question_permission')", response.data)
         self.assertIn(b'iPhone Settings', response.data)
@@ -268,6 +273,7 @@ class ApiTests(unittest.TestCase):
         ).get_json()["items"]
 
         self.assertEqual(items[2]["stage2"], {"stage": 2, "words": []})
+        self.assertTrue(items[2]["retained"])
         other_items = self.client.get(
             "/api/gallery", headers={"X-VillageLens-Tester-ID": "a2"},
         ).get_json()["items"]
@@ -719,13 +725,20 @@ class ApiTests(unittest.TestCase):
             }),
         }]}]}
         with patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"}):
-            value = _openai_question(image_bytes(), "image/jpeg", 320, 120, "ಇದು ಏನು?")
+            value = _openai_question(
+                image_bytes(), "image/jpeg", 320, 120, "ಈ ಎಲೆಗೆ ರೋಗ ಇದೆಯೇ?",
+                [{"question": "ಇದು ಏನು?", "answer_kn": "ಇದು ಒಂದು ಎಲೆ."}],
+                {"x": 32, "y": 12, "width": 64, "height": 48, "label": "ಎಲೆ"},
+            )
 
         self.assertEqual(value["answer_kn"], "ಇದು ಪುಸ್ತಕವಾಗಿದೆ.")
         self.assertEqual(value["evidence"][0]["box"], {"x": 32, "y": 24, "width": 96, "height": 48})
         payload = provider.call_args.kwargs["json"]
         self.assertFalse(payload["store"])
-        self.assertIn("ಇದು ಏನು?", payload["input"][0]["content"][0]["text"])
+        prompt = payload["input"][0]["content"][0]["text"]
+        self.assertIn("ಈ ಎಲೆಗೆ ರೋಗ ಇದೆಯೇ?", prompt)
+        self.assertIn("ಇದು ಒಂದು ಎಲೆ.", prompt)
+        self.assertIn('"box_normalized_0_1000": [100, 100, 200, 400]', prompt)
 
     @patch("api.app.requests.post")
     def test_openai_transcription_uses_audio_endpoint(self, provider: object) -> None:
@@ -765,7 +778,24 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.get_json()["answer_kn"], "ಇದು ಒಂದು ಚಿತ್ರ.")
         transcribe.assert_called_once_with(b"recorded-audio", "question.webm", "audio/webm")
-        self.assertEqual(question.call_args.args[-1], "ಇದು ಏನು?")
+        self.assertEqual(question.call_args.args[4], "ಇದು ಏನು?")
+        self.assertEqual(response.get_json()["question"], "ಇದು ಏನು?")
+
+    @patch("api.app._openai_question", return_value={"answer_kn": "ಇದು ಮಾದರಿ ಚಿತ್ರ."})
+    @patch("api.app._openai_transcribe", return_value="ಇದು ಏನು?")
+    def test_demo_recorded_question_is_supported(
+        self, transcribe: object, question: object,
+    ) -> None:
+        response = self.client.post(
+            "/api/demos/demo-i1/ask-audio",
+            data={"audio": (io.BytesIO(b"recorded-audio"), "question.m4a", "audio/mp4")},
+            content_type="multipart/form-data",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["question"], "ಇದು ಏನು?")
+        transcribe.assert_called_once()
+        question.assert_called_once()
 
     def test_usage_events_accept_only_privacy_safe_aggregates(self) -> None:
         with self.assertLogs("api.app", level="INFO") as logs:

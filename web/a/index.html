@@ -55,6 +55,14 @@
     .playing .underline:not(.active) { opacity: 0; }
     #status, #current { min-height: 1.4em; line-height: 1.25; margin: 4px 0; }
     #current { font-size: clamp(1.3rem, 5vw, 2.35rem); }
+    #conversation { margin: 8px 0; text-align: left; }
+    #conversation[hidden] { display: none; }
+    #conversation h2 { margin: 4px 0 7px; font-size: 1rem; color: #c7d1da; }
+    .turn { margin: 7px 0; padding: 8px 10px; border-left: 4px solid #55c98a; border-radius: 6px;
+      background: #1b252d; }
+    .turn p { margin: 3px 0; line-height: 1.35; }
+    .turn .question { color: #b8dff0; }
+    .turn .answer { color: white; cursor: pointer; }
     .note { color: #9fb3c8; font-size: .8rem; margin: 6px 0; }
     #install, #ask { background: #176c42; border-color: #55c98a; }
     #ask.active, #ask.working { border-color: #62d7ff; background: #174b5f; }
@@ -101,6 +109,10 @@
       <svg id="overlay" aria-label="Readable words"></svg>
     </div>
     <div id="current" lang="kn"></div>
+    <section id="conversation" aria-live="polite" hidden>
+      <h2>ಪ್ರಶ್ನೆಗಳು ಮತ್ತು ಉತ್ತರಗಳು · Questions and answers</h2>
+      <div id="conversation-turns"></div>
+    </section>
     <button id="stop" aria-label="Stop reading" data-tip="Stop reading">■</button>
     <p class="note">AI-assisted reading may make mistakes. Swipe the page to see saved tests.</p>
   </main>
@@ -109,10 +121,11 @@
     const input=$('camera-input'), image=$('source-image'), overlay=$('overlay'), stage=$('stage');
     const status=$('status'), current=$('current'), position=$('position'), timer=$('quality-timer');
     const ownerBadge=$('owner-badge'), micStatus=$('mic-status'), askButton=$('ask');
+    const conversation=$('conversation'), conversationTurns=$('conversation-turns');
     let gallery=[], galleryIndex=0, result=null, mode='word', timerId=0, started=0, timerOwner=null;
     let navigationGeneration=0;
     let playbackGeneration=0, speechGeneration=0, pointerStart=null, suppressTap=false, activeControl='mode-word';
-    let audioContext=null, activeAudioSource=null, activeRecorder=null, recordingTimer=0;
+    let audioContext=null, activeAudioSource=null, activeRecorder=null, recordingTimer=0, micTimerId=0;
     const speechAudioCache=new Map();
     const translationCache=new Map();
     const controlIds=['mode-word','mode-sentence','mode-translate','camera','play-words','play-sentences',
@@ -160,6 +173,27 @@
     function working(id,on) { const node=$(id); node.classList.toggle('working',on); node.setAttribute('aria-busy',String(on)); }
     function showMic(state,message) {
       micStatus.hidden=false; micStatus.dataset.state=state; micStatus.textContent=message;
+    }
+    function startMicTimer() {
+      clearInterval(micTimerId); const began=Date.now();
+      const update=()=>showMic('processing',`ಉತ್ತರವನ್ನು ಸಿದ್ಧಪಡಿಸುತ್ತಿದೆ… ${Math.floor((Date.now()-began)/1000)}s · Preparing answer…`);
+      update(); micTimerId=setInterval(update,1000);
+    }
+    function stopMicTimer() { clearInterval(micTimerId); micTimerId=0; }
+    function renderConversation(item) {
+      conversationTurns.textContent=''; const turns=item&&item.conversation||[];
+      conversation.hidden=!turns.length;
+      for (const [index,turn] of turns.entries()) {
+        const node=document.createElement('article'); node.className='turn';
+        const question=document.createElement('p'); question.className='question';
+        question.textContent=`${index+1}. 🎤 ${turn.question}`;
+        const answer=document.createElement('p'); answer.className='answer'; answer.lang='kn';
+        answer.textContent=`🔊 ${turn.answer_kn}`; answer.onclick=()=>speak(turn.answer_kn);
+        node.append(question,answer); conversationTurns.appendChild(node);
+      }
+    }
+    function restoreQuestionFocus(item) {
+      if (item&&item.questionFocus&&item.questionFocus.box) addFocus(item.questionFocus.box);
     }
 
     function clearControls() {
@@ -246,7 +280,9 @@
         const validated=true;
         $('quality-'+stageNumber).classList.toggle('ready',validated);
         $('quality-'+stageNumber).classList.toggle('failed',!validated);
-        if (stageNumber===2&&(value.words||[]).length&&item.id!=='demo-i2') render(item.result,false);
+        if (stageNumber===2&&(value.words||[]).length&&item.id!=='demo-i2') {
+          render(item.result,false); restoreQuestionFocus(item);
+        }
         if (stageNumber===2) track('stage_2',Boolean((value.words||[]).length),value.latency_ms||0);
         if (stageNumber===3&&value.summary_kn) {
           const count=(value.objects||[]).length;
@@ -461,6 +497,8 @@
     }
     async function selectObject(object) {
       stop(true);
+      const item=gallery[galleryIndex];
+      if (item) item.questionFocus={box:{...object.box},label:object.name_kn||object.name||''};
       document.querySelectorAll('.object-region').forEach(node=>node.classList.toggle('active',node.dataset.id===object.id));
       addFocus(object.box); const text=objectText(object); current.textContent=text;
       status.textContent='ಆಯ್ಕೆಯಾದ ವಸ್ತುವಿನ ಮಾಹಿತಿ'; track('object',Boolean(text)); if (text) await speak(text);
@@ -572,6 +610,7 @@
       if (!gallery.length) return;
       stop(); const navigation=++navigationGeneration;
       galleryIndex=(index+gallery.length)%gallery.length; const item=gallery[galleryIndex];
+      renderConversation(item);
       const owner=item.tester_id&&item.tester_id!=='unassigned'?item.tester_id.toUpperCase():'';
       const ownerName=item.tester_name?` · ${item.tester_name}`:'';
       position.textContent=`${item.label}  ${galleryIndex+1}/${gallery.length}`;
@@ -590,6 +629,7 @@
           const cached=readCachedStage(item,stageNumber);
           if (cached) applyReaderResult(item,stageNumber,cached);
         }
+        renderConversation(item); restoreQuestionFocus(item);
         timer.textContent=readCachedStage(item,3)?'saved ✓':(readCachedStage(item,2)?'OCR ✓':'local');
         if (item.kind==='capture'&&[2,3].some(stageNumber=>!readCachedStage(item,stageNumber))) {
           startCloudReaders(item);
@@ -712,6 +752,7 @@
       const objectUrl=URL.createObjectURL(file); image.src=objectUrl; stage.style.display='inline-block';
       const item={id:captureId,label:'Captured page',kind:'capture',image_url:objectUrl,result:null,
         tester_id:testerId,tester_name:testerId==='a3'?'Reviewer':'',startedAt:Date.now()};
+      renderConversation(item);
       beginTimer(item,item.startedAt);
       gallery.splice(Math.min(2,gallery.length),0,item); galleryIndex=gallery.indexOf(item);
       position.textContent=`${testerId?testerId.toUpperCase()+' · ':''}Captured page  ${galleryIndex+1}/${gallery.length}`;
@@ -740,20 +781,23 @@
       if (activeRecorder&&activeRecorder.state!=='inactive') {
         clearTimeout(recordingTimer); recordingTimer=0;
         askButton.textContent='⏳'; askButton.classList.remove('recording');
-        showMic('processing','ಧ್ವನಿಯನ್ನು ಕಳುಹಿಸಲಾಗುತ್ತಿದೆ… · Sending your voice…');
+        startMicTimer();
         status.textContent='ಪ್ರಶ್ನೆಯನ್ನು ಸಿದ್ಧಪಡಿಸುತ್ತಿದೆ… · Preparing question…';
         activeRecorder.stop(); return;
       }
       askButton.textContent='…';
       showMic('starting','ಮೈಕ್ ಪ್ರಾರಂಭವಾಗುತ್ತಿದೆ… · Starting microphone…');
       track('question_tap');
-      stop();
       const item=gallery[galleryIndex];
-      const retained=item&&(item.retained||item.result&&item.result.retained);
-      if (!retained||!/^[0-9a-f]{32}$/.test(item.id)) {
-        askButton.textContent='🎤'; showMic('blocked','ಮೊದಲು ಉಳಿಸಿದ ಚಿತ್ರ ಆಯ್ಕೆಮಾಡಿ. · Select a saved photo (not I1 or I2).');
+      const savedCapture=item&&item.kind==='capture'&&/^[0-9a-f]{32}$/.test(item.id)&&
+        (item.retained===true||item.result&&item.result.retained===true);
+      const demo=item&&item.kind==='demo'&&/^(?:demo-i1|demo-i2)$/.test(item.id);
+      stop();
+      restoreQuestionFocus(item);
+      if (!savedCapture&&!demo) {
+        askButton.textContent='🎤'; showMic('blocked','ಈ ಚಿತ್ರ ಇನ್ನೂ ಉಳಿದಿಲ್ಲ. · This photo has not been saved yet.');
         current.textContent='🎤 ✕';
-        status.textContent='ಉಳಿಸಿದ ಚಿತ್ರಕ್ಕೆ ಮಾತ್ರ ಪ್ರಶ್ನೆ ಕೇಳಬಹುದು. · Ask works on saved photos, not I1 or I2.';
+        status.textContent='ಚಿತ್ರ ಉಳಿದ ನಂತರ ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ. · Try again after the photo is saved.';
         track('question',false); return;
       }
       if (!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia||typeof MediaRecorder==='undefined') {
@@ -785,23 +829,37 @@
         askButton.textContent='⏹'; askButton.classList.add('recording'); current.textContent='🎤';
         showMic('recording','ಈಗ ಮಾತನಾಡಿ. ಮುಗಿದಾಗ ಕೆಂಪು ⏹ ಒತ್ತಿ. · Recording—speak, then tap red ⏹.');
         status.textContent='ಈಗ ಮಾತನಾಡಿ. ಮುಗಿದಾಗ 🎤 ಮತ್ತೆ ಒತ್ತಿ. · Speak now; tap 🎤 again when finished.';
-        recordingTimer=setTimeout(()=>{ if (recorder.state!=='inactive') recorder.stop(); },15000);
+        recordingTimer=setTimeout(()=>{ if (recorder.state!=='inactive') { startMicTimer(); recorder.stop(); } },15000);
         const audio=await recorded; clearTimeout(recordingTimer); recordingTimer=0; activeRecorder=null;
         stream.getTracks().forEach(track=>track.stop()); stream=null;
         if (generation!==playbackGeneration||activeControl!=='ask') return;
         if (!audio.size) throw new Error('EMPTY_RECORDING');
         track('question_recording',true,Date.now()-began); phase='upload';
         askButton.textContent='⏳'; askButton.classList.remove('recording');
-        showMic('processing','ಪ್ರಶ್ನೆಯನ್ನು ಅರ್ಥಮಾಡಿಕೊಳ್ಳುತ್ತಿದೆ… · Understanding your question…');
+        if (!micTimerId) startMicTimer();
         status.textContent='ಉತ್ತರವನ್ನು ಸಿದ್ಧಪಡಿಸುತ್ತಿದೆ… · Preparing answer…';
         const extension=audio.type.includes('mp4')?'m4a':(audio.type.includes('webm')?'webm':'audio');
         const form=new FormData(); form.append('audio',audio,`question.${extension}`);
-        const response=await fetch(`/api/captures/${item.id}/ask-audio`,{
+        form.append('history',JSON.stringify((item.conversation||[]).slice(-6).map(turn=>({
+          question:turn.question,answer_kn:turn.answer_kn,
+        }))));
+        if (item.questionFocus&&item.questionFocus.box) form.append('focus_box',JSON.stringify({
+          ...item.questionFocus.box,label:item.questionFocus.label||'',
+        }));
+        const endpoint=demo?`/api/demos/${item.id}/ask-audio`:`/api/captures/${item.id}/ask-audio`;
+        const response=await fetch(endpoint,{
           method:'POST',headers:testerHeaders(),body:form,
         });
         const answer=await response.json(); if (!response.ok) throw new Error(answer.error||'QUESTION_FAILED');
         track('question_upload',true,Date.now()-began); phase='answer';
-        if (answer.evidence&&answer.evidence[0]) addFocus(answer.evidence[0].box);
+        if (answer.evidence&&answer.evidence[0]) {
+          item.questionFocus={box:answer.evidence[0].box,label:item.questionFocus&&item.questionFocus.label||''};
+          addFocus(answer.evidence[0].box);
+        }
+        item.conversation=item.conversation||[];
+        item.conversation.push({question:answer.question||'ಪ್ರಶ್ನೆ',answer_kn:answer.answer_kn});
+        renderConversation(item);
+        stopMicTimer();
         showMic('ready','ಉತ್ತರ ಸಿದ್ಧವಾಗಿದೆ. · Answer ready.');
         current.textContent=answer.answer_kn; status.textContent='ಚಿತ್ರದ ಪ್ರಶ್ನೆಗೆ ಉತ್ತರ'; await speak(answer.answer_kn); track('question',true,Date.now()-began);
       } catch (error) {
@@ -821,6 +879,7 @@
         status.textContent='ಪ್ರಶ್ನೆಯನ್ನು ಕೇಳಲಾಗಲಿಲ್ಲ. ಮೇಲಿನ ಮೈಕ್ ಸಂದೇಶ ನೋಡಿ. · See the microphone message above.';
         track('question',false,Date.now()-began);
       } finally {
+        stopMicTimer();
         clearTimeout(recordingTimer); recordingTimer=0;
         if (activeRecorder===recorder) activeRecorder=null;
         if (stream) stream.getTracks().forEach(track=>track.stop());
