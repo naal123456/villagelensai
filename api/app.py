@@ -657,6 +657,28 @@ def _context_box(value: Any) -> list[float] | dict[str, float] | None:
     return [x, y, width, height] if width > 0 and height > 0 and x + width <= 1020 and y + height <= 1020 else None
 
 
+def _selectable_object_box(value: Any, parsed: dict[str, Any]) -> list[float] | dict[str, float] | None:
+    box = _context_box(value)
+    if box is None:
+        return None
+    image_size = parsed.get("image_size", {})
+    if isinstance(box, list):
+        full_width = full_height = 1000.0
+        _, _, width, height = box
+    else:
+        try:
+            full_width = float(image_size.get("width", 0))
+            full_height = float(image_size.get("height", 0))
+            width, height = box["width"], box["height"]
+        except (AttributeError, TypeError, ValueError):
+            return box
+    # A full-frame scene/background region overlaps every useful object and
+    # steals its touch event. It belongs in global explanation, not object mode.
+    if full_width > 0 and full_height > 0 and width >= full_width * .92 and height >= full_height * .92:
+        return None
+    return box
+
+
 def _scale_context_boxes(context: dict[str, Any], width: int, height: int) -> None:
     def scaled(value: Any) -> dict[str, int] | None:
         box = _context_box(value)
@@ -700,12 +722,13 @@ def _validated_context(parsed: dict[str, Any]) -> tuple[dict[str, Any], bool]:
             "purpose_kn": str(item.get("purpose_kn", "")).strip(),
             "evidence": str(item.get("evidence", "")).strip(),
             "uncertain": bool(item.get("uncertain", False)),
-            "box": _context_box(item.get("box")),
+            "box": _selectable_object_box(item.get("box"), parsed),
         }
         for item in objects
         if isinstance(item, dict)
         and _valid_kannada_text(item.get("name_kn"))
         and _valid_kannada_text(item.get("purpose_kn"))
+        and _selectable_object_box(item.get("box"), parsed) is not None
     ] if isinstance(objects, list) else []
     transcription = parsed.get("transcription_kn", [])
     context["transcription_kn"] = [
@@ -781,7 +804,7 @@ def _openai_reader(data: bytes, media_type: str, width: int, height: int) -> dic
     payload = {"model": OPENAI_MODEL, "store": False, "reasoning": {"effort": "none"},
                "max_output_tokens": 5000,
                "input": [{"role": "user", "content": [
-                   {"type": "input_text", "text": """Help a low-literacy Kannada-speaking adult understand this image. Read clearly visible Kannada and English for comprehension. Do not recreate all OCR boxes. Translate each distinct clearly visible English word into simple Kannada. Identify up to six useful visible objects and give each one bounding box [left,top,width,height] normalized 0 to 1000. If this is handwritten Kannada, transcribe every readable line exactly into transcription_kn with a line box and mark uncertain lines; distinguish recognition failure from blur, distance, perspective, cropping, and low contrast, and give specific capture guidance. Never label readable Kannada as another script. Treat joined measurements such as 300V, 2.0 HP, 50Hz, 10A, kg, ml, and degrees C as semantic units: preserve the printed characters and explain the unit naturally in Kannada. Explain what the image is, its purpose, important details, action, safety, and uncertainty in short natural spoken Kannada. Divide the explanation into two to six spoken_sections, each with the image region it refers to, so the interface can highlight evidence while speaking. brief_spoken_kn is the most useful one- or two-sentence global answer; detailed_spoken_kn adds useful context without mechanically repeating OCR. For calendars, summarize month, year, highlighted date and notable events rather than reciting the grid. For electrical equipment or medicine, report only visible or strongly supported identity, purpose, and ratings; never advise wiring, energizing, repair, or medication. Set confidence high only when important identity, text, numbers, and purpose are clear; set needs_independent_review true for handwriting uncertainty, safety-critical content, ambiguous units, or any important doubt. Never invent hidden facts, intent, diagnosis, species, or disease."""},
+                   {"type": "input_text", "text": """Help a low-literacy Kannada-speaking adult understand this image. Read clearly visible Kannada and English for comprehension. Do not recreate all OCR boxes. Translate each distinct clearly visible English word into simple Kannada. Identify up to six useful visible objects and give each one bounding box [left,top,width,height] normalized 0 to 1000. Object boxes must tightly localize a touchable object or useful sub-part; never return the whole image, page, background, ground, or soil as an object box. If this is handwritten Kannada, transcribe every readable line exactly into transcription_kn with a line box and mark uncertain lines; distinguish recognition failure from blur, distance, perspective, cropping, and low contrast, and give specific capture guidance. Never label readable Kannada as another script. Treat joined measurements such as 300V, 2.0 HP, 50Hz, 10A, kg, ml, and degrees C as semantic units: preserve the printed characters and explain the unit naturally in Kannada. Explain what the image is, its purpose, important details, action, safety, and uncertainty in short natural spoken Kannada. Divide the explanation into two to six spoken_sections, each with the image region it refers to, so the interface can highlight evidence while speaking. brief_spoken_kn is the most useful one- or two-sentence global answer; detailed_spoken_kn adds useful context without mechanically repeating OCR. For calendars, summarize month, year, highlighted date and notable events rather than reciting the grid. For electrical equipment or medicine, report only visible or strongly supported identity, purpose, and ratings; never advise wiring, energizing, repair, or medication. Set confidence high only when important identity, text, numbers, and purpose are clear; set needs_independent_review true for handwriting uncertainty, safety-critical content, ambiguous units, or any important doubt. Never invent hidden facts, intent, diagnosis, species, or disease."""},
                    {"type": "input_image", "image_url": f"data:{media_type};base64,{encoded}", "detail": "high"}]}],
                "text": {"verbosity": "low", "format": {"type": "json_schema", "name": "villagelens_reading", "strict": True, "schema": schema}}}
     response = requests.post("https://api.openai.com/v1/responses", json=payload,

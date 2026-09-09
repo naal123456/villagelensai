@@ -73,8 +73,13 @@ class ApiTests(unittest.TestCase):
         self.assertIn(b'function loadSharedImage', response.data)
         self.assertIn(b"serviceWorker.register('/a/sw.js'", response.data)
         self.assertIn(b'id="install"', response.data)
-        self.assertIn(b'Ask /', response.data)
-        self.assertIn(b'Install /', response.data)
+        self.assertIn(b'class="toolbar action-toolbar"', response.data)
+        action_toolbar = response.data.split(b'class="toolbar action-toolbar"', 1)[1].split(b'</nav>', 1)[0]
+        self.assertIn(b'id="ask"', action_toolbar)
+        self.assertIn(b'id="install"', action_toolbar)
+        self.assertIn(b'id="camera"', response.data)
+        self.assertIn(b'function selectableObjects', response.data)
+        self.assertIn(b"?'saved \xe2\x9c\x93'", response.data)
         self.assertIn(b'function clearControls', response.data)
         self.assertIn(b'function startAction', response.data)
         self.assertIn(b'function ensureContext', response.data)
@@ -93,7 +98,7 @@ class ApiTests(unittest.TestCase):
         self.assertIn(b"Add to Home Screen", response.data)
         self.assertNotIn(b'id="mode-meaning"', response.data)
         self.assertNotIn(b'id="play-meanings"', response.data)
-        self.assertIn(b"?'saved':'local'", response.data)
+        self.assertIn(b"?'saved \xe2\x9c\x93'", response.data)
         stage_three = response.data.split(b"if (stageNumber===3)", 1)[1].split(
             b"if (gallery[galleryIndex]===item)", 1,
         )[0]
@@ -601,6 +606,23 @@ class ApiTests(unittest.TestCase):
         })
 
         self.assertTrue(value["quality_validated"])
+
+    def test_full_frame_object_box_is_not_selectable(self) -> None:
+        value = _normalize_stage_three({
+            "analysis_version": "context-v2",
+            "image_size": {"width": 3072, "height": 4096},
+            "translations": [], "scene_type": "plant", "summary_kn": "ಇದು ಸಸ್ಯ.",
+            "objects": [
+                {"name": "soil", "name_kn": "ಮಣ್ಣು", "purpose_kn": "ಸಸ್ಯದ ನೆಲ",
+                 "evidence": "background", "uncertain": False,
+                 "box": {"x": 0, "y": 0, "width": 3072, "height": 4096}},
+                {"name": "leaf", "name_kn": "ಎಲೆ", "purpose_kn": "ಸಸ್ಯದ ಎಲೆ",
+                 "evidence": "visible leaf", "uncertain": False,
+                 "box": {"x": 1161, "y": 1028, "width": 553, "height": 1614}},
+            ],
+        })
+
+        self.assertEqual([item["name"] for item in value["objects"]], ["leaf"])
 
     @patch("api.app._process_stored_capture")
     def test_stored_capture_processing_contract(self, process: object) -> None:
