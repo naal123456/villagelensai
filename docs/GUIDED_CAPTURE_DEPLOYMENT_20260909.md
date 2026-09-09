@@ -20,11 +20,16 @@ can still be identified after its numeric gallery position changes. Existing
 captures also receive a deterministic display code without rewriting stored
 photos.
 
-The current retained gallery contains no confirmed handwriting sample. The page
-currently appearing as gallery image 11 is printed Kannada, not handwriting.
-This deployment therefore does not assign speculative handwriting labels to old
-captures. New stable codes should be used when collecting the next close and far
-handwriting pair.
+The expanded reviewer gallery contains a handwriting pair that had moved beyond
+the first 20 results. `A1-4E3077` is the wider view: nearly the whole notebook
+page is visible, with smaller writing and useful page context. `A1-185142` is the
+closer view: writing is larger and clearer, but the right side of several lines
+is cropped. The close view is consistent with the owner's recollection of making
+a demonstration photo, but the A1 session identifies the phone session—not who
+pressed the shutter—so photographer attribution remains unconfirmed. The page
+previously appearing as gallery image 11 (`A3-77000C`) is printed Kannada, not
+handwriting. These stable codes, rather than changing gallery positions, should
+be used in future feedback.
 
 ## Verification
 
