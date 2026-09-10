@@ -59,7 +59,7 @@ class ApiTests(unittest.TestCase):
         self.assertNotIn(b'id="quality-4"', response.data)
         self.assertIn(b'id="owner-badge"', response.data)
         self.assertIn(b'id="app-version"', response.data)
-        self.assertIn(b'v2026.09.10.1', response.data)
+        self.assertIn(b'v2026.09.10.2', response.data)
         self.assertIn(b"'UNASSIGNED \xc2\xb7 OLDER CAPTURE'", response.data)
         self.assertIn(b"`${owner}${ownerName}`", response.data)
         self.assertIn(b'navigationGeneration', response.data)
@@ -98,7 +98,15 @@ class ApiTests(unittest.TestCase):
         self.assertIn(b'function analyzeCameraFrame', response.data)
         self.assertIn(b'function cameraQualityState', response.data)
         self.assertIn(b"clearlySharp?24:16", response.data)
-        self.assertIn(b"cameraReadyHoldSeconds=1.2", response.data)
+        self.assertIn(b'page_clipped:pageCandidatePercent>14&&edgePercent>32', response.data)
+        self.assertIn(b'page_too_small:pageCandidatePercent>14&&pageCandidatePercent<35&&edgePercent<32', response.data)
+        self.assertIn(b'function cameraFrameScore', response.data)
+        self.assertIn(b'for (let frame=0;frame<3;frame++)', response.data)
+        self.assertIn(b'burst_frames:3', response.data)
+        camera_guide = response.data.split(b'function updateCameraGuide', 1)[1].split(
+            b'async function openGuidedCamera', 1,
+        )[0]
+        self.assertNotIn(b'captureGuidedPhoto', camera_guide)
         self.assertIn(b'function captureGuidedPhoto', response.data)
         self.assertIn(b"facingMode:{ideal:'environment'}", response.data)
         self.assertIn(b"source:'guided-camera-v1'", response.data)
@@ -587,7 +595,9 @@ class ApiTests(unittest.TestCase):
                 "X-VillageLens-Capture-Quality": json.dumps({
                     "brightness": 121.238, "sharpness": 14.126,
                     "motion": 2.5, "glare_percent": 3.1,
-                    "auto_captured": True, "private_note": "discard me",
+                    "page_candidate_percent": 48.567, "page_edge_percent": 12.345,
+                    "burst_frames": 3, "auto_captured": False,
+                    "private_note": "discard me",
                 }),
             },
         )
@@ -597,7 +607,9 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(value["capture_source"], "guided-camera-v1")
         self.assertEqual(value["capture_quality"], {
             "brightness": 121.24, "sharpness": 14.13, "motion": 2.5,
-            "glare_percent": 3.1, "auto_captured": True,
+            "glare_percent": 3.1, "page_candidate_percent": 48.57,
+            "page_edge_percent": 12.35, "burst_frames": 3.0,
+            "auto_captured": False,
         })
         self.assertNotIn("private_note", value["capture_quality"])
         self.assertEqual(store.call_args.args[2]["capture_code"], "A2-FFFFFF")
@@ -697,6 +709,8 @@ class ApiTests(unittest.TestCase):
         prompt = request_payload["input"][0]["content"][0]["text"]
         self.assertIn("Identify up to six useful visible objects", prompt)
         self.assertIn("handwritten list, first identify its likely purpose", prompt)
+        self.assertIn("use all readable text and pictures to teach the page", prompt)
+        self.assertIn("detailed_spoken_kn should be five to eight short teaching sentences", prompt)
         self.assertIn("rather than reciting the grid", prompt)
         self.assertIn("Never invent", prompt)
         self.assertIn("translations", request_payload["text"]["format"]["schema"]["required"])
