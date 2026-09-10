@@ -967,6 +967,12 @@ def _question_scene_context(value: dict[str, Any] | None) -> dict[str, Any]:
     return {
         "scene_type": str(normalized.get("scene_type", ""))[:200],
         "brief_spoken_kn": str(normalized.get("brief_spoken_kn", ""))[:1000],
+        "detailed_spoken_kn": str(normalized.get("detailed_spoken_kn", ""))[:2400],
+        "what_it_does_kn": str(normalized.get("what_it_does_kn", ""))[:800],
+        "important_points_kn": [
+            str(point)[:500] for point in normalized.get("important_points_kn", [])[:6]
+        ],
+        "uncertainty_kn": str(normalized.get("uncertainty_kn", ""))[:800],
         "objects": objects,
     }
 
@@ -979,7 +985,8 @@ def _saved_scene_identity_answer(
         "what is this", "what s this", "what is it", "tell me what this is",
         "ಇದು ಏನು", "ಇದೇನು", "ಇದು ಏನು ಹೇಳಿ", "ಇದು ಏನು ಅಂತ ಹೇಳಿ",
     }
-    answer = str(scene.get("brief_spoken_kn", "")).strip()
+    detailed = str(scene.get("detailed_spoken_kn", "")).strip()
+    answer = detailed if _valid_kannada_text(detailed) else str(scene.get("brief_spoken_kn", "")).strip()
     if normalized not in generic_questions or not _valid_kannada_text(answer):
         return None
     evidence_box = None

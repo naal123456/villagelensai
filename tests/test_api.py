@@ -59,7 +59,7 @@ class ApiTests(unittest.TestCase):
         self.assertNotIn(b'id="quality-4"', response.data)
         self.assertIn(b'id="owner-badge"', response.data)
         self.assertIn(b'id="app-version"', response.data)
-        self.assertIn(b'v2026.09.10.3', response.data)
+        self.assertIn(b'v2026.09.10.4', response.data)
         self.assertIn(b"'UNASSIGNED \xc2\xb7 OLDER CAPTURE'", response.data)
         self.assertIn(b"`${owner}${ownerName}`", response.data)
         self.assertIn(b'navigationGeneration', response.data)
@@ -100,13 +100,13 @@ class ApiTests(unittest.TestCase):
         self.assertIn(b"clearlySharp?24:16", response.data)
         self.assertIn(b'page_clipped:pageCandidatePercent>14&&edgePercent>32', response.data)
         self.assertIn(b'page_too_small:pageCandidatePercent>14&&pageCandidatePercent<35&&edgePercent<32', response.data)
-        self.assertIn(b'function cameraFrameScore', response.data)
         self.assertIn(b'function cameraGuideSourceRect', response.data)
         self.assertIn(b'function drawCameraGuideFrame', response.data)
         self.assertIn(b'function renderPageOutline', response.data)
-        self.assertIn(b'function rememberCameraCandidate', response.data)
-        self.assertIn(b'now-candidate.capturedAt<=900', response.data)
-        self.assertIn(b'burst_frames:recent.length||cameraCandidates.length', response.data)
+        self.assertIn(b'Solid box = photo', response.data)
+        self.assertIn(b"['ready','page-edge'", response.data)
+        self.assertIn(b'burst_frames:1', response.data)
+        self.assertNotIn(b'cameraCandidates', response.data)
         camera_guide = response.data.split(b'function updateCameraGuide', 1)[1].split(
             b'async function openGuidedCamera', 1,
         )[0]
@@ -865,6 +865,7 @@ class ApiTests(unittest.TestCase):
             "What is this?",
             {
                 "brief_spoken_kn": "ಇದು ಎಫ್ ಎಸ್ ಹನ್ನೆರಡು ವೀಡಿಯೊ ಕ್ಯಾಮೆರಾ ಘಟಕ.",
+                "detailed_spoken_kn": "ಇದು ಎಫ್ ಎಸ್ ಹನ್ನೆರಡು ವೀಡಿಯೊ ಕ್ಯಾಮೆರಾ ಘಟಕ. ಇದು ಚಿತ್ರವನ್ನು ದಾಖಲಿಸಲು ಬಳಸುತ್ತದೆ.",
                 "objects": [{
                     "name_kn": "ವೀಡಿಯೊ ಕ್ಯಾಮೆರಾ ಘಟಕ",
                     "box": {"x": 10, "y": 20, "width": 200, "height": 80},
@@ -876,6 +877,7 @@ class ApiTests(unittest.TestCase):
         self.assertIsNotNone(value)
         self.assertEqual(value["answer_source"], "saved_semantic_scene")
         self.assertGreater(len(value["answer_kn"]), len("ಇದು"))
+        self.assertIn("ಚಿತ್ರವನ್ನು ದಾಖಲಿಸಲು", value["answer_kn"])
         self.assertEqual(
             value["evidence"][0]["box"],
             {"x": 10.0, "y": 20.0, "width": 200.0, "height": 80.0},

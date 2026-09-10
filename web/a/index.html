@@ -86,6 +86,7 @@
     .camera-panel { padding: 10px 12px max(12px,env(safe-area-inset-bottom)); background: rgba(10,14,17,.98); }
     #camera-guidance { min-height: 2.6em; margin: 0 0 8px; font-size: 1.05rem; font-weight: 750; }
     #camera-metrics { margin: 0 0 8px; color: #b8c4ce; font-size: .78rem; font-variant-numeric: tabular-nums; }
+    #camera-crop-note { margin: 0 0 8px; color: #d5e8f2; font-size: .78rem; }
     .camera-actions { display: grid; grid-template-columns: 1fr 2fr; gap: 9px; }
     #camera-capture { min-height: 58px; background: #176c42; border-color: #55e58b; font-size: 1.15rem; }
     #camera-cancel { min-height: 58px; }
@@ -114,7 +115,7 @@
         <span class="bar" id="quality-1"></span><span class="bar" id="quality-2"></span>
         <span class="bar" id="quality-3"></span>
         <span id="quality-timer">—</span>
-        <span id="app-version" aria-label="App version">v2026.09.10.3</span>
+        <span id="app-version" aria-label="App version">v2026.09.10.4</span>
       </div>
       <p id="mic-status" role="status" aria-live="assertive" hidden></p>
     </section>
@@ -146,6 +147,7 @@
     <div class="camera-panel">
       <p id="camera-guidance" role="status" aria-live="polite">ಚಿತ್ರ ಅಥವಾ ಪುಟವನ್ನು ಚೌಕದೊಳಗೆ ಇರಿಸಿ · Fit the object or page inside the box</p>
       <p id="camera-metrics" aria-hidden="true">Starting camera…</p>
+      <p id="camera-crop-note">ಗಟ್ಟಿ ಚೌಕ = ಚಿತ್ರ · ಚುಕ್ಕೆ ರೇಖೆ = ಪುಟದ ಅಂದಾಜು · Solid box = photo · Dashed = estimated page</p>
       <div class="camera-actions">
         <button id="camera-cancel" aria-label="Cancel camera">✕</button>
         <button id="camera-capture" aria-label="Take picture now">📷 ಈಗ ತೆಗೆಯಿರಿ · Take now</button>
@@ -166,7 +168,7 @@
     let navigationGeneration=0;
     let playbackGeneration=0, speechGeneration=0, pointerStart=null, suppressTap=false, activeControl='mode-word';
     let audioContext=null, activeAudioSource=null, activeRecorder=null, recordingTimer=0, micTimerId=0;
-    let cameraStream=null, cameraAnalysisTimer=0, previousCameraFrame=null,cameraCandidates=[];
+    let cameraStream=null, cameraAnalysisTimer=0, previousCameraFrame=null;
     let cameraCapturing=false, lastCameraPrompt='', lastCameraPromptAt=0, latestCameraQuality=null;
     const speechAudioCache=new Map();
     const translationCache=new Map();
@@ -176,7 +178,7 @@
       'what_is_it_kn','what_it_does_kn','important_points_kn','action_needed_kn','warning_kn','uncertainty_kn',
       'transcription_kn','spoken_sections','verified_regions','confidence','needs_independent_review'];
     const analysisVersion='context-v2';
-    const appVersion='2026-09-10.3';
+    const appVersion='2026-09-10.4';
     let speechVoices=[];
     const testerId=configureTesterId();
 
@@ -798,7 +800,7 @@
       return (crypto.randomUUID?crypto.randomUUID():`${Date.now()}-${Math.random()}`).replace(/-/g,'').replace(/[^0-9a-f]/gi,'').padEnd(32,'0').slice(0,32).toLowerCase();
     }
     function closeGuidedCamera() {
-      clearTimeout(cameraAnalysisTimer); cameraAnalysisTimer=0; previousCameraFrame=null; cameraCandidates=[];
+      clearTimeout(cameraAnalysisTimer); cameraAnalysisTimer=0; previousCameraFrame=null;
       pageOutline.hidden=true;
       if (cameraStream) cameraStream.getTracks().forEach(track=>track.stop());
       cameraStream=null; cameraPreview.srcObject=null; cameraGuide.hidden=true; cameraCapturing=false;
@@ -894,8 +896,8 @@
       if (glare) return ['wait','glare','ಪ್ರತಿಫಲನ ತಪ್ಪಿಸಲು ಸ್ವಲ್ಪ ಓರೆಯಾಗಿಸಿ · Tilt slightly to remove glare','ಬೆಳಕಿನ ಪ್ರತಿಫಲನ ತಪ್ಪಿಸಲು ಸ್ವಲ್ಪ ಓರೆಯಾಗಿಸಿ.'];
       if (moving) return ['wait','motion','ಫೋನ್ ಸ್ಥಿರವಾಗಿ ಹಿಡಿಯಿರಿ · Hold the phone steady','ಫೋನ್ ಸ್ಥಿರವಾಗಿ ಹಿಡಿಯಿರಿ.'];
       if (soft) return ['wait','soft','ಸ್ಪಷ್ಟವಾಗಲು ನಿಧಾನವಾಗಿ ಹತ್ತಿರ ಅಥವಾ ದೂರ ಸರಿಸಿ · Move slowly until clear','ಚಿತ್ರ ಸ್ಪಷ್ಟವಾಗುವವರೆಗೆ ನಿಧಾನವಾಗಿ ಹತ್ತಿರ ಅಥವಾ ದೂರ ಸರಿಸಿ.'];
-      if (quality.page_clipped) return ['wait','page-edge','ಪುಟದ ಅಂಚು ಕಾಣುತ್ತಿಲ್ಲ—ಸ್ವಲ್ಪ ದೂರ ಸರಿಸಿ · Page edge missing—move farther away','ಪುಟದ ಅಂಚು ಕಾಣುತ್ತಿಲ್ಲ. ಸ್ವಲ್ಪ ದೂರ ಸರಿಸಿ.'];
-      if (quality.page_too_small) return ['wait','page-small','ಪುಟವನ್ನು ಚೌಕದೊಳಗೆ ಇಟ್ಟು ಸ್ವಲ್ಪ ಹತ್ತಿರ ಬನ್ನಿ · Keep the whole page in the box and move closer','ಪುಟವನ್ನು ಚೌಕದೊಳಗೆ ಇಟ್ಟು ಸ್ವಲ್ಪ ಹತ್ತಿರ ಬನ್ನಿ.'];
+      if (quality.page_clipped) return ['ready','page-edge','ಪುಟದ ಅಂಚು ಖಚಿತವಾಗಿಲ್ಲ—ಚಿತ್ರ ತೆಗೆಯಬಹುದು ಅಥವಾ ಸರಿಪಡಿಸಬಹುದು · Page edge uncertain—take now or adjust','ಪುಟದ ಅಂಚು ಖಚಿತವಾಗಿಲ್ಲ. ಚಿತ್ರ ತೆಗೆಯಬಹುದು ಅಥವಾ ಸರಿಪಡಿಸಬಹುದು.'];
+      if (quality.page_too_small) return ['ready','page-small','ಪುಟ ಪೂರ್ಣವಾಗಿದ್ದರೆ ಸ್ವಲ್ಪ ಹತ್ತಿರ ಬರಬಹುದು · If the whole page fits, you may move closer','ಪುಟ ಪೂರ್ಣವಾಗಿದ್ದರೆ ಸ್ವಲ್ಪ ಹತ್ತಿರ ಬರಬಹುದು.'];
       return ['ready','ready','ಚೆನ್ನಾಗಿದೆ—ಸ್ಥಿರವಾಗಿ ಹಿಡಿಯಿರಿ · Good—hold steady','ಚೆನ್ನಾಗಿದೆ. ಸ್ಥಿರವಾಗಿ ಹಿಡಿಯಿರಿ.'];
     }
     function updateCameraGuide() {
@@ -903,11 +905,11 @@
       const quality=analyzeCameraFrame();
       if (!quality) { cameraAnalysisTimer=setTimeout(updateCameraGuide,300); return; }
       latestCameraQuality=quality;
-      rememberCameraCandidate(quality); renderPageOutline(quality);
+      renderPageOutline(quality);
       const [state,key,message,spoken]=cameraQualityState(quality);
       cameraGuide.dataset.quality=state; cameraPrompt(key,message,spoken);
       cameraMetrics.textContent=`Light ${Math.round(quality.brightness)} · Sharp ${quality.sharpness.toFixed(1)} · Motion ${quality.motion.toFixed(1)} · Glare ${Math.round(quality.glare_percent)}%`;
-      if (state==='ready') {
+      if (state==='ready'&&key==='ready') {
         cameraGuidance.textContent='ಚಿತ್ರ ಸಿದ್ಧವಾಗಿದೆ—ಹಸಿರು ಕ್ಯಾಮೆರಾ ಒತ್ತಿ · Ready—tap the green camera';
       }
       cameraAnalysisTimer=setTimeout(updateCameraGuide,320);
@@ -920,7 +922,7 @@
         cameraPreview.srcObject=cameraStream; cameraGuide.hidden=false; cameraGuide.dataset.quality='wait';
         cameraGuidance.textContent='ಚಿತ್ರ ಅಥವಾ ಪುಟವನ್ನು ಚೌಕದೊಳಗೆ ಇರಿಸಿ · Fit the object or page inside the box';
         cameraMetrics.textContent='Checking light and focus…'; cameraCapturing=false; latestCameraQuality=null;
-        cameraCandidates=[]; pageOutline.hidden=true;
+        pageOutline.hidden=true;
         const trackVideo=cameraStream.getVideoTracks()[0];
         try {
           const capabilities=trackVideo.getCapabilities?trackVideo.getCapabilities():{};
@@ -934,30 +936,14 @@
         input.click();
       }
     }
-    function cameraFrameScore(quality) {
-      const number=key=>Number(quality&&quality[key])||0;
-      return number('sharpness')*5-number('motion')-number('dark_percent')*2-number('glare_percent')*3-
-        number('page_edge_percent')*2-(quality&&quality.page_clipped?120:0)-(quality&&quality.page_too_small?50:0);
-    }
-    function rememberCameraCandidate(quality) {
-      const canvas=document.createElement('canvas'); if (!drawCameraGuideFrame(canvas)) return;
-      cameraCandidates.push({canvas,quality:{...quality},capturedAt:Date.now()});
-      while (cameraCandidates.length>4) cameraCandidates.shift();
-    }
-    async function captureGuidedPhoto() {
+    function captureGuidedPhoto() {
       if (cameraCapturing||!cameraPreview.videoWidth) return;
       cameraCapturing=true; clearTimeout(cameraAnalysisTimer);
-      cameraGuidance.textContent='ಉತ್ತಮ ಚಿತ್ರವನ್ನು ಆಯ್ಕೆ ಮಾಡುತ್ತಿದೆ… · Choosing the clearest picture…';
-      const immediate=analyzeCameraFrame()||latestCameraQuality||{}; rememberCameraCandidate(immediate);
-      const now=Date.now(),recent=cameraCandidates.filter(candidate=>now-candidate.capturedAt<=900);
-      const best=(recent.length?recent:cameraCandidates).reduce((winner,candidate)=>{
-        const score=cameraFrameScore(candidate.quality)-(now-candidate.capturedAt)/25;
-        return !winner||score>winner.score?{...candidate,score}:winner;
-      },null);
-      const output=best&&best.canvas,quality={...(best&&best.quality||immediate),auto_captured:false,
-        burst_frames:recent.length||cameraCandidates.length};
+      cameraGuidance.textContent='ಈಗ ಕಾಣುವ ಚಿತ್ರವನ್ನು ಉಳಿಸುತ್ತಿದೆ… · Saving what you see now…';
+      const quality={...(analyzeCameraFrame()||latestCameraQuality||{}),auto_captured:false,burst_frames:1};
+      const output=document.createElement('canvas'),drawn=drawCameraGuideFrame(output);
       closeGuidedCamera(); track('camera_manual');
-      if (!output) { input.click(); return; }
+      if (!drawn) { input.click(); return; }
       output.toBlob(blob=>{
         if (!blob) { input.click(); return; }
         useCapture(new File([blob],`guided-${Date.now()}.jpg`,{type:'image/jpeg'}),{source:'guided-camera-v1',quality});
