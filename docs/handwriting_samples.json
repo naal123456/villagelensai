@@ -63,6 +63,12 @@
         "Mixed Latin transliteration, Kannada script, overwriting, and spelling variation make literal pronunciation difficult.",
         "Semantic analysis identified the document as a meal menu and recovered several likely foods while preserving uncertainty."
       ],
+      "verified_readings": [
+        {"item": 1, "source": "Puliyogare", "spoken_kn": "ಪುಳಿಯೋಗರೆ", "meaning": "spicy tamarind rice"},
+        {"item": 2, "source": "handwritten Kannada misread as numbers", "spoken_kn": "ಕಡಲೆಕಾಯಿ", "meaning": "groundnuts"},
+        {"item": 3, "source": "Shavige", "spoken_kn": "ಶಾವಿಗೆ", "meaning": "vermicelli food"},
+        {"item": 7, "source": "Ollige misread as Even", "spoken_kn": "ಒಳಿಗೆ", "meaning": "food item"}
+      ],
       "field_status": "foundational hard mixed-script handwriting sample"
     }
   ]

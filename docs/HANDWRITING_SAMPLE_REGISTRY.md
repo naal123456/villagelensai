@@ -26,6 +26,13 @@ OCR pronunciation is not a sufficient evaluation for this sample; document
 purpose, likely food names, uncertainty, and audio continuity must be scored
 separately.
 
+Owner-verified readings for `HW-0003` are: item 1 `Puliyogare` →
+`ಪುಳಿಯೋಗರೆ` (spicy tamarind rice), item 2 → `ಕಡಲೆಕಾಯಿ` (groundnuts),
+item 3 `Shavige` → `ಶಾವಿಗೆ` (vermicelli food), and item 7 `Ollige` →
+`ಒಳಿಗೆ`. These corrections are attached to their image regions in the tester
+application. They override literal OCR for touch and continuous reading without
+silently treating the remaining uncertain handwriting as verified truth.
+
 ## Accumulation rules
 
 Each new handwriting example should receive:

@@ -80,6 +80,36 @@ DEMO_ASSETS = {
 APP_ASSETS = {
     "manifest.webmanifest", "sw.js", "icon.svg", "icon-192.png", "icon-512.png",
 }
+VERIFIED_CAPTURE_REGIONS = {
+    "fac3bcfd6b5d43d79fa1652e10159b95": [
+        {
+            "id": "rupa-menu-thursday-1", "label": "Puliyogare",
+            "spoken_kn": "ಒಂದು. ಪುಳಿಯೋಗರೆ.",
+            "meaning_kn": "ಹುಣಸೆಹಣ್ಣಿನ ಮಸಾಲೆ ಅನ್ನ.",
+            "box": {"x": 87, "y": 593, "width": 455, "height": 116},
+            "verified_by": "owner_feedback_20260909",
+        },
+        {
+            "id": "rupa-menu-thursday-2", "label": "Kadle kai",
+            "spoken_kn": "ಎರಡು. ಕಡಲೆಕಾಯಿ.", "meaning_kn": "ನೆಲಗಡಲೆ.",
+            "box": {"x": 122, "y": 698, "width": 436, "height": 125},
+            "verified_by": "owner_feedback_20260909",
+        },
+        {
+            "id": "rupa-menu-thursday-3", "label": "Shavige",
+            "spoken_kn": "ಮೂರು. ಶಾವಿಗೆ.",
+            "meaning_kn": "ವರ್ಮಿಸೆಲ್ಲಿಯಿಂದ ಮಾಡುವ ತಿಂಡಿ.",
+            "box": {"x": 143, "y": 835, "width": 486, "height": 80},
+            "verified_by": "owner_feedback_20260909",
+        },
+        {
+            "id": "rupa-menu-thursday-7", "label": "Ollige",
+            "spoken_kn": "ಏಳು. ಒಳಿಗೆ.", "meaning_kn": "ಒಳಿಗೆ ಎಂಬ ತಿಂಡಿ.",
+            "box": {"x": 109, "y": 1211, "width": 474, "height": 104},
+            "verified_by": "owner_feedback_20260909",
+        },
+    ],
+}
 
 Image.MAX_IMAGE_PIXELS = MAX_IMAGE_PIXELS
 
@@ -1319,6 +1349,10 @@ def gallery() -> tuple[Response, int]:
                 ):
                     continue
                 owner_id = str(value.get("tester_id", "")).strip().lower()
+                verified_regions = VERIFIED_CAPTURE_REGIONS.get(capture_id, [])
+                displayed_result = dict(value)
+                if verified_regions:
+                    displayed_result["verified_regions"] = verified_regions
                 item = {
                     "id": capture_id,
                     "label": value.get("label") or "Captured page",
@@ -1327,10 +1361,12 @@ def gallery() -> tuple[Response, int]:
                     "retained": True,
                     "captured_at": value.get("captured_at"),
                     "image_url": f"/api/captures/{capture_id}/image",
-                    "result": value,
+                    "result": displayed_result,
                     "tester_id": owner_id or "unassigned",
                     "tester_name": TESTER_NAMES.get(owner_id, ""),
                 }
+                if verified_regions:
+                    item["verified_regions"] = verified_regions
                 for stage in (2, 3):
                     if evidence_blob := evidence.get((capture_id, stage)):
                         try:

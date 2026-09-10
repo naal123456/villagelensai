@@ -63,6 +63,9 @@ class ApiTests(unittest.TestCase):
         self.assertIn(b'X-VillageLens-Tester-ID', response.data)
         self.assertIn(b'function speechSegments', response.data)
         self.assertIn(b'function speechChunks', response.data)
+        self.assertIn(b'function applyVerifiedReadingRegions', response.data)
+        self.assertIn('ಪುಳಿಯೋಗರೆ'.encode(), response.data)
+        self.assertIn('ಶಾವಿಗೆ'.encode(), response.data)
         self.assertIn(b"playKannada(prepared,generation)", response.data)
         self.assertIn(b'unlockAudioPlayback', response.data)
         self.assertIn(b'function voiceFor', response.data)
@@ -313,6 +316,28 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(len(reviewer["items"]), 3)
         self.assertEqual(reviewer["items"][2]["tester_id"], "a1")
         self.assertEqual(reviewer["items"][2]["tester_name"], "Eeregowda")
+
+    @patch("api.app._storage_bucket")
+    def test_gallery_attaches_owner_verified_handwriting_regions(
+        self, storage_bucket: object,
+    ) -> None:
+        capture_id = "fac3bcfd6b5d43d79fa1652e10159b95"
+        result_blob = MagicMock()
+        result_blob.name = f"captures/{capture_id}/result.json"
+        result_blob.download_as_text.return_value = json.dumps({
+            "capture_id": capture_id, "captured_at": "2026-09-10T01:57:49+00:00",
+            "label": "Captured page", "tester_id": "a3", "words": [], "lines": [],
+        })
+        storage_bucket.return_value.list_blobs.return_value = [result_blob]
+
+        item = self.client.get(
+            "/api/gallery", headers={"X-VillageLens-Tester-ID": "a3"},
+        ).get_json()["items"][2]
+
+        self.assertEqual([region["label"] for region in item["verified_regions"]], [
+            "Puliyogare", "Kadle kai", "Shavige", "Ollige",
+        ])
+        self.assertEqual(item["result"]["verified_regions"][1]["spoken_kn"], "ಎರಡು. ಕಡಲೆಕಾಯಿ.")
 
     def test_health_reports_pinned_models(self) -> None:
         response = self.client.get("/health")

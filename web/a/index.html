@@ -167,7 +167,7 @@
       'select-object','infer-global','ask','install'];
     const meaningFields=['summary_kn','brief_spoken_kn','detailed_spoken_kn','scene_type','objects',
       'what_is_it_kn','what_it_does_kn','important_points_kn','action_needed_kn','warning_kn','uncertainty_kn',
-      'transcription_kn','spoken_sections','confidence','needs_independent_review'];
+      'transcription_kn','spoken_sections','verified_regions','confidence','needs_independent_review'];
     const analysisVersion='context-v2';
     let speechVoices=[];
     const testerId=configureTesterId();
@@ -334,6 +334,10 @@
     function normalizedSpeech(text) {
       return String(text||'').replace(/\bSmt\.?\s*/gi,'Shrimati ').replace(/\bSri\.?\s*/gi,'Shri ')
         .replace(/\bProf\.?\s*/gi,'Professor ').replace(/\bDr\.?\s*/gi,'Doctor ')
+        .replace(/\bPuliyog(?:a)?re\b/gi,'ಪುಳಿಯೋಗರೆ').replace(/\bShavige\b/gi,'ಶಾವಿಗೆ')
+        .replace(/\bPayasa\b/gi,'ಪಾಯಸ').replace(/\bKosumbari\b/gi,'ಕೋಸಂಬರಿ')
+        .replace(/\bMosa(?:r|v)anna\b/gi,'ಮೊಸರನ್ನ').replace(/\bHappla\b/gi,'ಹಪ್ಪಳ')
+        .replace(/\bOllige\b/gi,'ಒಳಿಗೆ')
         .replace(/(\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)\s*V\b/gi,'$1 ವೋಲ್ಟ್ ಅಥವಾ $2 ವೋಲ್ಟ್')
         .replace(/(\d+(?:\.\d+)?)\s*(kW|HP|Hz|V|A|W|kg|ml|°C)\b/gi,(_,n,u)=>`${n} ${{kw:'ಕಿಲೋವ್ಯಾಟ್',hp:'ಹಾರ್ಸ್ ಪವರ್',hz:'ಹರ್ಟ್ಸ್',v:'ವೋಲ್ಟ್',a:'ಆಂಪಿಯರ್',w:'ವ್ಯಾಟ್',kg:'ಕಿಲೋಗ್ರಾಂ',ml:'ಮಿಲಿಲಿಟರ್','°c':'ಡಿಗ್ರಿ ಸೆಲ್ಸಿಯಸ್'}[u.toLowerCase()]||u}`)
         .replace(/ಪ್ರೊ\.?/g,'ಪ್ರೊಫೆಸರ್ ').replace(/ಡಾ\.?/g,'ಡಾಕ್ಟರ್ ');
@@ -605,7 +609,25 @@
         id:`transcription-${index}`,text:line.text_kn,box:line.box,word_ids:[],uncertain:line.uncertain,
       }));
     }
-    function effectiveLines() { const handwritten=transcriptionLines(); return handwritten.length?handwritten:(result&&result.lines||[]); }
+    function verifiedRegions() { return result&&result.verified_regions||[]; }
+    function effectiveLines() {
+      const verified=verifiedRegions(); if (verified.length) return verified.map(region=>({...region,text:region.spoken_kn}));
+      const handwritten=transcriptionLines(); return handwritten.length?handwritten:(result&&result.lines||[]);
+    }
+    function renderVerifiedRegions() {
+      overlay.querySelectorAll('.verified-hit').forEach(node=>node.remove());
+      if (!['word','sentence'].includes(mode)) return;
+      for (const region of verifiedRegions()) {
+        const hit=document.createElementNS('http://www.w3.org/2000/svg','rect');
+        for (const key of ['x','y','width','height']) hit.setAttribute(key,region.box[key]);
+        hit.setAttribute('class','hit verified-hit');
+        hit.addEventListener('click',event=>{
+          event.stopPropagation(); if (suppressTap) return; stop(true); activate(region,region.spoken_kn);
+          track(mode==='sentence'?'line':'word'); speak(region.spoken_kn);
+        });
+        overlay.appendChild(hit);
+      }
+    }
     function renderTranscriptions() {
       overlay.querySelectorAll('.transcription-region').forEach(node=>node.remove());
       if (mode!=='sentence') return;
@@ -618,7 +640,7 @@
       }
       if (transcriptionLines().length) status.textContent='ಕೈಬರಹದ ಸಾಲನ್ನು ಸ್ಪರ್ಶಿಸಿ.';
     }
-    function renderContextRegions() { renderObjects(); renderTranscriptions(); }
+    function renderContextRegions() { renderObjects(); renderTranscriptions(); renderVerifiedRegions(); }
     function render(value,markStageOne=true) {
       result=value; overlay.textContent=''; current.textContent='';
       overlay.setAttribute('viewBox',`0 0 ${value.image_size.width} ${value.image_size.height}`);
@@ -707,7 +729,23 @@
         if (!response.ok) throw new Error('GALLERY_FAILED'); gallery=(await response.json()).items||[]; await showGallery(0);
       } catch (_) { status.textContent='ಉಳಿಸಿದ ಚಿತ್ರಗಳನ್ನು ತೆರೆಯಲು ಆಗಲಿಲ್ಲ.'; }
     }
+    function applyVerifiedReadingRegions(items) {
+      const regions=verifiedRegions(); if (!regions.length) return items;
+      const inside=(item,region)=>item.box&&item.box.x+item.box.width/2>=region.box.x&&
+        item.box.x+item.box.width/2<=region.box.x+region.box.width&&
+        item.box.y+item.box.height/2>=region.box.y&&item.box.y+item.box.height/2<=region.box.y+region.box.height;
+      const emitted=new Set(),output=[];
+      for (const item of items) {
+        const region=regions.find(candidate=>inside(item,candidate));
+        if (!region) { output.push(item); continue; }
+        if (emitted.has(region.id)) continue; emitted.add(region.id);
+        const ids=items.filter(candidate=>inside(candidate,region)).map(candidate=>candidate.id);
+        output.push({...region,text:region.spoken_kn,ids});
+      }
+      return output;
+    }
     function groupedWords(items) {
+      items=applyVerifiedReadingRegions(items);
       const output=[];
       for (let index=0;index<items.length;index++) {
         const first=items[index], sameLine=next=>next&&next.line_id===first.line_id;
