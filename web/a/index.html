@@ -239,6 +239,9 @@
       stop(); mode=next; activeControl=id; $(id).classList.add('active');
       renderContextRegions();
     }
+    function defaultWordMode() {
+      clearControls(); mode='word'; activeControl='mode-word'; $('mode-word').classList.add('active');
+    }
     function startAction(id) {
       if (activeControl===id) { stop(); return false; }
       stop(); mode='none'; activeControl=id; $(id).classList.add('active'); working(id,true); return true;
@@ -645,7 +648,7 @@
     }
     async function showGallery(index) {
       if (!gallery.length) return;
-      stop(); const navigation=++navigationGeneration;
+      stop(); defaultWordMode(); const navigation=++navigationGeneration;
       galleryIndex=(index+gallery.length)%gallery.length; const item=gallery[galleryIndex];
       renderConversation(item);
       const owner=item.tester_id&&item.tester_id!=='unassigned'?item.tester_id.toUpperCase():'';
@@ -877,7 +880,7 @@
       await item.cloudPromise;
     }
     async function useCapture(file,captureMeta={}) {
-      if (!file) return; stop(); const navigation=++navigationGeneration; resetQuality(); status.textContent='ಚಿತ್ರವನ್ನು ಓದುತ್ತಿದೆ…';
+      if (!file) return; stop(); defaultWordMode(); const navigation=++navigationGeneration; resetQuality(); status.textContent='ಚಿತ್ರವನ್ನು ಓದುತ್ತಿದೆ…';
       const captureId=newCaptureId();
       const objectUrl=URL.createObjectURL(file); image.src=objectUrl; stage.style.display='inline-block';
       const captureCode=`${(testerId||'UN').toUpperCase()}-${captureId.slice(0,6).toUpperCase()}`;

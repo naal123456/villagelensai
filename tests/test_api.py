@@ -11,7 +11,7 @@ from PIL import Image
 from api.app import (
     _access_token, _filter_local_regions, _normalize_stage_three,
     _openai_question, _openai_transcribe, _openai_translate, _parse_tsv,
-    _process_stored_capture, _tester_link_token, app,
+    _process_stored_capture, _saved_scene_identity_answer, _tester_link_token, app,
 )
 
 
@@ -90,6 +90,8 @@ class ApiTests(unittest.TestCase):
         self.assertIn(b"?'saved \xe2\x9c\x93'", response.data)
         self.assertIn(b'function clearControls', response.data)
         self.assertIn(b'function startAction', response.data)
+        self.assertIn(b'function defaultWordMode', response.data)
+        self.assertIn(b"stop(); defaultWordMode(); const navigation", response.data)
         self.assertIn(b'function ensureContext', response.data)
         self.assertIn(b'function chooseObjectMode', response.data)
         self.assertIn(b"fetch('/api/translate'", response.data)
@@ -767,6 +769,7 @@ class ApiTests(unittest.TestCase):
                 image_bytes(), "image/jpeg", 320, 120, "ಈ ಎಲೆಗೆ ರೋಗ ಇದೆಯೇ?",
                 [{"question": "ಇದು ಏನು?", "answer_kn": "ಇದು ಒಂದು ಎಲೆ."}],
                 {"x": 32, "y": 12, "width": 64, "height": 48, "label": "ಎಲೆ"},
+                {"scene_type": "ಸಸ್ಯ", "brief_spoken_kn": "ಇದು ಒಂದು ಸಸ್ಯ."},
             )
 
         self.assertEqual(value["answer_kn"], "ಇದು ಪುಸ್ತಕವಾಗಿದೆ.")
@@ -777,6 +780,29 @@ class ApiTests(unittest.TestCase):
         self.assertIn("ಈ ಎಲೆಗೆ ರೋಗ ಇದೆಯೇ?", prompt)
         self.assertIn("ಇದು ಒಂದು ಎಲೆ.", prompt)
         self.assertIn('"box_normalized_0_1000": [100, 100, 200, 400]', prompt)
+        self.assertIn('"saved_semantic_scene": {"scene_type":', prompt)
+        self.assertIn("Never answer with only a demonstrative word", prompt)
+
+    def test_generic_identity_question_reuses_saved_semantic_answer(self) -> None:
+        value = _saved_scene_identity_answer(
+            "What is this?",
+            {
+                "brief_spoken_kn": "ಇದು ಎಫ್ ಎಸ್ ಹನ್ನೆರಡು ವೀಡಿಯೊ ಕ್ಯಾಮೆರಾ ಘಟಕ.",
+                "objects": [{
+                    "name_kn": "ವೀಡಿಯೊ ಕ್ಯಾಮೆರಾ ಘಟಕ",
+                    "box": {"x": 10, "y": 20, "width": 200, "height": 80},
+                }],
+            },
+            320, 120,
+        )
+
+        self.assertIsNotNone(value)
+        self.assertEqual(value["answer_source"], "saved_semantic_scene")
+        self.assertGreater(len(value["answer_kn"]), len("ಇದು"))
+        self.assertEqual(
+            value["evidence"][0]["box"],
+            {"x": 10.0, "y": 20.0, "width": 200.0, "height": 80.0},
+        )
 
     @patch("api.app.requests.post")
     def test_openai_transcription_uses_audio_endpoint(self, provider: object) -> None:

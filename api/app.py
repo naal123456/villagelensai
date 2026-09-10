@@ -838,6 +838,7 @@ def _openai_question(
     data: bytes, media_type: str, width: int, height: int, question: str,
     history: list[dict[str, str]] | None = None,
     focus_box: dict[str, Any] | None = None,
+    scene_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     api_key = os.environ.get("OPENAI_API_KEY", "").strip()
     if not api_key:
@@ -864,6 +865,7 @@ def _openai_question(
             "label": str((focus_box or {}).get("label", ""))[:120],
             "box_normalized_0_1000": normalized_focus,
         } if normalized_focus else None,
+        "saved_semantic_scene": scene_context or None,
         "current_question": question,
     }, ensure_ascii=False)
     payload = {
@@ -874,6 +876,9 @@ def _openai_question(
                 "Answer the user's spoken question about this image in simple natural Kannada. "
                 "This is one continuing conversation about the same unchanged image. Use prior turns and "
                 "the current referent region to resolve words such as this, it, that leaf, or this part. "
+                "When there is no current referent, a general question such as 'what is this?' refers to "
+                "the whole image; use the saved semantic scene when supplied. Never answer with only a "
+                "demonstrative word such as 'this' or its Kannada equivalent. "
                 "Keep the subject consistent across follow-up questions, but correct an earlier answer if "
                 "the image contradicts it. For plant health questions, describe visible signs and uncertainty; "
                 "do not claim a disease diagnosis from an image alone. "
@@ -908,6 +913,49 @@ def _openai_question(
     }
     _scale_context_boxes({"spoken_sections": result["evidence"]}, width, height)
     return result
+
+
+def _question_scene_context(value: dict[str, Any] | None) -> dict[str, Any]:
+    if not _current_stage_three(value):
+        return {}
+    normalized = _normalize_stage_three(value or {})
+    objects = [
+        {
+            "name_kn": str(item.get("name_kn", ""))[:120],
+            "purpose_kn": str(item.get("purpose_kn", ""))[:300],
+            "box": item.get("box"),
+        }
+        for item in normalized.get("objects", [])[:6]
+        if isinstance(item, dict)
+    ]
+    return {
+        "scene_type": str(normalized.get("scene_type", ""))[:200],
+        "brief_spoken_kn": str(normalized.get("brief_spoken_kn", ""))[:1000],
+        "objects": objects,
+    }
+
+
+def _saved_scene_identity_answer(
+    question: str, scene: dict[str, Any], width: int, height: int,
+) -> dict[str, Any] | None:
+    normalized = re.sub(r"[^a-z0-9\u0c80-\u0cff]+", " ", question.casefold()).strip()
+    generic_questions = {
+        "what is this", "what s this", "what is it", "tell me what this is",
+        "ಇದು ಏನು", "ಇದೇನು", "ಇದು ಏನು ಹೇಳಿ", "ಇದು ಏನು ಅಂತ ಹೇಳಿ",
+    }
+    answer = str(scene.get("brief_spoken_kn", "")).strip()
+    if normalized not in generic_questions or not _valid_kannada_text(answer):
+        return None
+    evidence_box = None
+    objects = scene.get("objects", [])
+    if isinstance(objects, list) and objects and isinstance(objects[0], dict):
+        evidence_box = _context_box(objects[0].get("box"))
+    return {
+        "answer_kn": answer, "warning_kn": "", "uncertainty_kn": "",
+        "evidence": [{"box": evidence_box}] if evidence_box else [],
+        "image_size": {"width": width, "height": height},
+        "answer_source": "saved_semantic_scene",
+    }
 
 
 def _question_history(value: Any) -> list[dict[str, str]]:
@@ -1380,10 +1428,15 @@ def ask_about_capture(capture_id: str) -> tuple[Response, int]:
         image, _ = _normalized_image(source.download_as_bytes())
         normalized = io.BytesIO()
         image.save(normalized, format="PNG")
-        answer = _openai_question(
+        focus = _question_focus(payload.get("focus_box"), image.width, image.height)
+        scene = _question_scene_context(
+            _stored_json(bucket, f"captures/{capture_id}/stage-3.json")
+        )
+        answer = (None if focus else _saved_scene_identity_answer(
+            question, scene, image.width, image.height,
+        )) or _openai_question(
             normalized.getvalue(), "image/png", image.width, image.height, question,
-            _question_history(payload.get("history")),
-            _question_focus(payload.get("focus_box"), image.width, image.height),
+            _question_history(payload.get("history")), focus, scene,
         )
         answer["question"] = question
         return jsonify(answer), 200
@@ -1426,10 +1479,15 @@ def ask_about_capture_audio(capture_id: str) -> tuple[Response, int]:
         image, _ = _normalized_image(source.download_as_bytes())
         normalized = io.BytesIO()
         image.save(normalized, format="PNG")
-        answer = _openai_question(
+        focus = _question_focus(request.form.get("focus_box"), image.width, image.height)
+        scene = _question_scene_context(
+            _stored_json(bucket, f"captures/{capture_id}/stage-3.json")
+        )
+        answer = (None if focus else _saved_scene_identity_answer(
+            question, scene, image.width, image.height,
+        )) or _openai_question(
             normalized.getvalue(), "image/png", image.width, image.height, question,
-            _question_history(request.form.get("history")),
-            _question_focus(request.form.get("focus_box"), image.width, image.height),
+            _question_history(request.form.get("history")), focus, scene,
         )
         answer["question"] = question
         return jsonify(answer), 200
