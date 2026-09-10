@@ -232,6 +232,9 @@ def _response_headers(response: Response) -> Response:
         if origin and origin in _allowed_origins():
             response.headers["Access-Control-Allow-Origin"] = origin
             response.headers["Vary"] = "Origin"
+    if request.path in {"/a", "/a/"}:
+        response.headers["Cache-Control"] = "no-store, max-age=0"
+        response.headers["Pragma"] = "no-cache"
     return response
 
 
@@ -362,9 +365,10 @@ def app_asset(filename: str) -> Response | tuple[Response, int]:
     if filename not in APP_ASSETS:
         return jsonify(error="APP_ASSET_NOT_FOUND"), 404
     response = make_response(send_from_directory(WEB_ROOT / "a", filename))
+    if filename in {"sw.js", "manifest.webmanifest"}:
+        response.headers["Cache-Control"] = "no-cache, max-age=0"
     if filename == "sw.js":
         response.headers["Service-Worker-Allowed"] = "/a/"
-        response.headers["Cache-Control"] = "no-cache"
     return response
 
 

@@ -1,12 +1,17 @@
 const SHARED_IMAGE = '/a/shared-image';
 const SHARED_CACHE = 'villagelens-shared-image-v1';
+const APP_VERSION = '2026-09-10.1';
 
 self.addEventListener('install', event => {
   event.waitUntil(self.skipWaiting());
 });
 
 self.addEventListener('activate', event => {
-  event.waitUntil(self.clients.claim());
+  event.waitUntil((async () => {
+    await self.clients.claim();
+    const clients = await self.clients.matchAll({type: 'window'});
+    clients.forEach(client => client.postMessage({type: 'APP_UPDATED', version: APP_VERSION}));
+  })());
 });
 
 self.addEventListener('fetch', event => {

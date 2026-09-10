@@ -24,12 +24,13 @@
     button.working { border-color: #62d7ff; background: #174b5f; animation: working 1s infinite alternate; }
     @keyframes working { to { box-shadow: 0 0 15px #62d7ff; } }
     button:focus-visible { outline: 4px solid #65d6ff; outline-offset: 2px; }
-    .quality { display: grid; grid-template-columns: repeat(3, 1fr) auto; gap: 6px; align-items: center; }
+    .quality { display: grid; grid-template-columns: repeat(3, 1fr) auto auto; gap: 6px; align-items: center; }
     .bar { height: 14px; border: 1px solid #64717d; border-radius: 5px; background: #46515b; }
     #quality-1.ready { background: #e5bc27; border-color: #ffe071; }
     #quality-2.ready { background: #9adfae; } #quality-3.ready { background: #39ad68; }
     .bar.failed { border-color: #9b7048; background: #5c4c3e; }
     #quality-timer { min-width: 2.6em; color: #c7d1da; font-variant-numeric: tabular-nums; font-size: .85rem; }
+    #app-version { color: #8fa0ad; font-size: .66rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
     #mic-status { margin: 5px 0 0; padding: 7px 9px; border: 2px solid #62d7ff; border-radius: 8px;
       background: #123b4a; color: white; font-size: .9rem; font-weight: 750; }
     #mic-status[data-state="recording"] { border-color: #ff6b6b; background: #5b2020; }
@@ -109,6 +110,7 @@
         <span class="bar" id="quality-1"></span><span class="bar" id="quality-2"></span>
         <span class="bar" id="quality-3"></span>
         <span id="quality-timer">—</span>
+        <span id="app-version" aria-label="App version">v2026.09.10.1</span>
       </div>
       <p id="mic-status" role="status" aria-live="assertive" hidden></p>
     </section>
@@ -169,6 +171,7 @@
       'what_is_it_kn','what_it_does_kn','important_points_kn','action_needed_kn','warning_kn','uncertainty_kn',
       'transcription_kn','spoken_sections','verified_regions','confidence','needs_independent_review'];
     const analysisVersion='context-v2';
+    const appVersion='2026-09-10.1';
     const cameraReadyHoldSeconds=1.2;
     let speechVoices=[];
     const testerId=configureTesterId();
@@ -1117,9 +1120,17 @@
     });
     $('install').onclick=async()=>{
       stop(); activeControl='install'; $('install').classList.add('active'); working('install',true);
-      if (installPrompt) { await installPrompt.prompt(); installPrompt=null; finishAction('install'); return; }
+      if (installPrompt) {
+        const prompt=installPrompt; installPrompt=null; await prompt.prompt();
+        const choice=await prompt.userChoice;
+        const accepted=choice&&choice.outcome==='accepted';
+        status.textContent=accepted?'ಮುಖಪುಟಕ್ಕೆ ಸೇರಿಸಲಾಗಿದೆ · Added to home screen':'ಸ್ಥಾಪನೆ ರದ್ದಾಗಿದೆ. ಮತ್ತೆ 📲 ಒತ್ತಿರಿ · Install cancelled. Tap 📲 again.';
+        speakRaw(accepted?'ಮುಖಪುಟಕ್ಕೆ ಸೇರಿಸಲಾಗಿದೆ.':'ಸ್ಥಾಪಿಸಲು ಮತ್ತೆ ಬಟನ್ ಒತ್ತಿರಿ.');
+        finishAction('install'); return;
+      }
       const ios=/iPad|iPhone|iPod/.test(navigator.userAgent);
       status.textContent=ios?'ಸಫಾರಿಯ Share ⬆️ ಒತ್ತಿ, Add to Home Screen ಆಯ್ಕೆ ಮಾಡಿ.':'Chrome ಮೆನು ⋮ ಒತ್ತಿ, Add to Home screen ಆಯ್ಕೆ ಮಾಡಿ.';
+      speakRaw(ios?'ಕೆಳಗಿನ ಶೇರ್ ಬಟನ್ ಒತ್ತಿ. ನಂತರ ಆಡ್ ಟು ಹೋಮ್ ಸ್ಕ್ರೀನ್ ಆಯ್ಕೆ ಮಾಡಿ.':'ಕ್ರೋಮ್ ಮೆನು ಒತ್ತಿ. ನಂತರ ಆಡ್ ಟು ಹೋಮ್ ಸ್ಕ್ರೀನ್ ಆಯ್ಕೆ ಮಾಡಿ.');
       finishAction('install');
     };
     window.addEventListener('appinstalled',()=>{ $('install').hidden=true; installPrompt=null; });
@@ -1142,7 +1153,17 @@
     }
     async function startApp() {
       if ('serviceWorker' in navigator) {
-        try { await navigator.serviceWorker.register('/a/sw.js',{scope:'/a/'}); } catch (_) {}
+        try {
+          const hadController=Boolean(navigator.serviceWorker.controller);
+          let reloading=false;
+          navigator.serviceWorker.addEventListener('controllerchange',()=>{
+            if (!hadController||reloading) return; reloading=true; location.reload();
+          });
+          const registration=await navigator.serviceWorker.register('/a/sw.js',{
+            scope:'/a/',updateViaCache:'none'
+          });
+          await registration.update();
+        } catch (_) {}
       }
       await loadGallery();
       await loadSharedImage();
