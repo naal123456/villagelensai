@@ -1,0 +1,47 @@
+{
+  "schema": "villagelens.handwriting-samples.v1",
+  "updated_at": "2026-09-09",
+  "privacy": "References only. Images and transcribed page contents remain in protected storage.",
+  "samples": [
+    {
+      "sample_id": "HW-0001",
+      "capture_code": "A1-185142",
+      "capture_id": "1851422669a6487892e1f6e5189982fa",
+      "captured_at": "2026-09-04T13:37:17.668935+00:00",
+      "tester_session": "a1",
+      "tester_name": "Eeregowda",
+      "photographer": "unconfirmed",
+      "photographer_note": "Possibly a helper demonstration; an A1 session identifies the phone session, not the person who pressed the shutter.",
+      "language": "Kannada",
+      "content_type": "handwritten notebook question-and-answer page",
+      "view": "close",
+      "pair_id": "HW-PAIR-0001",
+      "quality_notes": [
+        "Writing is larger and clearer than the paired overview.",
+        "The right side of multiple lines is cropped.",
+        "The page is angled and some contrast is low."
+      ],
+      "field_status": "foundational sample"
+    },
+    {
+      "sample_id": "HW-0002",
+      "capture_code": "A1-4E3077",
+      "capture_id": "4e30772f680147b49c2c3b2f2cb73aff",
+      "captured_at": "2026-09-04T13:37:24.084878+00:00",
+      "tester_session": "a1",
+      "tester_name": "Eeregowda",
+      "photographer": "unconfirmed",
+      "photographer_note": "An A1 session identifies the phone session, not the person who pressed the shutter.",
+      "language": "Kannada",
+      "content_type": "handwritten notebook question-and-answer page",
+      "view": "overview",
+      "pair_id": "HW-PAIR-0001",
+      "quality_notes": [
+        "Nearly the complete notebook page is visible.",
+        "Page context is stronger than the paired close view.",
+        "Writing is smaller and harder for recognition."
+      ],
+      "field_status": "foundational sample"
+    }
+  ]
+}
