@@ -169,6 +169,7 @@
       'what_is_it_kn','what_it_does_kn','important_points_kn','action_needed_kn','warning_kn','uncertainty_kn',
       'transcription_kn','spoken_sections','verified_regions','confidence','needs_independent_review'];
     const analysisVersion='context-v2';
+    const cameraReadyHoldSeconds=1.2;
     let speechVoices=[];
     const testerId=configureTesterId();
 
@@ -827,23 +828,29 @@
       return {brightness:brightness/gray.length,dark_percent:100*dark/gray.length,
         glare_percent:100*glare/gray.length,sharpness:sharpness/Math.max(1,samples),motion};
     }
+    function cameraQualityState(quality) {
+      const dark=quality.brightness<48||quality.dark_percent>48, glare=quality.glare_percent>22;
+      // A genuinely sharp frame can survive normal hand tremor. Softer frames still
+      // require steadier hands so motion is not mistaken for useful edge detail.
+      const clearlySharp=quality.sharpness>=7, moving=quality.motion>(clearlySharp?24:16);
+      const soft=quality.sharpness<4.5;
+      if (dark) return ['bad','dark','ಬೆಳಕು ಬೇಕು · Need more light','ಬೆಳಕು ಬೇಕು.'];
+      if (glare) return ['wait','glare','ಪ್ರತಿಫಲನ ತಪ್ಪಿಸಲು ಸ್ವಲ್ಪ ಓರೆಯಾಗಿಸಿ · Tilt slightly to remove glare','ಬೆಳಕಿನ ಪ್ರತಿಫಲನ ತಪ್ಪಿಸಲು ಸ್ವಲ್ಪ ಓರೆಯಾಗಿಸಿ.'];
+      if (moving) return ['wait','motion','ಫೋನ್ ಸ್ಥಿರವಾಗಿ ಹಿಡಿಯಿರಿ · Hold the phone steady','ಫೋನ್ ಸ್ಥಿರವಾಗಿ ಹಿಡಿಯಿರಿ.'];
+      if (soft) return ['wait','soft','ಸ್ಪಷ್ಟವಾಗಲು ನಿಧಾನವಾಗಿ ಹತ್ತಿರ ಅಥವಾ ದೂರ ಸರಿಸಿ · Move slowly until clear','ಚಿತ್ರ ಸ್ಪಷ್ಟವಾಗುವವರೆಗೆ ನಿಧಾನವಾಗಿ ಹತ್ತಿರ ಅಥವಾ ದೂರ ಸರಿಸಿ.'];
+      return ['ready','ready','ಚೆನ್ನಾಗಿದೆ—ಸ್ಥಿರವಾಗಿ ಹಿಡಿಯಿರಿ · Good—hold steady','ಚೆನ್ನಾಗಿದೆ. ಸ್ಥಿರವಾಗಿ ಹಿಡಿಯಿರಿ.'];
+    }
     function updateCameraGuide() {
       if (!cameraStream||cameraCapturing) return;
       const quality=analyzeCameraFrame();
       if (!quality) { cameraAnalysisTimer=setTimeout(updateCameraGuide,300); return; }
       latestCameraQuality=quality;
-      const dark=quality.brightness<48||quality.dark_percent>48, glare=quality.glare_percent>22;
-      const moving=quality.motion>10, soft=quality.sharpness<4.5;
-      let state='ready',key='ready',message='ಚೆನ್ನಾಗಿದೆ—ಸ್ಥಿರವಾಗಿ ಹಿಡಿಯಿರಿ · Good—hold steady',spoken='ಚೆನ್ನಾಗಿದೆ. ಸ್ಥಿರವಾಗಿ ಹಿಡಿಯಿರಿ.';
-      if (dark) { state='bad'; key='dark'; message='ಬೆಳಕು ಬೇಕು · Need more light'; spoken='ಬೆಳಕು ಬೇಕು.'; }
-      else if (glare) { state='wait'; key='glare'; message='ಪ್ರತಿಫಲನ ತಪ್ಪಿಸಲು ಸ್ವಲ್ಪ ಓರೆಯಾಗಿಸಿ · Tilt slightly to remove glare'; spoken='ಬೆಳಕಿನ ಪ್ರತಿಫಲನ ತಪ್ಪಿಸಲು ಸ್ವಲ್ಪ ಓರೆಯಾಗಿಸಿ.'; }
-      else if (moving) { state='wait'; key='motion'; message='ಫೋನ್ ಸ್ಥಿರವಾಗಿ ಹಿಡಿಯಿರಿ · Hold the phone steady'; spoken='ಫೋನ್ ಸ್ಥಿರವಾಗಿ ಹಿಡಿಯಿರಿ.'; }
-      else if (soft) { state='wait'; key='soft'; message='ಸ್ಪಷ್ಟವಾಗಲು ನಿಧಾನವಾಗಿ ಹತ್ತಿರ ಅಥವಾ ದೂರ ಸರಿಸಿ · Move slowly until clear'; spoken='ಚಿತ್ರ ಸ್ಪಷ್ಟವಾಗುವವರೆಗೆ ನಿಧಾನವಾಗಿ ಹತ್ತಿರ ಅಥವಾ ದೂರ ಸರಿಸಿ.'; }
+      const [state,key,message,spoken]=cameraQualityState(quality);
       cameraGuide.dataset.quality=state; cameraPrompt(key,message,spoken);
       cameraMetrics.textContent=`Light ${Math.round(quality.brightness)} · Sharp ${quality.sharpness.toFixed(1)} · Motion ${quality.motion.toFixed(1)} · Glare ${Math.round(quality.glare_percent)}%`;
       if (state==='ready') {
         if (!cameraReadySince) cameraReadySince=Date.now();
-        const remaining=Math.max(0,2.2-(Date.now()-cameraReadySince)/1000);
+        const remaining=Math.max(0,cameraReadyHoldSeconds-(Date.now()-cameraReadySince)/1000);
         cameraGuidance.textContent=`${message} · ${remaining.toFixed(1)}s`;
         if (!remaining) { captureGuidedPhoto(true); return; }
       } else cameraReadySince=0;
