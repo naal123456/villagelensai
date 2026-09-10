@@ -356,12 +356,30 @@
       }
       return segments.filter(segment=>segment.text.trim());
     }
+    function speechChunks(text,maxLength=420) {
+      let remaining=normalizedSpeech(text).trim(); const chunks=[];
+      while (remaining.length>maxLength) {
+        const window=remaining.slice(0,maxLength+1);
+        let cut=Math.max(window.lastIndexOf('. '),window.lastIndexOf('। '),window.lastIndexOf('; '),window.lastIndexOf('! '),window.lastIndexOf('? '));
+        if (cut<Math.floor(maxLength*.55)) cut=window.lastIndexOf(' ');
+        if (cut<1) cut=maxLength;
+        chunks.push(remaining.slice(0,cut+1).trim()); remaining=remaining.slice(cut+1).trim();
+      }
+      if (remaining) chunks.push(remaining); return chunks;
+    }
     async function ensureAudioContext() {
       const AudioContextClass=window.AudioContext||window.webkitAudioContext;
       if (!AudioContextClass) return null;
       if (!audioContext) audioContext=new AudioContextClass();
       if (audioContext.state==='suspended') await audioContext.resume();
       return audioContext;
+    }
+    async function unlockAudioPlayback() {
+      try {
+        const context=await ensureAudioContext(); if (!context) return;
+        const source=context.createBufferSource(); source.buffer=context.createBuffer(1,1,22050);
+        source.connect(context.destination); source.start();
+      } catch (_) {}
     }
     function showKannadaVoiceError() {
       status.textContent='ಕನ್ನಡ ಧ್ವನಿ ತಾತ್ಕಾಲಿಕವಾಗಿ ಲಭ್ಯವಿಲ್ಲ. ಮತ್ತೆ ಸ್ಪರ್ಶಿಸಿ.';
@@ -391,7 +409,12 @@
       stopSpeechOnly();
       if (!text) return false;
       const generation=speechGeneration;
-      for (const segment of speechSegments(text)) {
+      for (const prepared of speechChunks(text)) {
+        if (/[ಀ-೿]/.test(prepared)) {
+          if (!await playKannada(prepared,generation)) return false;
+          continue;
+        }
+        for (const segment of speechSegments(prepared)) {
         if (segment.language==='kn-IN') {
           if (!await playKannada(segment.text,generation)) return false;
           continue;
@@ -408,6 +431,7 @@
         });
         if (!completed.ok||generation!==speechGeneration) {
           return false;
+        }
         }
       }
       return true;
@@ -916,6 +940,7 @@
     }
     async function askImageQuestion() {
       if (activeRecorder&&activeRecorder.state!=='inactive') {
+        unlockAudioPlayback();
         clearTimeout(recordingTimer); recordingTimer=0;
         askButton.textContent='⏳'; askButton.classList.remove('recording');
         startMicTimer();
@@ -1033,7 +1058,7 @@
     $('camera-cancel').onclick=()=>{ closeGuidedCamera(); clearControls(); track('camera_cancel'); };
     $('camera-capture').onclick=()=>captureGuidedPhoto(false);
     input.onchange=()=>useCapture(input.files&&input.files[0]);
-    document.addEventListener('pointerdown',()=>{ ensureAudioContext(); },{passive:true});
+    document.addEventListener('pointerdown',unlockAudioPlayback,{passive:true});
     stage.addEventListener('pointerdown',event=>{ pointerStart={x:event.clientX,y:event.clientY}; suppressTap=false; });
     stage.addEventListener('pointerup',event=>{
       if (!pointerStart) return; const dx=event.clientX-pointerStart.x,dy=event.clientY-pointerStart.y; pointerStart=null;

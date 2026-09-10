@@ -42,6 +42,28 @@
         "Writing is smaller and harder for recognition."
       ],
       "field_status": "foundational sample"
+    },
+    {
+      "sample_id": "HW-0003",
+      "capture_code": "A3-FAC3BC",
+      "capture_id": "fac3bcfd6b5d43d79fa1652e10159b95",
+      "captured_at": "2026-09-10T01:57:49.456640+00:00",
+      "tester_session": "a3",
+      "tester_name": "Reviewer",
+      "photographer": "unconfirmed",
+      "author": "Rupa",
+      "author_note": "The owner confirmed that Rupa prepared the handwritten list.",
+      "language": "Mixed English transliteration and Kannada",
+      "content_type": "handwritten two-day meal menu list",
+      "view": "overview with cropped right column",
+      "pair_id": null,
+      "quality_notes": [
+        "The left Thursday column is mostly visible and in focus.",
+        "The right Friday column is substantially cropped.",
+        "Mixed Latin transliteration, Kannada script, overwriting, and spelling variation make literal pronunciation difficult.",
+        "Semantic analysis identified the document as a meal menu and recovered several likely foods while preserving uncertainty."
+      ],
+      "field_status": "foundational hard mixed-script handwriting sample"
     }
   ]
 }

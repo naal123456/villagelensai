@@ -62,6 +62,9 @@ class ApiTests(unittest.TestCase):
         self.assertIn(b'localStorage.setItem', response.data)
         self.assertIn(b'X-VillageLens-Tester-ID', response.data)
         self.assertIn(b'function speechSegments', response.data)
+        self.assertIn(b'function speechChunks', response.data)
+        self.assertIn(b"playKannada(prepared,generation)", response.data)
+        self.assertIn(b'unlockAudioPlayback', response.data)
         self.assertIn(b'function voiceFor', response.data)
         self.assertIn(b"fetch('/api/speech'", response.data)
         self.assertIn(b'function playKannada', response.data)
@@ -195,6 +198,21 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.headers["X-VillageLens-Speech-Cache"], "miss")
         self.assertEqual(response.headers["Cache-Control"], "private, max-age=604800")
         synthesize.assert_called_once_with("ಕನ್ನಡ ಪದ")
+
+    @patch("api.app._storage_bucket", return_value=None)
+    @patch("api.app._synthesize_kannada", return_value=b"mixed-mp3")
+    def test_mixed_kannada_numbers_and_units_are_one_server_utterance(
+        self, synthesize: object, storage_bucket: object,
+    ) -> None:
+        response = self.client.post(
+            "/api/speech", json={"text": "ಇದು FS-12. ಒಳಹರಿವು 220 ವೋಲ್ಟ್ 2 ಆಂಪಿಯರ್."},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, b"mixed-mp3")
+        synthesize.assert_called_once_with(
+            "ಇದು FS-12. ಒಳಹರಿವು 220 ವೋಲ್ಟ್ 2 ಆಂಪಿಯರ್.",
+        )
 
     @patch("api.app._synthesize_kannada")
     @patch("api.app._storage_bucket")
@@ -639,6 +657,7 @@ class ApiTests(unittest.TestCase):
         request_payload = provider.call_args.kwargs["json"]
         prompt = request_payload["input"][0]["content"][0]["text"]
         self.assertIn("Identify up to six useful visible objects", prompt)
+        self.assertIn("handwritten list, first identify its likely purpose", prompt)
         self.assertIn("rather than reciting the grid", prompt)
         self.assertIn("Never invent", prompt)
         self.assertIn("translations", request_payload["text"]["format"]["schema"]["required"])
@@ -782,6 +801,7 @@ class ApiTests(unittest.TestCase):
         self.assertIn('"box_normalized_0_1000": [100, 100, 200, 400]', prompt)
         self.assertIn('"saved_semantic_scene": {"scene_type":', prompt)
         self.assertIn("Never answer with only a demonstrative word", prompt)
+        self.assertIn("Kannada number words", prompt)
 
     def test_generic_identity_question_reuses_saved_semantic_answer(self) -> None:
         value = _saved_scene_identity_answer(
