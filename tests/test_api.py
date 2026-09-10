@@ -59,7 +59,7 @@ class ApiTests(unittest.TestCase):
         self.assertNotIn(b'id="quality-4"', response.data)
         self.assertIn(b'id="owner-badge"', response.data)
         self.assertIn(b'id="app-version"', response.data)
-        self.assertIn(b'v2026.09.10.2', response.data)
+        self.assertIn(b'v2026.09.10.3', response.data)
         self.assertIn(b"'UNASSIGNED \xc2\xb7 OLDER CAPTURE'", response.data)
         self.assertIn(b"`${owner}${ownerName}`", response.data)
         self.assertIn(b'navigationGeneration', response.data)
@@ -101,8 +101,12 @@ class ApiTests(unittest.TestCase):
         self.assertIn(b'page_clipped:pageCandidatePercent>14&&edgePercent>32', response.data)
         self.assertIn(b'page_too_small:pageCandidatePercent>14&&pageCandidatePercent<35&&edgePercent<32', response.data)
         self.assertIn(b'function cameraFrameScore', response.data)
-        self.assertIn(b'for (let frame=0;frame<3;frame++)', response.data)
-        self.assertIn(b'burst_frames:3', response.data)
+        self.assertIn(b'function cameraGuideSourceRect', response.data)
+        self.assertIn(b'function drawCameraGuideFrame', response.data)
+        self.assertIn(b'function renderPageOutline', response.data)
+        self.assertIn(b'function rememberCameraCandidate', response.data)
+        self.assertIn(b'now-candidate.capturedAt<=900', response.data)
+        self.assertIn(b'burst_frames:recent.length||cameraCandidates.length', response.data)
         camera_guide = response.data.split(b'function updateCameraGuide', 1)[1].split(
             b'async function openGuidedCamera', 1,
         )[0]

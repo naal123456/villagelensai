@@ -76,6 +76,10 @@
     #camera-preview { width: 100%; height: 100%; object-fit: cover; background: #000; }
     #camera-frame { position: absolute; inset: 10% 7%; border: 5px solid #ffb052; border-radius: 16px;
       box-shadow: 0 0 0 999px rgba(0,0,0,.2); pointer-events: none; transition: border-color .15s; }
+    #page-outline { position: absolute; border: 3px dashed #62d7ff; border-radius: 8px;
+      box-shadow: 0 0 8px rgba(98,215,255,.8); pointer-events: none; }
+    #page-outline[data-state="clipped"] { border-color: #ffcf52; box-shadow: 0 0 8px rgba(255,207,82,.8); }
+    #page-outline[hidden] { display: none; }
     #camera-guide[data-quality="bad"] #camera-frame { border-color: #ff6868; }
     #camera-guide[data-quality="wait"] #camera-frame { border-color: #ffcf52; }
     #camera-guide[data-quality="ready"] #camera-frame { border-color: #55e58b; box-shadow: 0 0 18px #55e58b,0 0 0 999px rgba(0,0,0,.14); }
@@ -110,7 +114,7 @@
         <span class="bar" id="quality-1"></span><span class="bar" id="quality-2"></span>
         <span class="bar" id="quality-3"></span>
         <span id="quality-timer">—</span>
-        <span id="app-version" aria-label="App version">v2026.09.10.2</span>
+        <span id="app-version" aria-label="App version">v2026.09.10.3</span>
       </div>
       <p id="mic-status" role="status" aria-live="assertive" hidden></p>
     </section>
@@ -137,7 +141,7 @@
   <section id="camera-guide" data-quality="wait" hidden role="dialog" aria-modal="true" aria-label="Guided camera">
     <div class="camera-view">
       <video id="camera-preview" autoplay muted playsinline></video>
-      <div id="camera-frame" aria-hidden="true"></div>
+      <div id="camera-frame" aria-hidden="true"><div id="page-outline" hidden></div></div>
     </div>
     <div class="camera-panel">
       <p id="camera-guidance" role="status" aria-live="polite">ಚಿತ್ರ ಅಥವಾ ಪುಟವನ್ನು ಚೌಕದೊಳಗೆ ಇರಿಸಿ · Fit the object or page inside the box</p>
@@ -155,13 +159,14 @@
     const status=$('status'), current=$('current'), position=$('position'), timer=$('quality-timer');
     const ownerBadge=$('owner-badge'), micStatus=$('mic-status'), askButton=$('ask');
     const conversation=$('conversation'), conversationTurns=$('conversation-turns');
-    const cameraGuide=$('camera-guide'), cameraPreview=$('camera-preview');
+    const cameraGuide=$('camera-guide'), cameraPreview=$('camera-preview'),cameraFrame=$('camera-frame');
+    const pageOutline=$('page-outline');
     const cameraGuidance=$('camera-guidance'), cameraMetrics=$('camera-metrics'), cameraCanvas=$('camera-analysis');
     let gallery=[], galleryIndex=0, result=null, mode='word', timerId=0, started=0, timerOwner=null;
     let navigationGeneration=0;
     let playbackGeneration=0, speechGeneration=0, pointerStart=null, suppressTap=false, activeControl='mode-word';
     let audioContext=null, activeAudioSource=null, activeRecorder=null, recordingTimer=0, micTimerId=0;
-    let cameraStream=null, cameraAnalysisTimer=0, previousCameraFrame=null;
+    let cameraStream=null, cameraAnalysisTimer=0, previousCameraFrame=null,cameraCandidates=[];
     let cameraCapturing=false, lastCameraPrompt='', lastCameraPromptAt=0, latestCameraQuality=null;
     const speechAudioCache=new Map();
     const translationCache=new Map();
@@ -171,7 +176,7 @@
       'what_is_it_kn','what_it_does_kn','important_points_kn','action_needed_kn','warning_kn','uncertainty_kn',
       'transcription_kn','spoken_sections','verified_regions','confidence','needs_independent_review'];
     const analysisVersion='context-v2';
-    const appVersion='2026-09-10.2';
+    const appVersion='2026-09-10.3';
     let speechVoices=[];
     const testerId=configureTesterId();
 
@@ -793,7 +798,8 @@
       return (crypto.randomUUID?crypto.randomUUID():`${Date.now()}-${Math.random()}`).replace(/-/g,'').replace(/[^0-9a-f]/gi,'').padEnd(32,'0').slice(0,32).toLowerCase();
     }
     function closeGuidedCamera() {
-      clearTimeout(cameraAnalysisTimer); cameraAnalysisTimer=0; previousCameraFrame=null;
+      clearTimeout(cameraAnalysisTimer); cameraAnalysisTimer=0; previousCameraFrame=null; cameraCandidates=[];
+      pageOutline.hidden=true;
       if (cameraStream) cameraStream.getTracks().forEach(track=>track.stop());
       cameraStream=null; cameraPreview.srcObject=null; cameraGuide.hidden=true; cameraCapturing=false;
     }
@@ -803,15 +809,35 @@
         lastCameraPrompt=key; lastCameraPromptAt=now; speakRaw(spokenKn);
       }
     }
+    function cameraGuideSourceRect() {
+      const sourceWidth=cameraPreview.videoWidth,sourceHeight=cameraPreview.videoHeight;
+      const previewRect=cameraPreview.getBoundingClientRect(),guideRect=cameraFrame.getBoundingClientRect();
+      if (!sourceWidth||!sourceHeight||!previewRect.width||!previewRect.height) return null;
+      const scale=Math.max(previewRect.width/sourceWidth,previewRect.height/sourceHeight);
+      const renderedWidth=sourceWidth*scale,renderedHeight=sourceHeight*scale;
+      const renderedLeft=previewRect.left+(previewRect.width-renderedWidth)/2;
+      const renderedTop=previewRect.top+(previewRect.height-renderedHeight)/2;
+      const x=Math.max(0,(guideRect.left-renderedLeft)/scale),y=Math.max(0,(guideRect.top-renderedTop)/scale);
+      const right=Math.min(sourceWidth,(guideRect.right-renderedLeft)/scale);
+      const bottom=Math.min(sourceHeight,(guideRect.bottom-renderedTop)/scale);
+      return {x,y,width:Math.max(1,right-x),height:Math.max(1,bottom-y)};
+    }
+    function drawCameraGuideFrame(canvas) {
+      const source=cameraGuideSourceRect(); if (!source) return false;
+      const limit=1600,scale=Math.min(1,limit/Math.max(source.width,source.height));
+      canvas.width=Math.max(1,Math.round(source.width*scale)); canvas.height=Math.max(1,Math.round(source.height*scale));
+      canvas.getContext('2d').drawImage(cameraPreview,source.x,source.y,source.width,source.height,0,0,canvas.width,canvas.height);
+      return true;
+    }
     function analyzeCameraFrame() {
-      const width=192, sourceWidth=cameraPreview.videoWidth, sourceHeight=cameraPreview.videoHeight;
-      if (!sourceWidth||!sourceHeight) return null;
-      const height=Math.max(108,Math.round(width*sourceHeight/sourceWidth));
+      const width=192,source=cameraGuideSourceRect(); if (!source) return null;
+      const height=Math.max(108,Math.round(width*source.height/source.width));
       cameraCanvas.width=width; cameraCanvas.height=height;
       const context=cameraCanvas.getContext('2d',{willReadFrequently:true});
-      context.drawImage(cameraPreview,0,0,width,height);
+      context.drawImage(cameraPreview,source.x,source.y,source.width,source.height,0,0,width,height);
       const pixels=context.getImageData(0,0,width,height).data, gray=new Uint8Array(width*height);
       let brightness=0,dark=0,glare=0,paper=0;
+      let paperLeft=width,paperRight=-1,paperTop=height,paperBottom=-1;
       const pageEdges={left:0,right:0,top:0,bottom:0};
       const edgeX=Math.max(4,Math.round(width*.045)),edgeY=Math.max(4,Math.round(height*.045));
       for (let pixel=0,index=0;pixel<gray.length;pixel++,index+=4) {
@@ -820,6 +846,8 @@
         gray[pixel]=value; brightness+=value; if (value<35) dark++; if (value>245) glare++;
         const x=pixel%width,y=Math.floor(pixel/width),chroma=Math.max(red,green,blue)-Math.min(red,green,blue);
         if (value>105&&chroma<38) {
+          paperLeft=Math.min(paperLeft,x); paperRight=Math.max(paperRight,x);
+          paperTop=Math.min(paperTop,y); paperBottom=Math.max(paperBottom,y);
           paper++; if (x<edgeX) pageEdges.left++; if (x>=width-edgeX) pageEdges.right++;
           if (y<edgeY) pageEdges.top++; if (y>=height-edgeY) pageEdges.bottom++;
         }
@@ -839,11 +867,22 @@
       const edgePercent=Math.max(
         100*pageEdges.left/(edgeX*height),100*pageEdges.right/(edgeX*height),
         100*pageEdges.top/(edgeY*width),100*pageEdges.bottom/(edgeY*width));
+      const pageBox=pageCandidatePercent>14&&paperRight>=paperLeft?{
+        x:paperLeft/width,y:paperTop/height,width:(paperRight-paperLeft+1)/width,height:(paperBottom-paperTop+1)/height,
+      }:null;
       return {brightness:brightness/gray.length,dark_percent:100*dark/gray.length,
         glare_percent:100*glare/gray.length,sharpness:sharpness/Math.max(1,samples),motion,
         page_candidate_percent:pageCandidatePercent,page_edge_percent:edgePercent,
+        page_box:pageBox,
         page_clipped:pageCandidatePercent>14&&edgePercent>32,
         page_too_small:pageCandidatePercent>14&&pageCandidatePercent<35&&edgePercent<32};
+    }
+    function renderPageOutline(quality) {
+      const box=quality&&quality.page_box;
+      if (!box) { pageOutline.hidden=true; return; }
+      pageOutline.hidden=false; pageOutline.dataset.state=quality.page_clipped?'clipped':'complete';
+      pageOutline.style.left=`${100*box.x}%`; pageOutline.style.top=`${100*box.y}%`;
+      pageOutline.style.width=`${100*box.width}%`; pageOutline.style.height=`${100*box.height}%`;
     }
     function cameraQualityState(quality) {
       const dark=quality.brightness<48||quality.dark_percent>48, glare=quality.glare_percent>22;
@@ -864,6 +903,7 @@
       const quality=analyzeCameraFrame();
       if (!quality) { cameraAnalysisTimer=setTimeout(updateCameraGuide,300); return; }
       latestCameraQuality=quality;
+      rememberCameraCandidate(quality); renderPageOutline(quality);
       const [state,key,message,spoken]=cameraQualityState(quality);
       cameraGuide.dataset.quality=state; cameraPrompt(key,message,spoken);
       cameraMetrics.textContent=`Light ${Math.round(quality.brightness)} · Sharp ${quality.sharpness.toFixed(1)} · Motion ${quality.motion.toFixed(1)} · Glare ${Math.round(quality.glare_percent)}%`;
@@ -880,6 +920,7 @@
         cameraPreview.srcObject=cameraStream; cameraGuide.hidden=false; cameraGuide.dataset.quality='wait';
         cameraGuidance.textContent='ಚಿತ್ರ ಅಥವಾ ಪುಟವನ್ನು ಚೌಕದೊಳಗೆ ಇರಿಸಿ · Fit the object or page inside the box';
         cameraMetrics.textContent='Checking light and focus…'; cameraCapturing=false; latestCameraQuality=null;
+        cameraCandidates=[]; pageOutline.hidden=true;
         const trackVideo=cameraStream.getVideoTracks()[0];
         try {
           const capabilities=trackVideo.getCapabilities?trackVideo.getCapabilities():{};
@@ -894,23 +935,29 @@
       }
     }
     function cameraFrameScore(quality) {
-      return quality.sharpness*5-quality.motion-quality.dark_percent*2-quality.glare_percent*3-
-        quality.page_edge_percent*2-(quality.page_clipped?120:0)-(quality.page_too_small?50:0);
+      const number=key=>Number(quality&&quality[key])||0;
+      return number('sharpness')*5-number('motion')-number('dark_percent')*2-number('glare_percent')*3-
+        number('page_edge_percent')*2-(quality&&quality.page_clipped?120:0)-(quality&&quality.page_too_small?50:0);
+    }
+    function rememberCameraCandidate(quality) {
+      const canvas=document.createElement('canvas'); if (!drawCameraGuideFrame(canvas)) return;
+      cameraCandidates.push({canvas,quality:{...quality},capturedAt:Date.now()});
+      while (cameraCandidates.length>4) cameraCandidates.shift();
     }
     async function captureGuidedPhoto() {
       if (cameraCapturing||!cameraPreview.videoWidth) return;
       cameraCapturing=true; clearTimeout(cameraAnalysisTimer);
       cameraGuidance.textContent='ಉತ್ತಮ ಚಿತ್ರವನ್ನು ಆಯ್ಕೆ ಮಾಡುತ್ತಿದೆ… · Choosing the clearest picture…';
-      const output=document.createElement('canvas'); output.width=cameraPreview.videoWidth; output.height=cameraPreview.videoHeight;
-      const outputContext=output.getContext('2d'); let bestQuality=null,bestScore=-Infinity;
-      for (let frame=0;frame<3;frame++) {
-        const quality=analyzeCameraFrame()||latestCameraQuality||{};
-        const score=cameraFrameScore(quality);
-        if (score>bestScore) { bestScore=score; bestQuality=quality; outputContext.drawImage(cameraPreview,0,0,output.width,output.height); }
-        if (frame<2) await new Promise(resolve=>setTimeout(resolve,140));
-      }
-      const quality={...(bestQuality||latestCameraQuality||{}),auto_captured:false,burst_frames:3};
+      const immediate=analyzeCameraFrame()||latestCameraQuality||{}; rememberCameraCandidate(immediate);
+      const now=Date.now(),recent=cameraCandidates.filter(candidate=>now-candidate.capturedAt<=900);
+      const best=(recent.length?recent:cameraCandidates).reduce((winner,candidate)=>{
+        const score=cameraFrameScore(candidate.quality)-(now-candidate.capturedAt)/25;
+        return !winner||score>winner.score?{...candidate,score}:winner;
+      },null);
+      const output=best&&best.canvas,quality={...(best&&best.quality||immediate),auto_captured:false,
+        burst_frames:recent.length||cameraCandidates.length};
       closeGuidedCamera(); track('camera_manual');
+      if (!output) { input.click(); return; }
       output.toBlob(blob=>{
         if (!blob) { input.click(); return; }
         useCapture(new File([blob],`guided-${Date.now()}.jpg`,{type:'image/jpeg'}),{source:'guided-camera-v1',quality});
