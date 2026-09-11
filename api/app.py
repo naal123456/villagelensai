@@ -40,9 +40,14 @@ MAX_SPEECH_CHARACTERS = int(os.environ.get("VILLAGELENS_MAX_SPEECH_CHARACTERS", 
 ALLOWED_MEDIA_TYPES = {"image/jpeg", "image/png", "image/webp"}
 CAPTURE_BUCKET = os.environ.get("VILLAGELENS_CAPTURE_BUCKET", "")
 OPENAI_MODEL = os.environ.get("VILLAGELENS_OPENAI_MODEL", "gpt-5.6-sol")
-OPENAI_SERVICE_TIER = os.environ.get("VILLAGELENS_OPENAI_SERVICE_TIER", "fast")
+OPENAI_INSTANT_MODEL = os.environ.get("VILLAGELENS_OPENAI_INSTANT_MODEL", OPENAI_MODEL)
+OPENAI_ASTRA_MODEL = os.environ.get("VILLAGELENS_OPENAI_ASTRA_MODEL", "gpt-6-astra")
+OPENAI_INSTANT_SERVICE_TIER = os.environ.get("VILLAGELENS_OPENAI_SERVICE_TIER", "fast")
+OPENAI_FULL_SERVICE_TIER = os.environ.get("VILLAGELENS_OPENAI_FULL_SERVICE_TIER", "auto")
 OPENAI_TRANSLATION_MODEL = os.environ.get("VILLAGELENS_TRANSLATION_MODEL", "gpt-5-mini")
 OPENAI_ANALYSIS_VERSION = "context-v2"
+OPENAI_INSTANT_ANALYSIS_VERSION = "instant-v1"
+OPENAI_ASTRA_ANALYSIS_VERSION = "astra-review-v1"
 KANNADA_TTS_VOICE = os.environ.get("VILLAGELENS_KANNADA_TTS_VOICE", "kn-IN-Standard-A")
 ACCESS_COOKIE_NAME = "villagelens_access_v2"
 TESTER_COOKIE_NAME = "villagelens_tester_v1"
@@ -678,6 +683,10 @@ def _normalize_stage_three(value: dict[str, Any]) -> dict[str, Any]:
         translations=translations, summary_kn=summary,
         quality_validated=valid and (context_valid if has_context else True),
     )
+    if "consensus_validated" in normalized:
+        normalized["consensus_validated"] = bool(
+            normalized["consensus_validated"] and normalized["quality_validated"]
+        )
     if has_context:
         normalized.update(context)
     return normalized
@@ -801,7 +810,12 @@ def _validated_context(parsed: dict[str, Any]) -> tuple[dict[str, Any], bool]:
     return context, valid
 
 
-def _openai_reader(data: bytes, media_type: str, width: int, height: int) -> dict[str, Any]:
+def _openai_reader(
+    data: bytes, media_type: str, width: int, height: int, *, stage: int = 3,
+    model: str | None = None, service_tier: str | None = None,
+    analysis_version: str | None = None, quick: bool = False,
+    prior_analysis: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     api_key = os.environ.get("OPENAI_API_KEY", "").strip()
     if not api_key:
         raise RuntimeError("OPENAI_READER_NOT_CONFIGURED")
@@ -846,12 +860,33 @@ def _openai_reader(data: bytes, media_type: str, width: int, height: int) -> dic
         "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
         "needs_independent_review": {"type": "boolean"},
     })
+    if prior_analysis is not None:
+        schema["required"].extend(["agrees_with_sol", "material_disagreement_kn"])
+        schema["properties"].update({
+            "agrees_with_sol": {"type": "boolean"},
+            "material_disagreement_kn": {"type": "string"},
+        })
     encoded = base64.b64encode(data).decode("ascii")
-    payload = {"model": OPENAI_MODEL, "service_tier": OPENAI_SERVICE_TIER,
-               "store": False, "reasoning": {"effort": "none"},
-               "max_output_tokens": 5000,
+    selected_model = model or OPENAI_MODEL
+    selected_tier = service_tier or OPENAI_FULL_SERVICE_TIER
+    selected_version = analysis_version or OPENAI_ANALYSIS_VERSION
+    prompt_prefix = ""
+    if quick:
+        prompt_prefix = ("This is the fast first understanding pass. Prioritize a useful identity, purpose, "
+                         "one short Kannada summary, and at most three important objects. Be concise. ")
+    if prior_analysis is not None:
+        prior = json.dumps(prior_analysis, ensure_ascii=False, separators=(",", ":"))[:12000]
+        prompt_prefix = ("You are the strongest independent reviewer. Inspect the image yourself, compare the "
+                         "earlier Sol analysis below, correct it when needed, and return the best final Kannada "
+                         "explanation. Set agrees_with_sol false and describe the material disagreement in Kannada "
+                         "when identity, important text or numbers, purpose, safety, or teaching meaning differs. "
+                         f"Earlier Sol analysis: {prior}\n")
+    payload = {"model": selected_model, "service_tier": selected_tier,
+               "store": False,
+               "reasoning": {"effort": "low" if selected_model == OPENAI_ASTRA_MODEL else "none"},
+               "max_output_tokens": 2200 if quick else 5000,
                "input": [{"role": "user", "content": [
-                   {"type": "input_text", "text": """Help a low-literacy Kannada-speaking adult understand this image. Read clearly visible Kannada and English for comprehension. Do not recreate all OCR boxes. Translate each distinct clearly visible English word into simple Kannada. Identify up to six useful visible objects and give each one bounding box [left,top,width,height] normalized 0 to 1000. Object boxes must tightly localize a touchable object or useful sub-part; never return the whole image, page, background, ground, or soil as an object box. If this is handwriting or a handwritten list, first identify its likely purpose and organization, such as a menu, shopping list, homework, names, dates, or tasks. Transcribe every readable line exactly into transcription_kn with a line box and mark uncertain lines; for uncertain words give a plausible reading only when the visible letters and list context support it, otherwise abstain. Distinguish recognition failure from blur, distance, perspective, cropping, and low contrast, and give specific capture guidance. Never label readable Kannada as another script. Treat joined measurements such as 300V, 2.0 HP, 50Hz, 10A, kg, ml, and degrees C as semantic units: preserve the printed characters and explain the unit naturally in Kannada. Explain what the image is, its purpose, important details, action, safety, and uncertainty in short natural spoken Kannada. For a textbook or educational page, use all readable text and pictures to teach the page rather than merely naming it or repeating its first lines: identify the central topic, connect the main ideas, explain difficult Kannada terms in very simple conversational Kannada, say why the topic matters, and give one concrete example when the page supports it. If cropping prevents a complete lesson, describe exactly which edge is missing and do not invent the missing text. Divide the explanation into three to six spoken_sections that together form the useful lesson, including any important uncertainty, with each section tied to the image region it discusses so the interface can highlight evidence while speaking. brief_spoken_kn is the most useful one- or two-sentence global answer; for an educational page detailed_spoken_kn should be five to eight short teaching sentences, while other images may be shorter. Do not mechanically repeat OCR. For calendars, summarize month, year, highlighted date and notable events rather than reciting the grid. For electrical equipment or medicine, report only visible or strongly supported identity, purpose, and ratings; never advise wiring, energizing, repair, or medication. Set confidence high only when important identity, text, numbers, and purpose are clear; set needs_independent_review true for handwriting uncertainty, safety-critical content, ambiguous units, or any important doubt. Never invent hidden facts, intent, diagnosis, species, or disease."""},
+                   {"type": "input_text", "text": prompt_prefix + """Help a low-literacy Kannada-speaking adult understand this image. Read clearly visible Kannada and English for comprehension. Do not recreate all OCR boxes. Translate each distinct clearly visible English word into simple Kannada. Identify up to six useful visible objects and give each one bounding box [left,top,width,height] normalized 0 to 1000. Object boxes must tightly localize a touchable object or useful sub-part; never return the whole image, page, background, ground, or soil as an object box. If this is handwriting or a handwritten list, first identify its likely purpose and organization, such as a menu, shopping list, homework, names, dates, or tasks. Transcribe every readable line exactly into transcription_kn with a line box and mark uncertain lines; for uncertain words give a plausible reading only when the visible letters and list context support it, otherwise abstain. Distinguish recognition failure from blur, distance, perspective, cropping, and low contrast, and give specific capture guidance. Never label readable Kannada as another script. Treat joined measurements such as 300V, 2.0 HP, 50Hz, 10A, kg, ml, and degrees C as semantic units: preserve the printed characters and explain the unit naturally in Kannada. Explain what the image is, its purpose, important details, action, safety, and uncertainty in short natural spoken Kannada. For a textbook or educational page, use all readable text and pictures to teach the page rather than merely naming it or repeating its first lines: identify the central topic, connect the main ideas, explain difficult Kannada terms in very simple conversational Kannada, say why the topic matters, and give one concrete example when the page supports it. If cropping prevents a complete lesson, describe exactly which edge is missing and do not invent the missing text. Divide the explanation into three to six spoken_sections that together form the useful lesson, including any important uncertainty, with each section tied to the image region it discusses so the interface can highlight evidence while speaking. brief_spoken_kn is the most useful one- or two-sentence global answer; for an educational page detailed_spoken_kn should be five to eight short teaching sentences, while other images may be shorter. Do not mechanically repeat OCR. For calendars, summarize month, year, highlighted date and notable events rather than reciting the grid. For electrical equipment or medicine, report only visible or strongly supported identity, purpose, and ratings; never advise wiring, energizing, repair, or medication. Set confidence high only when important identity, text, numbers, and purpose are clear; set needs_independent_review true for handwriting uncertainty, safety-critical content, ambiguous units, or any important doubt. Never invent hidden facts, intent, diagnosis, species, or disease."""},
                    {"type": "input_image", "image_url": f"data:{media_type};base64,{encoded}", "detail": "high"}]}],
                "text": {"verbosity": "low", "format": {"type": "json_schema", "name": "villagelens_reading", "strict": True, "schema": schema}}}
     response = requests.post("https://api.openai.com/v1/responses", json=payload,
@@ -864,13 +899,21 @@ def _openai_reader(data: bytes, media_type: str, width: int, height: int) -> dic
     translations, summary_kn, quality_validated = _validated_kannada_output(parsed)
     context, context_validated = _validated_context(parsed)
     _scale_context_boxes(context, width, height)
-    return {"schema": "villagelens.reader.v1", "stage": 3, "reader": "vision_language",
-            "model": OPENAI_MODEL, "analysis_version": OPENAI_ANALYSIS_VERSION,
+    result = {"schema": "villagelens.reader.v1", "stage": stage, "reader": "vision_language",
+            "model": selected_model, "analysis_version": selected_version,
             "service_tier": str(response_value.get("service_tier", "unknown")),
             "latency_ms": round((time.monotonic()-started)*1000),
             "image_size": {"width": width, "height": height}, "words": [], "lines": [], "text": "",
             "translations": translations, "summary_kn": summary_kn, **context,
             "quality_validated": quality_validated and context_validated}
+    if prior_analysis is not None:
+        disagreement = str(parsed.get("material_disagreement_kn", "")).strip()
+        result["agrees_with_sol"] = bool(parsed.get("agrees_with_sol", False))
+        result["material_disagreement_kn"] = disagreement
+        result["consensus_validated"] = bool(
+            result["quality_validated"] and result["agrees_with_sol"] and not disagreement
+        )
+    return result
 
 
 def _openai_question(
@@ -1160,6 +1203,25 @@ def _reader_failure_name(capture_id: str, stage: int) -> str:
     return f"captures/{capture_id}/stage-{stage}-failure.json"
 
 
+def _current_reader_stage(value: dict[str, Any] | None, stage: int) -> bool:
+    if not value:
+        return False
+    if stage == 1:
+        return value.get("reader") == "cloud_ocr"
+    if stage == 2:
+        return (
+            value.get("reader") == "vision_language"
+            and value.get("analysis_version") == OPENAI_INSTANT_ANALYSIS_VERSION
+        )
+    if stage == 3:
+        return _current_stage_three(value) and value.get("model") != OPENAI_ASTRA_MODEL
+    return (
+        stage == 4 and value.get("reader") == "vision_language"
+        and value.get("model") == OPENAI_ASTRA_MODEL
+        and value.get("analysis_version") == OPENAI_ASTRA_ANALYSIS_VERSION
+    )
+
+
 def _reader_cooling_down(bucket: Any, capture_id: str, stage: int) -> bool:
     failure = _stored_json(bucket, _reader_failure_name(capture_id, stage))
     try:
@@ -1191,7 +1253,7 @@ def _authorized_capture(bucket: Any, capture_id: str, tester_id: str) -> dict[st
 
 
 def _process_stored_stage(capture_id: str, tester_id: str, stage: int) -> dict[str, Any]:
-    if stage not in {2, 3}:
+    if stage not in {1, 2, 3, 4}:
         raise ValueError("READER_NOT_FOUND")
     bucket = _storage_bucket()
     if bucket is None:
@@ -1199,9 +1261,18 @@ def _process_stored_stage(capture_id: str, tester_id: str, stage: int) -> dict[s
     with _capture_processing_locks[(capture_id, stage)]:
         capture = _authorized_capture(bucket, capture_id, tester_id)
         existing = _stored_json(bucket, f"captures/{capture_id}/stage-{stage}.json")
-        if existing is not None and (stage != 3 or _current_stage_three(existing)):
-            return _normalize_stage_three(existing) if stage == 3 else existing
-        if stage == 3 and not os.environ.get("OPENAI_API_KEY", "").strip():
+        if stage == 1 and not _current_reader_stage(existing, 1):
+            legacy_google = _stored_json(bucket, f"captures/{capture_id}/stage-2.json")
+            existing = legacy_google if _current_reader_stage(legacy_google, 1) else existing
+        if _current_reader_stage(existing, stage):
+            normalized = dict(existing)
+            normalized["stage"] = stage
+            return _normalize_stage_three(normalized) if stage in {2, 3, 4} else normalized
+        if stage == 2 and _current_reader_stage(existing, 1):
+            migrated = dict(existing)
+            migrated["stage"] = 1
+            _store_reader_evidence(capture_id, 1, migrated)
+        if stage in {2, 3, 4} and not os.environ.get("OPENAI_API_KEY", "").strip():
             raise RuntimeError("OPENAI_READER_NOT_CONFIGURED")
         if _reader_cooling_down(bucket, capture_id, stage):
             raise RuntimeError("READER_COOLDOWN")
@@ -1214,8 +1285,29 @@ def _process_stored_stage(capture_id: str, tester_id: str, stage: int) -> dict[s
         image.save(normalized, format="JPEG", quality=88, optimize=True)
         data = normalized.getvalue()
         try:
-            value = (_vision_reader(data, image.width, image.height) if stage == 2
-                     else _openai_reader(data, "image/jpeg", image.width, image.height))
+            if stage == 1:
+                value = _vision_reader(data, image.width, image.height)
+                value["stage"] = 1
+            elif stage == 2:
+                value = _openai_reader(
+                    data, "image/jpeg", image.width, image.height, stage=2,
+                    model=OPENAI_INSTANT_MODEL, service_tier=OPENAI_INSTANT_SERVICE_TIER,
+                    analysis_version=OPENAI_INSTANT_ANALYSIS_VERSION, quick=True,
+                )
+            elif stage == 3:
+                value = _openai_reader(
+                    data, "image/jpeg", image.width, image.height, stage=3,
+                    model=OPENAI_MODEL, service_tier=OPENAI_FULL_SERVICE_TIER,
+                    analysis_version=OPENAI_ANALYSIS_VERSION,
+                )
+            else:
+                sol = _process_stored_stage(capture_id, tester_id, 3)
+                value = _openai_reader(
+                    data, "image/jpeg", image.width, image.height, stage=4,
+                    model=OPENAI_ASTRA_MODEL, service_tier=OPENAI_FULL_SERVICE_TIER,
+                    analysis_version=OPENAI_ASTRA_ANALYSIS_VERSION,
+                    prior_analysis=sol,
+                )
         except Exception as exc:
             error = str(exc) if isinstance(exc, RuntimeError) else f"STAGE_{stage}_UNAVAILABLE"
             try:
@@ -1239,9 +1331,9 @@ def _process_stored_capture(capture_id: str, tester_id: str) -> tuple[dict[int, 
     _authorized_capture(bucket, capture_id, tester_id)
     stages: dict[int, dict[str, Any]] = {}
     errors: dict[int, str] = {}
-    with ThreadPoolExecutor(max_workers=2) as executor:
+    with ThreadPoolExecutor(max_workers=3) as executor:
         futures = {executor.submit(_process_stored_stage, capture_id, tester_id, stage): stage
-                   for stage in (2, 3)}
+                   for stage in (1, 2, 3)}
         for future in as_completed(futures):
             stage = futures[future]
             try:
@@ -1249,6 +1341,12 @@ def _process_stored_capture(capture_id: str, tester_id: str) -> tuple[dict[int, 
             except Exception as exc:
                 app.logger.exception("Stored reader stage %s failed for capture %s", stage, capture_id)
                 errors[stage] = str(exc) if isinstance(exc, RuntimeError) else f"STAGE_{stage}_UNAVAILABLE"
+    if 3 in stages:
+        try:
+            stages[4] = _process_stored_stage(capture_id, tester_id, 4)
+        except Exception as exc:
+            app.logger.exception("Stored reader stage 4 failed for capture %s", capture_id)
+            errors[4] = str(exc) if isinstance(exc, RuntimeError) else "STAGE_4_UNAVAILABLE"
     return stages, errors
 
 
@@ -1390,7 +1488,7 @@ def gallery() -> tuple[Response, int]:
                 (parts[1], int(match.group(1))): blob
                 for blob in blobs
                 if len(parts := blob.name.split("/")) == 3
-                and (match := re.fullmatch(r"stage-([23])\.json", parts[2]))
+                and (match := re.fullmatch(r"stage-([1-4])\.json", parts[2]))
                 and _valid_capture_id(parts[1])
             }
             for blob in blobs:
@@ -1424,24 +1522,33 @@ def gallery() -> tuple[Response, int]:
                 }
                 if verified_regions:
                     item["verified_regions"] = verified_regions
-                for stage in (2, 3):
-                    if evidence_blob := evidence.get((capture_id, stage)):
+                stage_values: dict[int, dict[str, Any]] = {}
+                for stored_stage in (1, 2, 3, 4):
+                    if evidence_blob := evidence.get((capture_id, stored_stage)):
                         try:
-                            stage_value = json.loads(
+                            stage_values[stored_stage] = json.loads(
                                 evidence_blob.download_as_text(encoding="utf-8")
                             )
-                            if stage != 3 or _current_stage_three(stage_value):
-                                normalized = _normalize_stage_three(stage_value) if stage == 3 else stage_value
-                                item[f"stage{stage}"] = normalized
-                                if stage == 3:
-                                    scene_type = str(normalized.get("scene_type", "")).strip()
-                                    if scene_type:
-                                        item["label"] = scene_type[:60]
                         except (TypeError, ValueError, json.JSONDecodeError):
                             app.logger.warning(
                                 "Ignoring invalid stage %s evidence for capture %s",
-                                stage, capture_id,
+                                stored_stage, capture_id,
                             )
+                if 1 not in stage_values and _current_reader_stage(stage_values.get(2), 1):
+                    stage_values[1] = dict(stage_values[2])
+                for stage in (1, 2, 3, 4):
+                    stage_value = stage_values.get(stage)
+                    if not _current_reader_stage(stage_value, stage):
+                        continue
+                    normalized = dict(stage_value)
+                    normalized["stage"] = stage
+                    if stage in {2, 3, 4}:
+                        normalized = _normalize_stage_three(normalized)
+                    item[f"stage{stage}"] = normalized
+                    if stage in {3, 4}:
+                        scene_type = str(normalized.get("scene_type", "")).strip()
+                        if scene_type:
+                            item["label"] = scene_type[:60]
                 stored.append(item)
             stored.sort(key=lambda item: (item.get("captured_at") or "", item["id"]))
             sequence_counts: defaultdict[str, int] = defaultdict(int)
@@ -1499,7 +1606,10 @@ def process_captured_image(capture_id: str) -> tuple[Response, int]:
             capture_id=capture_id,
             stages={str(stage): value for stage, value in stages.items()},
             errors={str(stage): error for stage, error in errors.items()},
-            complete=all(stage in stages for stage in (2, 3)),
+            complete=(
+                all(stage in stages for stage in (1, 2, 3, 4))
+                and stages[4].get("consensus_validated") is True
+            ),
         ), 200
     except FileNotFoundError:
         return jsonify(error="CAPTURE_NOT_FOUND"), 404
@@ -1514,7 +1624,7 @@ def process_captured_image(capture_id: str) -> tuple[Response, int]:
 def process_captured_stage(capture_id: str, stage: int) -> tuple[Response, int]:
     if not _valid_capture_id(capture_id):
         return jsonify(error="CAPTURE_NOT_FOUND"), 404
-    if stage not in {2, 3}:
+    if stage not in {1, 2, 3, 4}:
         return jsonify(error="READER_NOT_FOUND"), 404
     try:
         result = _process_stored_stage(capture_id, _tester_id(), stage)
@@ -1559,7 +1669,9 @@ def ask_about_capture(capture_id: str) -> tuple[Response, int]:
         image.save(normalized, format="PNG")
         focus = _question_focus(payload.get("focus_box"), image.width, image.height)
         scene = _question_scene_context(
-            _stored_json(bucket, f"captures/{capture_id}/stage-3.json")
+            _stored_json(bucket, f"captures/{capture_id}/stage-4.json")
+            or _stored_json(bucket, f"captures/{capture_id}/stage-3.json")
+            or _stored_json(bucket, f"captures/{capture_id}/stage-2.json")
         )
         answer = (None if focus else _saved_scene_identity_answer(
             question, scene, image.width, image.height,
@@ -1610,7 +1722,9 @@ def ask_about_capture_audio(capture_id: str) -> tuple[Response, int]:
         image.save(normalized, format="PNG")
         focus = _question_focus(request.form.get("focus_box"), image.width, image.height)
         scene = _question_scene_context(
-            _stored_json(bucket, f"captures/{capture_id}/stage-3.json")
+            _stored_json(bucket, f"captures/{capture_id}/stage-4.json")
+            or _stored_json(bucket, f"captures/{capture_id}/stage-3.json")
+            or _stored_json(bucket, f"captures/{capture_id}/stage-2.json")
         )
         answer = (None if focus else _saved_scene_identity_answer(
             question, scene, image.width, image.height,
@@ -1757,22 +1871,37 @@ def capture() -> tuple[Response, int]:
 
 @app.post("/api/read/<int:stage>")
 def cloud_read(stage: int) -> tuple[Response, int]:
-    if stage not in {2, 3}:
+    if stage not in {1, 2, 3, 4}:
         return jsonify(error="READER_NOT_FOUND"), 404
+    if stage == 4:
+        return jsonify(error="READER_REQUIRES_RETAINED_CAPTURE"), 409
     media_type = (request.content_type or "").split(";", 1)[0].lower()
     if media_type not in ALLOWED_MEDIA_TYPES:
         return jsonify(error="CAPTURE_MEDIA_TYPE_UNSUPPORTED"), 415
     data = request.get_data(cache=False)
     if not data:
         return jsonify(error="CAPTURE_EMPTY"), 400
-    if stage == 3 and not os.environ.get("OPENAI_API_KEY", "").strip():
+    if stage in {2, 3} and not os.environ.get("OPENAI_API_KEY", "").strip():
         return jsonify(error="OPENAI_READER_NOT_CONFIGURED"), 503
     try:
         image, _ = _normalized_image(data)
         normalized = io.BytesIO()
-        image.save(normalized, format="PNG")
-        payload = (_vision_reader(normalized.getvalue(), image.width, image.height) if stage == 2
-                   else _openai_reader(normalized.getvalue(), "image/png", image.width, image.height))
+        image.save(normalized, format="JPEG", quality=88, optimize=True)
+        if stage == 1:
+            payload = _vision_reader(normalized.getvalue(), image.width, image.height)
+            payload["stage"] = 1
+        elif stage == 2:
+            payload = _openai_reader(
+                normalized.getvalue(), "image/jpeg", image.width, image.height, stage=2,
+                model=OPENAI_INSTANT_MODEL, service_tier=OPENAI_INSTANT_SERVICE_TIER,
+                analysis_version=OPENAI_INSTANT_ANALYSIS_VERSION, quick=True,
+            )
+        else:
+            payload = _openai_reader(
+                normalized.getvalue(), "image/jpeg", image.width, image.height, stage=3,
+                model=OPENAI_MODEL, service_tier=OPENAI_FULL_SERVICE_TIER,
+                analysis_version=OPENAI_ANALYSIS_VERSION,
+            )
         payload["tester_id"] = _tester_id() or "unassigned"
         _store_reader_evidence(request.headers.get("X-VillageLens-Capture-ID", ""), stage, payload)
         return jsonify(payload), 200
