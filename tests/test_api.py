@@ -60,7 +60,7 @@ class ApiTests(unittest.TestCase):
         self.assertIn(b'id="quality-4"', response.data)
         self.assertIn(b'id="owner-badge"', response.data)
         self.assertIn(b'id="app-version"', response.data)
-        self.assertIn(b'v2026.09.10.9', response.data)
+        self.assertIn(b'v2026.09.10.10', response.data)
         self.assertIn(b"'UNASSIGNED \xc2\xb7 OLDER CAPTURE'", response.data)
         self.assertIn(b"`${owner}${ownerName}`", response.data)
         self.assertIn(b'navigationGeneration', response.data)
@@ -848,14 +848,16 @@ class ApiTests(unittest.TestCase):
         with patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"}):
             value = _openai_reader(
                 image_bytes(), "image/jpeg", 320, 120, stage=4,
-                model="gpt-6-astra", service_tier="auto",
-                analysis_version="astra-review-v1",
+                model="gpt-6-astra", service_tier="fast",
+                analysis_version="astra-review-v2",
                 prior_analysis={"brief_spoken_kn": "ಇದು ಪುಸ್ತಕ."},
             )
 
         payload = provider.call_args.kwargs["json"]
         self.assertEqual(payload["model"], "gpt-6-astra")
+        self.assertEqual(payload["service_tier"], "fast")
         self.assertEqual(payload["reasoning"]["effort"], "low")
+        self.assertEqual(provider.call_args.kwargs["timeout"], 85)
         self.assertIn("Earlier Sol analysis", payload["input"][0]["content"][0]["text"])
         self.assertIn("agrees_with_sol", payload["text"]["format"]["schema"]["required"])
         self.assertTrue(value["consensus_validated"])
@@ -1020,7 +1022,7 @@ class ApiTests(unittest.TestCase):
             },
             f"captures/{capture_id}/stage-4.json": {
                 "stage": 4, "reader": "vision_language", "model": "gpt-6-astra",
-                "analysis_version": "astra-review-v1", "summary_kn": "ಪುಸ್ತಕ",
+                "analysis_version": "astra-review-v2", "summary_kn": "ಪುಸ್ತಕ",
                 "consensus_validated": True,
             },
         }

@@ -44,11 +44,11 @@ OPENAI_INSTANT_MODEL = os.environ.get("VILLAGELENS_OPENAI_INSTANT_MODEL", OPENAI
 OPENAI_ASTRA_MODEL = os.environ.get("VILLAGELENS_OPENAI_ASTRA_MODEL", "gpt-6-astra")
 OPENAI_INSTANT_SERVICE_TIER = os.environ.get("VILLAGELENS_OPENAI_SERVICE_TIER", "fast")
 OPENAI_FULL_SERVICE_TIER = os.environ.get("VILLAGELENS_OPENAI_FULL_SERVICE_TIER", "fast")
-OPENAI_ASTRA_SERVICE_TIER = os.environ.get("VILLAGELENS_OPENAI_ASTRA_SERVICE_TIER", "auto")
+OPENAI_ASTRA_SERVICE_TIER = os.environ.get("VILLAGELENS_OPENAI_ASTRA_SERVICE_TIER", "fast")
 OPENAI_TRANSLATION_MODEL = os.environ.get("VILLAGELENS_TRANSLATION_MODEL", "gpt-5-mini")
 OPENAI_ANALYSIS_VERSION = "context-v2"
 OPENAI_INSTANT_ANALYSIS_VERSION = "instant-v2"
-OPENAI_ASTRA_ANALYSIS_VERSION = "astra-review-v1"
+OPENAI_ASTRA_ANALYSIS_VERSION = "astra-review-v2"
 KANNADA_TTS_VOICE = os.environ.get("VILLAGELENS_KANNADA_TTS_VOICE", "kn-IN-Standard-A")
 ACCESS_COOKIE_NAME = "villagelens_access_v2"
 TESTER_COOKIE_NAME = "villagelens_tester_v1"
@@ -913,8 +913,11 @@ def _openai_reader(
                    {"type": "input_image", "image_url": f"data:{media_type};base64,{encoded}",
                     "detail": "low" if quick else "high"}]}],
                "text": {"verbosity": "low", "format": {"type": "json_schema", "name": "villagelens_reading", "strict": True, "schema": schema}}}
-    response = requests.post("https://api.openai.com/v1/responses", json=payload,
-                             headers={"Authorization": f"Bearer {api_key}"}, timeout=75)
+    response = requests.post(
+        "https://api.openai.com/v1/responses", json=payload,
+        headers={"Authorization": f"Bearer {api_key}"},
+        timeout=85 if selected_model == OPENAI_ASTRA_MODEL else 75,
+    )
     if response.status_code != 200:
         app.logger.warning("OpenAI reader failed with HTTP %s", response.status_code)
         raise RuntimeError("OPENAI_READER_FAILED")
