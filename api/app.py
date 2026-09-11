@@ -43,10 +43,11 @@ OPENAI_MODEL = os.environ.get("VILLAGELENS_OPENAI_MODEL", "gpt-5.6-sol")
 OPENAI_INSTANT_MODEL = os.environ.get("VILLAGELENS_OPENAI_INSTANT_MODEL", OPENAI_MODEL)
 OPENAI_ASTRA_MODEL = os.environ.get("VILLAGELENS_OPENAI_ASTRA_MODEL", "gpt-6-astra")
 OPENAI_INSTANT_SERVICE_TIER = os.environ.get("VILLAGELENS_OPENAI_SERVICE_TIER", "fast")
-OPENAI_FULL_SERVICE_TIER = os.environ.get("VILLAGELENS_OPENAI_FULL_SERVICE_TIER", "auto")
+OPENAI_FULL_SERVICE_TIER = os.environ.get("VILLAGELENS_OPENAI_FULL_SERVICE_TIER", "fast")
+OPENAI_ASTRA_SERVICE_TIER = os.environ.get("VILLAGELENS_OPENAI_ASTRA_SERVICE_TIER", "auto")
 OPENAI_TRANSLATION_MODEL = os.environ.get("VILLAGELENS_TRANSLATION_MODEL", "gpt-5-mini")
 OPENAI_ANALYSIS_VERSION = "context-v2"
-OPENAI_INSTANT_ANALYSIS_VERSION = "instant-v1"
+OPENAI_INSTANT_ANALYSIS_VERSION = "instant-v2"
 OPENAI_ASTRA_ANALYSIS_VERSION = "astra-review-v1"
 KANNADA_TTS_VOICE = os.environ.get("VILLAGELENS_KANNADA_TTS_VOICE", "kn-IN-Standard-A")
 ACCESS_COOKIE_NAME = "villagelens_access_v2"
@@ -860,6 +861,19 @@ def _openai_reader(
         "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
         "needs_independent_review": {"type": "boolean"},
     })
+    if quick:
+        schema = {
+            "type": "object", "additionalProperties": False,
+            "required": ["scene_type", "what_is_it_kn", "what_it_does_kn",
+                         "brief_spoken_kn", "important_points_kn", "uncertainty_kn", "confidence"],
+            "properties": {
+                "scene_type": {"type": "string"}, "what_is_it_kn": {"type": "string"},
+                "what_it_does_kn": {"type": "string"}, "brief_spoken_kn": {"type": "string"},
+                "important_points_kn": {"type": "array", "items": {"type": "string"}, "maxItems": 3},
+                "uncertainty_kn": {"type": "string"},
+                "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
+            },
+        }
     if prior_analysis is not None:
         schema["required"].extend(["agrees_with_sol", "material_disagreement_kn"])
         schema["properties"].update({
@@ -872,10 +886,19 @@ def _openai_reader(
     selected_version = analysis_version or OPENAI_ANALYSIS_VERSION
     prompt_prefix = ""
     if quick:
-        prompt_prefix = ("This is the fast first understanding pass. Prioritize a useful identity, purpose, "
-                         "one short Kannada summary, and at most three important objects. Be concise. ")
+        prompt_prefix = ("Give a fast first understanding for a low-literacy Kannada-speaking adult. Identify "
+                         "the visible item or page and its purpose. Explain up to three immediately useful "
+                         "details in simple spoken Kannada. Preserve important visible numbers and units. Do not "
+                         "transcribe the page, find bounding boxes, or provide a long lesson. State uncertainty "
+                         "instead of guessing. ")
     if prior_analysis is not None:
-        prior = json.dumps(prior_analysis, ensure_ascii=False, separators=(",", ":"))[:12000]
+        prior_keys = ("scene_type", "what_is_it_kn", "what_it_does_kn", "important_points_kn",
+                      "action_needed_kn", "warning_kn", "uncertainty_kn", "brief_spoken_kn",
+                      "detailed_spoken_kn", "transcription_kn", "confidence")
+        prior = json.dumps(
+            {key: prior_analysis[key] for key in prior_keys if key in prior_analysis},
+            ensure_ascii=False, separators=(",", ":"),
+        )[:7000]
         prompt_prefix = ("You are the strongest independent reviewer. Inspect the image yourself, compare the "
                          "earlier Sol analysis below, correct it when needed, and return the best final Kannada "
                          "explanation. Set agrees_with_sol false and describe the material disagreement in Kannada "
@@ -884,10 +907,11 @@ def _openai_reader(
     payload = {"model": selected_model, "service_tier": selected_tier,
                "store": False,
                "reasoning": {"effort": "low" if selected_model == OPENAI_ASTRA_MODEL else "none"},
-               "max_output_tokens": 2200 if quick else 5000,
+               "max_output_tokens": 700 if quick else 3500,
                "input": [{"role": "user", "content": [
-                   {"type": "input_text", "text": prompt_prefix + """Help a low-literacy Kannada-speaking adult understand this image. Read clearly visible Kannada and English for comprehension. Do not recreate all OCR boxes. Translate each distinct clearly visible English word into simple Kannada. Identify up to six useful visible objects and give each one bounding box [left,top,width,height] normalized 0 to 1000. Object boxes must tightly localize a touchable object or useful sub-part; never return the whole image, page, background, ground, or soil as an object box. If this is handwriting or a handwritten list, first identify its likely purpose and organization, such as a menu, shopping list, homework, names, dates, or tasks. Transcribe every readable line exactly into transcription_kn with a line box and mark uncertain lines; for uncertain words give a plausible reading only when the visible letters and list context support it, otherwise abstain. Distinguish recognition failure from blur, distance, perspective, cropping, and low contrast, and give specific capture guidance. Never label readable Kannada as another script. Treat joined measurements such as 300V, 2.0 HP, 50Hz, 10A, kg, ml, and degrees C as semantic units: preserve the printed characters and explain the unit naturally in Kannada. Explain what the image is, its purpose, important details, action, safety, and uncertainty in short natural spoken Kannada. For a textbook or educational page, use all readable text and pictures to teach the page rather than merely naming it or repeating its first lines: identify the central topic, connect the main ideas, explain difficult Kannada terms in very simple conversational Kannada, say why the topic matters, and give one concrete example when the page supports it. If cropping prevents a complete lesson, describe exactly which edge is missing and do not invent the missing text. Divide the explanation into three to six spoken_sections that together form the useful lesson, including any important uncertainty, with each section tied to the image region it discusses so the interface can highlight evidence while speaking. brief_spoken_kn is the most useful one- or two-sentence global answer; for an educational page detailed_spoken_kn should be five to eight short teaching sentences, while other images may be shorter. Do not mechanically repeat OCR. For calendars, summarize month, year, highlighted date and notable events rather than reciting the grid. For electrical equipment or medicine, report only visible or strongly supported identity, purpose, and ratings; never advise wiring, energizing, repair, or medication. Set confidence high only when important identity, text, numbers, and purpose are clear; set needs_independent_review true for handwriting uncertainty, safety-critical content, ambiguous units, or any important doubt. Never invent hidden facts, intent, diagnosis, species, or disease."""},
-                   {"type": "input_image", "image_url": f"data:{media_type};base64,{encoded}", "detail": "high"}]}],
+                   {"type": "input_text", "text": prompt_prefix + ("" if quick else """Help a low-literacy Kannada-speaking adult understand this image. Read clearly visible Kannada and English for comprehension. Do not recreate all OCR boxes. Translate each distinct clearly visible English word into simple Kannada. Identify up to six useful visible objects and give each one bounding box [left,top,width,height] normalized 0 to 1000. Object boxes must tightly localize a touchable object or useful sub-part; never return the whole image, page, background, ground, or soil as an object box. If this is handwriting or a handwritten list, first identify its likely purpose and organization, such as a menu, shopping list, homework, names, dates, or tasks. Transcribe every readable line exactly into transcription_kn with a line box and mark uncertain lines; for uncertain words give a plausible reading only when the visible letters and list context support it, otherwise abstain. Distinguish recognition failure from blur, distance, perspective, cropping, and low contrast, and give specific capture guidance. Never label readable Kannada as another script. Treat joined measurements such as 300V, 2.0 HP, 50Hz, 10A, kg, ml, and degrees C as semantic units: preserve the printed characters and explain the unit naturally in Kannada. Explain what the image is, its purpose, important details, action, safety, and uncertainty in short natural spoken Kannada. For a textbook or educational page, use all readable text and pictures to teach the page rather than merely naming it or repeating its first lines: identify the central topic, connect the main ideas, explain difficult Kannada terms in very simple conversational Kannada, say why the topic matters, and give one concrete example when the page supports it. If cropping prevents a complete lesson, describe exactly which edge is missing and do not invent the missing text. Divide the explanation into three to six spoken_sections that together form the useful lesson, including any important uncertainty, with each section tied to the image region it discusses so the interface can highlight evidence while speaking. brief_spoken_kn is the most useful one- or two-sentence global answer; for an educational page detailed_spoken_kn should be five to eight short teaching sentences, while other images may be shorter. Do not mechanically repeat OCR. For calendars, summarize month, year, highlighted date and notable events rather than reciting the grid. For electrical equipment or medicine, report only visible or strongly supported identity, purpose, and ratings; never advise wiring, energizing, repair, or medication. Set confidence high only when important identity, text, numbers, and purpose are clear; set needs_independent_review true for handwriting uncertainty, safety-critical content, ambiguous units, or any important doubt. Never invent hidden facts, intent, diagnosis, species, or disease.""")},
+                   {"type": "input_image", "image_url": f"data:{media_type};base64,{encoded}",
+                    "detail": "low" if quick else "high"}]}],
                "text": {"verbosity": "low", "format": {"type": "json_schema", "name": "villagelens_reading", "strict": True, "schema": schema}}}
     response = requests.post("https://api.openai.com/v1/responses", json=payload,
                              headers={"Authorization": f"Bearer {api_key}"}, timeout=75)
@@ -896,6 +920,17 @@ def _openai_reader(
         raise RuntimeError("OPENAI_READER_FAILED")
     response_value = response.json()
     parsed = json.loads(_openai_output_text(response_value))
+    if quick:
+        points = parsed.get("important_points_kn", [])
+        detailed_parts = [parsed.get("brief_spoken_kn", ""), parsed.get("what_it_does_kn", "")]
+        if isinstance(points, list):
+            detailed_parts.extend(points)
+        parsed.update({
+            "translations": [], "objects": [], "action_needed_kn": "", "warning_kn": "",
+            "detailed_spoken_kn": " ".join(str(part).strip() for part in detailed_parts if str(part).strip()),
+            "transcription_kn": [], "spoken_sections": [],
+            "needs_independent_review": parsed.get("confidence") != "high",
+        })
     translations, summary_kn, quality_validated = _validated_kannada_output(parsed)
     context, context_validated = _validated_context(parsed)
     _scale_context_boxes(context, width, height)
@@ -1304,7 +1339,7 @@ def _process_stored_stage(capture_id: str, tester_id: str, stage: int) -> dict[s
                 sol = _process_stored_stage(capture_id, tester_id, 3)
                 value = _openai_reader(
                     data, "image/jpeg", image.width, image.height, stage=4,
-                    model=OPENAI_ASTRA_MODEL, service_tier=OPENAI_FULL_SERVICE_TIER,
+                    model=OPENAI_ASTRA_MODEL, service_tier=OPENAI_ASTRA_SERVICE_TIER,
                     analysis_version=OPENAI_ASTRA_ANALYSIS_VERSION,
                     prior_analysis=sol,
                 )

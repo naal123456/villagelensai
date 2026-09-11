@@ -60,7 +60,7 @@ class ApiTests(unittest.TestCase):
         self.assertIn(b'id="quality-4"', response.data)
         self.assertIn(b'id="owner-badge"', response.data)
         self.assertIn(b'id="app-version"', response.data)
-        self.assertIn(b'v2026.09.10.8', response.data)
+        self.assertIn(b'v2026.09.10.9', response.data)
         self.assertIn(b"'UNASSIGNED \xc2\xb7 OLDER CAPTURE'", response.data)
         self.assertIn(b"`${owner}${ownerName}`", response.data)
         self.assertIn(b'navigationGeneration', response.data)
@@ -716,7 +716,7 @@ class ApiTests(unittest.TestCase):
     def test_stage_two_uses_sol_fast_first_pass(self, reader: object, store: object) -> None:
         reader.return_value = {
             "schema": "villagelens.reader.v1", "stage": 2,
-            "reader": "vision_language", "analysis_version": "instant-v1",
+            "reader": "vision_language", "analysis_version": "instant-v2",
             "summary_kn": "ಇದು ಪುಸ್ತಕ.",
         }
         capture_id = "9" * 32
@@ -727,11 +727,39 @@ class ApiTests(unittest.TestCase):
             )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.get_json()["analysis_version"], "instant-v1")
+        self.assertEqual(response.get_json()["analysis_version"], "instant-v2")
         self.assertEqual(reader.call_args.kwargs["stage"], 2)
         self.assertEqual(reader.call_args.kwargs["service_tier"], "fast")
         self.assertTrue(reader.call_args.kwargs["quick"])
         store.assert_called_once_with(capture_id, 2, reader.return_value)
+
+    @patch("api.app.requests.post")
+    def test_quick_reader_uses_small_low_detail_contract(self, provider: object) -> None:
+        provider.return_value.status_code = 200
+        provider.return_value.json.return_value = {"service_tier": "priority", "output": [{"content": [{
+            "type": "output_text", "text": json.dumps({
+                "scene_type": "adapter", "what_is_it_kn": "ಇದು ವಿದ್ಯುತ್ ಅಡಾಪ್ಟರ್.",
+                "what_it_does_kn": "ಇದು ವಿದ್ಯುತ್ ಒದಗಿಸುತ್ತದೆ.",
+                "brief_spoken_kn": "ಇದು ವಿದ್ಯುತ್ ಅಡಾಪ್ಟರ್.",
+                "important_points_kn": ["ವೋಲ್ಟೇಜ್ ನೋಡಿ."], "uncertainty_kn": "",
+                "confidence": "high",
+            }),
+        }]}]}
+
+        with patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"}):
+            value = _openai_reader(
+                image_bytes(), "image/jpeg", 320, 120, stage=2,
+                model="gpt-5.6-sol", service_tier="fast",
+                analysis_version="instant-v2", quick=True,
+            )
+
+        payload = provider.call_args.kwargs["json"]
+        schema = payload["text"]["format"]["schema"]
+        self.assertEqual(payload["max_output_tokens"], 700)
+        self.assertEqual(payload["input"][0]["content"][1]["detail"], "low")
+        self.assertNotIn("objects", schema["properties"])
+        self.assertIn("Do not transcribe", payload["input"][0]["content"][0]["text"])
+        self.assertTrue(value["quality_validated"])
 
     @patch("api.app._store_reader_evidence")
     @patch("api.app.requests.post")
@@ -796,7 +824,7 @@ class ApiTests(unittest.TestCase):
         self.assertIn("spoken_sections", request_payload["text"]["format"]["schema"]["required"])
         self.assertNotIn("words", request_payload["text"]["format"]["schema"]["properties"])
         self.assertEqual(request_payload["reasoning"]["effort"], "none")
-        self.assertEqual(request_payload["service_tier"], "auto")
+        self.assertEqual(request_payload["service_tier"], "fast")
         self.assertEqual(request_payload["text"]["verbosity"], "low")
         self.assertEqual(value["service_tier"], "priority")
         store.assert_called_once_with(capture_id, 3, value)
@@ -982,7 +1010,7 @@ class ApiTests(unittest.TestCase):
             },
             f"captures/{capture_id}/stage-2.json": {
                 "stage": 2, "reader": "vision_language", "model": "gpt-5.6-sol",
-                "analysis_version": "instant-v1", "summary_kn": "ಪುಸ್ತಕ",
+                "analysis_version": "instant-v2", "summary_kn": "ಪುಸ್ತಕ",
             },
             f"captures/{capture_id}/stage-3.json": {
                 "stage": 3, "reader": "vision_language", "model": "gpt-5.6-sol",
