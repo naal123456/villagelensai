@@ -111,7 +111,7 @@
         <span class="bar" id="quality-1"></span><span class="bar" id="quality-2"></span>
         <span class="bar" id="quality-3"></span>
         <span id="quality-timer">—</span>
-        <span id="app-version" aria-label="App version">v2026.09.10.6</span>
+        <span id="app-version" aria-label="App version">v2026.09.10.7</span>
       </div>
       <p id="mic-status" role="status" aria-live="assertive" hidden></p>
     </section>
@@ -174,7 +174,7 @@
       'what_is_it_kn','what_it_does_kn','important_points_kn','action_needed_kn','warning_kn','uncertainty_kn',
       'transcription_kn','spoken_sections','verified_regions','confidence','needs_independent_review'];
     const analysisVersion='context-v2';
-    const appVersion='2026-09-10.6';
+    const appVersion='2026-09-10.7';
     const captureBurstFrames=4;
     let speechVoices=[];
     const testerId=configureTesterId();
@@ -954,22 +954,17 @@
         return {ok:true};
       } catch (error) { saveFailure(item,stageNumber); return {ok:false,error:error.message||'READER_FAILED'}; }
     }
-    async function processStoredReaders(item,requested) {
-      const response=await fetch(`/api/captures/${item.id}/process`,{
-        method:'POST',headers:testerHeaders(),credentials:'same-origin',keepalive:true,
-      });
-      if (response.status===401) { location.href='/access'; return requested.map(()=>({ok:false,error:'ACCESS_REQUIRED'})); }
-      const value=await response.json(); if (!response.ok) throw new Error(value.error||'PROCESSING_FAILED');
-      const outcomes=new Map(), errors=value.errors||{}, stages=value.stages||{};
-      for (const stageNumber of requested) {
-        const stageValue=stages[String(stageNumber)];
-        if (stageValue) { applyReaderResult(item,stageNumber,stageValue); outcomes.set(stageNumber,{ok:true}); }
-        else if (errors[String(stageNumber)]) outcomes.set(stageNumber,{ok:false,error:errors[String(stageNumber)]});
+    async function processStoredReader(item,stageNumber) {
+      try {
+        const response=await fetch(`/api/captures/${item.id}/process/${stageNumber}`,{
+          method:'POST',headers:testerHeaders(),credentials:'same-origin',keepalive:true,
+        });
+        if (response.status===401) { location.href='/access'; return {ok:false,error:'ACCESS_REQUIRED'}; }
+        const value=await response.json(); if (!response.ok) throw new Error(value.error||'PROCESSING_FAILED');
+        applyReaderResult(item,stageNumber,value.result); return {ok:true};
+      } catch (error) {
+        saveFailure(item,stageNumber); return {ok:false,error:error.message||'READER_FAILED'};
       }
-      return requested.map(stageNumber=>{
-        const outcome=outcomes.get(stageNumber)||{ok:false,error:'READER_FAILED'};
-        if (!outcome.ok) saveFailure(item,stageNumber); return outcome;
-      });
     }
     async function startCloudReaders(item,blob) {
       const missing=[2,3].filter(stageNumber=>!readCachedStage(item,stageNumber));
@@ -979,13 +974,14 @@
       if (!missing.length) { endTimer(item); timer.textContent='saved ✓'; return; }
       if (!requested.length) { endTimer(item); status.textContent='ಮೊದಲ ಓದುವಿಕೆ ಸಿದ್ಧವಾಗಿದೆ. Cloud reading is cooling down.'; return; }
       if (item.cloudPromise) { beginTimer(item,item.cloudStartedAt); await item.cloudPromise; return; }
-      item.cloudStartedAt=item.startedAt||Date.now(); beginTimer(item,item.cloudStartedAt);
+      item.cloudStartedAt=item.cloudAttempted?Date.now():(item.startedAt||Date.now());
+      item.cloudAttempted=true; beginTimer(item,item.cloudStartedAt);
       item.cloudPromise=(async()=>{
       try {
         const captureId=/^[0-9a-f]{32}$/.test(item.id)?item.id:'';
         let outcomes;
         if (captureId&&(item.retained||item.result&&item.result.retained)) {
-          outcomes=await processStoredReaders(item,requested);
+          outcomes=await Promise.all(requested.map(stageNumber=>processStoredReader(item,stageNumber)));
         } else {
           if (!blob) { const response=await fetch(item.image_url); if (!response.ok) throw new Error('IMAGE_FAILED'); blob=await response.blob(); }
           outcomes=await Promise.all(requested.map(stageNumber=>callReader(stageNumber,blob,captureId,item)));
@@ -1008,7 +1004,8 @@
       if (!file) return; stop(); defaultWordMode(); const navigation=++navigationGeneration; resetQuality(); status.textContent='ಚಿತ್ರವನ್ನು ಓದುತ್ತಿದೆ…';
       const captureId=newCaptureId();
       const objectUrl=URL.createObjectURL(file); image.src=objectUrl; stage.style.display='inline-block';
-      const captureCode=`${(testerId||'UN').toUpperCase()}-${nextCaptureSequence++}`;
+      const captureSequence=nextCaptureSequence++;
+      const captureCode=`${(testerId||'UN').toUpperCase()}-${captureSequence}`;
       const item={id:captureId,label:'Captured photo',capture_code:captureCode,kind:'capture',image_url:objectUrl,result:null,
         tester_id:testerId,tester_name:testerId==='a3'?'Reviewer':'',startedAt:Date.now()};
       renderConversation(item);
@@ -1033,6 +1030,9 @@
         }
         await startCloudReaders(item,file);
       } catch (_) {
+        if (nextCaptureSequence===captureSequence+1) nextCaptureSequence=captureSequence;
+        item.capture_code=`${captureCode} · NOT SAVED`;
+        if (gallery[galleryIndex]===item) position.textContent=`${item.capture_code}  ${galleryIndex+1}/${gallery.length}`;
         track('capture',false,Date.now()-item.startedAt);
         endTimer(item); $('quality-1').classList.add('failed');
         if (navigation===navigationGeneration) status.textContent='ಈ ಚಿತ್ರವನ್ನು ಓದಲು ಆಗಲಿಲ್ಲ. ಮತ್ತೊಮ್ಮೆ ಪ್ರಯತ್ನಿಸಿ.';

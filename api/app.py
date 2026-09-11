@@ -40,6 +40,7 @@ MAX_SPEECH_CHARACTERS = int(os.environ.get("VILLAGELENS_MAX_SPEECH_CHARACTERS", 
 ALLOWED_MEDIA_TYPES = {"image/jpeg", "image/png", "image/webp"}
 CAPTURE_BUCKET = os.environ.get("VILLAGELENS_CAPTURE_BUCKET", "")
 OPENAI_MODEL = os.environ.get("VILLAGELENS_OPENAI_MODEL", "gpt-5.6-sol")
+OPENAI_SERVICE_TIER = os.environ.get("VILLAGELENS_OPENAI_SERVICE_TIER", "fast")
 OPENAI_TRANSLATION_MODEL = os.environ.get("VILLAGELENS_TRANSLATION_MODEL", "gpt-5-mini")
 OPENAI_ANALYSIS_VERSION = "context-v2"
 KANNADA_TTS_VOICE = os.environ.get("VILLAGELENS_KANNADA_TTS_VOICE", "kn-IN-Standard-A")
@@ -50,6 +51,7 @@ ACCESS_COOKIE_TTL_SECONDS = 30 * 24 * 60 * 60
 MAX_QUESTION_CHARACTERS = 500
 MAX_QUESTION_AUDIO_BYTES = 4 * 1024 * 1024
 MAX_QUESTION_HISTORY_TURNS = 6
+READER_FAILURE_COOLDOWN_SECONDS = 5 * 60
 OPENAI_TRANSCRIPTION_MODEL = os.environ.get(
     "VILLAGELENS_TRANSCRIPTION_MODEL", "gpt-4o-mini-transcribe"
 )
@@ -117,7 +119,7 @@ app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = MAX_CAPTURE_BYTES
 app.config["VILLAGELENS_ACCESS_CODE"] = os.environ.get("VILLAGELENS_ACCESS_CODE", "").strip()
 app.config["VILLAGELENS_SESSION_SECRET"] = os.environ.get("VILLAGELENS_SESSION_SECRET", "")
-_capture_processing_locks: defaultdict[str, threading.Lock] = defaultdict(threading.Lock)
+_capture_processing_locks: defaultdict[tuple[str, int], threading.Lock] = defaultdict(threading.Lock)
 
 
 def _access_code() -> str:
@@ -845,7 +847,8 @@ def _openai_reader(data: bytes, media_type: str, width: int, height: int) -> dic
         "needs_independent_review": {"type": "boolean"},
     })
     encoded = base64.b64encode(data).decode("ascii")
-    payload = {"model": OPENAI_MODEL, "store": False, "reasoning": {"effort": "none"},
+    payload = {"model": OPENAI_MODEL, "service_tier": OPENAI_SERVICE_TIER,
+               "store": False, "reasoning": {"effort": "none"},
                "max_output_tokens": 5000,
                "input": [{"role": "user", "content": [
                    {"type": "input_text", "text": """Help a low-literacy Kannada-speaking adult understand this image. Read clearly visible Kannada and English for comprehension. Do not recreate all OCR boxes. Translate each distinct clearly visible English word into simple Kannada. Identify up to six useful visible objects and give each one bounding box [left,top,width,height] normalized 0 to 1000. Object boxes must tightly localize a touchable object or useful sub-part; never return the whole image, page, background, ground, or soil as an object box. If this is handwriting or a handwritten list, first identify its likely purpose and organization, such as a menu, shopping list, homework, names, dates, or tasks. Transcribe every readable line exactly into transcription_kn with a line box and mark uncertain lines; for uncertain words give a plausible reading only when the visible letters and list context support it, otherwise abstain. Distinguish recognition failure from blur, distance, perspective, cropping, and low contrast, and give specific capture guidance. Never label readable Kannada as another script. Treat joined measurements such as 300V, 2.0 HP, 50Hz, 10A, kg, ml, and degrees C as semantic units: preserve the printed characters and explain the unit naturally in Kannada. Explain what the image is, its purpose, important details, action, safety, and uncertainty in short natural spoken Kannada. For a textbook or educational page, use all readable text and pictures to teach the page rather than merely naming it or repeating its first lines: identify the central topic, connect the main ideas, explain difficult Kannada terms in very simple conversational Kannada, say why the topic matters, and give one concrete example when the page supports it. If cropping prevents a complete lesson, describe exactly which edge is missing and do not invent the missing text. Divide the explanation into three to six spoken_sections that together form the useful lesson, including any important uncertainty, with each section tied to the image region it discusses so the interface can highlight evidence while speaking. brief_spoken_kn is the most useful one- or two-sentence global answer; for an educational page detailed_spoken_kn should be five to eight short teaching sentences, while other images may be shorter. Do not mechanically repeat OCR. For calendars, summarize month, year, highlighted date and notable events rather than reciting the grid. For electrical equipment or medicine, report only visible or strongly supported identity, purpose, and ratings; never advise wiring, energizing, repair, or medication. Set confidence high only when important identity, text, numbers, and purpose are clear; set needs_independent_review true for handwriting uncertainty, safety-critical content, ambiguous units, or any important doubt. Never invent hidden facts, intent, diagnosis, species, or disease."""},
@@ -856,12 +859,14 @@ def _openai_reader(data: bytes, media_type: str, width: int, height: int) -> dic
     if response.status_code != 200:
         app.logger.warning("OpenAI reader failed with HTTP %s", response.status_code)
         raise RuntimeError("OPENAI_READER_FAILED")
-    parsed = json.loads(_openai_output_text(response.json()))
+    response_value = response.json()
+    parsed = json.loads(_openai_output_text(response_value))
     translations, summary_kn, quality_validated = _validated_kannada_output(parsed)
     context, context_validated = _validated_context(parsed)
     _scale_context_boxes(context, width, height)
     return {"schema": "villagelens.reader.v1", "stage": 3, "reader": "vision_language",
             "model": OPENAI_MODEL, "analysis_version": OPENAI_ANALYSIS_VERSION,
+            "service_tier": str(response_value.get("service_tier", "unknown")),
             "latency_ms": round((time.monotonic()-started)*1000),
             "image_size": {"width": width, "height": height}, "words": [], "lines": [], "text": "",
             "translations": translations, "summary_kn": summary_kn, **context,
@@ -1151,62 +1156,100 @@ def _stored_json(bucket: Any, name: str) -> dict[str, Any] | None:
         return None
 
 
-def _process_stored_capture(capture_id: str, tester_id: str) -> tuple[dict[int, dict[str, Any]], dict[int, str]]:
+def _reader_failure_name(capture_id: str, stage: int) -> str:
+    return f"captures/{capture_id}/stage-{stage}-failure.json"
+
+
+def _reader_cooling_down(bucket: Any, capture_id: str, stage: int) -> bool:
+    failure = _stored_json(bucket, _reader_failure_name(capture_id, stage))
+    try:
+        failed_at = datetime.fromisoformat(str((failure or {}).get("failed_at", "")))
+        if failed_at.tzinfo is None:
+            failed_at = failed_at.replace(tzinfo=timezone.utc)
+        return (datetime.now(timezone.utc) - failed_at).total_seconds() < READER_FAILURE_COOLDOWN_SECONDS
+    except (TypeError, ValueError):
+        return False
+
+
+def _store_reader_failure(bucket: Any, capture_id: str, stage: int, error: str) -> None:
+    bucket.blob(_reader_failure_name(capture_id, stage)).upload_from_string(
+        json.dumps({
+            "schema": "villagelens.reader-failure.v1", "stage": stage,
+            "failed_at": datetime.now(timezone.utc).isoformat(), "error": error[:80],
+        }, separators=(",", ":")),
+        content_type="application/json; charset=utf-8",
+    )
+
+
+def _authorized_capture(bucket: Any, capture_id: str, tester_id: str) -> dict[str, Any]:
+    capture = _stored_json(bucket, f"captures/{capture_id}/result.json")
+    if capture is None or (
+        tester_id and not _is_reviewer(tester_id) and capture.get("tester_id") != tester_id
+    ):
+        raise FileNotFoundError
+    return capture
+
+
+def _process_stored_stage(capture_id: str, tester_id: str, stage: int) -> dict[str, Any]:
+    if stage not in {2, 3}:
+        raise ValueError("READER_NOT_FOUND")
     bucket = _storage_bucket()
     if bucket is None:
         raise FileNotFoundError
-    with _capture_processing_locks[capture_id]:
-        capture = _stored_json(bucket, f"captures/{capture_id}/result.json")
-        if capture is None or (
-            tester_id and not _is_reviewer(tester_id) and capture.get("tester_id") != tester_id
-        ):
-            raise FileNotFoundError
-
-        stages = {
-            stage: value for stage in (2, 3)
-            if (value := _stored_json(bucket, f"captures/{capture_id}/stage-{stage}.json")) is not None
-            and (stage != 3 or _current_stage_three(value))
-        }
-        if 3 in stages:
-            stages[3] = _normalize_stage_three(stages[3])
-        missing = [stage for stage in (2, 3) if stage not in stages]
-        errors: dict[int, str] = {}
-        if 3 in missing and not os.environ.get("OPENAI_API_KEY", "").strip():
-            missing.remove(3)
-            errors[3] = "OPENAI_READER_NOT_CONFIGURED"
-        if not missing:
-            return stages, errors
+    with _capture_processing_locks[(capture_id, stage)]:
+        capture = _authorized_capture(bucket, capture_id, tester_id)
+        existing = _stored_json(bucket, f"captures/{capture_id}/stage-{stage}.json")
+        if existing is not None and (stage != 3 or _current_stage_three(existing)):
+            return _normalize_stage_three(existing) if stage == 3 else existing
+        if stage == 3 and not os.environ.get("OPENAI_API_KEY", "").strip():
+            raise RuntimeError("OPENAI_READER_NOT_CONFIGURED")
+        if _reader_cooling_down(bucket, capture_id, stage):
+            raise RuntimeError("READER_COOLDOWN")
 
         source = bucket.blob(f"captures/{capture_id}/source")
         if not source.exists():
             raise FileNotFoundError
         image, _ = _normalized_image(source.download_as_bytes())
         normalized = io.BytesIO()
-        image.save(normalized, format="PNG")
+        image.save(normalized, format="JPEG", quality=88, optimize=True)
         data = normalized.getvalue()
-
-        def run(stage: int) -> dict[str, Any]:
+        try:
             value = (_vision_reader(data, image.width, image.height) if stage == 2
-                     else _openai_reader(data, "image/png", image.width, image.height))
-            owner_id = str(capture.get("tester_id", "")).strip().lower()
-            value["tester_id"] = (
-                owner_id if TESTER_ID_PATTERN.fullmatch(owner_id)
-                else tester_id or "unassigned"
-            )
-            _store_reader_evidence(capture_id, stage, value)
-            return value
+                     else _openai_reader(data, "image/jpeg", image.width, image.height))
+        except Exception as exc:
+            error = str(exc) if isinstance(exc, RuntimeError) else f"STAGE_{stage}_UNAVAILABLE"
+            try:
+                _store_reader_failure(bucket, capture_id, stage, error)
+            except Exception:
+                app.logger.warning("Could not retain stage %s cooldown for capture %s", stage, capture_id)
+            raise
+        owner_id = str(capture.get("tester_id", "")).strip().lower()
+        value["tester_id"] = (
+            owner_id if TESTER_ID_PATTERN.fullmatch(owner_id)
+            else tester_id or "unassigned"
+        )
+        _store_reader_evidence(capture_id, stage, value)
+        return value
 
-        if missing:
-            with ThreadPoolExecutor(max_workers=len(missing)) as executor:
-                futures = {executor.submit(run, stage): stage for stage in missing}
-                for future in as_completed(futures):
-                    stage = futures[future]
-                    try:
-                        stages[stage] = future.result()
-                    except Exception as exc:
-                        app.logger.exception("Stored reader stage %s failed for capture %s", stage, capture_id)
-                        errors[stage] = str(exc) if isinstance(exc, RuntimeError) else f"STAGE_{stage}_UNAVAILABLE"
-        return stages, errors
+
+def _process_stored_capture(capture_id: str, tester_id: str) -> tuple[dict[int, dict[str, Any]], dict[int, str]]:
+    bucket = _storage_bucket()
+    if bucket is None:
+        raise FileNotFoundError
+    _authorized_capture(bucket, capture_id, tester_id)
+    stages: dict[int, dict[str, Any]] = {}
+    errors: dict[int, str] = {}
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = {executor.submit(_process_stored_stage, capture_id, tester_id, stage): stage
+                   for stage in (2, 3)}
+        for future in as_completed(futures):
+            stage = futures[future]
+            try:
+                stages[stage] = future.result()
+            except Exception as exc:
+                app.logger.exception("Stored reader stage %s failed for capture %s", stage, capture_id)
+                errors[stage] = str(exc) if isinstance(exc, RuntimeError) else f"STAGE_{stage}_UNAVAILABLE"
+    return stages, errors
 
 
 def _valid_capture_id(capture_id: str) -> bool:
@@ -1465,6 +1508,27 @@ def process_captured_image(capture_id: str) -> tuple[Response, int]:
     except Exception:
         app.logger.exception("Stored capture processing failed for %s", capture_id)
         return jsonify(error="CAPTURE_PROCESSING_UNAVAILABLE"), 503
+
+
+@app.post("/api/captures/<capture_id>/process/<int:stage>")
+def process_captured_stage(capture_id: str, stage: int) -> tuple[Response, int]:
+    if not _valid_capture_id(capture_id):
+        return jsonify(error="CAPTURE_NOT_FOUND"), 404
+    if stage not in {2, 3}:
+        return jsonify(error="READER_NOT_FOUND"), 404
+    try:
+        result = _process_stored_stage(capture_id, _tester_id(), stage)
+        return jsonify(
+            schema="villagelens.stage-processing.v1",
+            capture_id=capture_id, stage=stage, result=result,
+        ), 200
+    except FileNotFoundError:
+        return jsonify(error="CAPTURE_NOT_FOUND"), 404
+    except RuntimeError as exc:
+        return jsonify(error=str(exc)), 503
+    except Exception:
+        app.logger.exception("Stored capture stage %s failed for %s", stage, capture_id)
+        return jsonify(error=f"STAGE_{stage}_UNAVAILABLE"), 503
 
 
 @app.post("/api/captures/<capture_id>/ask")

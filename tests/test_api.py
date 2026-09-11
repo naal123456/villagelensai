@@ -11,7 +11,8 @@ from PIL import Image
 from api.app import (
     _access_token, _filter_local_regions, _normalize_stage_three,
     _openai_question, _openai_transcribe, _openai_translate, _parse_tsv,
-    _process_stored_capture, _saved_scene_identity_answer, _tester_link_token, app,
+    _process_stored_capture, _process_stored_stage, _saved_scene_identity_answer,
+    _tester_link_token, app,
 )
 
 
@@ -59,7 +60,7 @@ class ApiTests(unittest.TestCase):
         self.assertNotIn(b'id="quality-4"', response.data)
         self.assertIn(b'id="owner-badge"', response.data)
         self.assertIn(b'id="app-version"', response.data)
-        self.assertIn(b'v2026.09.10.6', response.data)
+        self.assertIn(b'v2026.09.10.7', response.data)
         self.assertIn(b"'UNASSIGNED \xc2\xb7 OLDER CAPTURE'", response.data)
         self.assertIn(b"`${owner}${ownerName}`", response.data)
         self.assertIn(b'navigationGeneration', response.data)
@@ -79,7 +80,11 @@ class ApiTests(unittest.TestCase):
         self.assertIn(b'function playKannada', response.data)
         self.assertIn(b'speechAudioCache', response.data)
         self.assertIn(b'keepalive:true', response.data)
-        self.assertIn(b'/process`', response.data)
+        self.assertIn(b'/process/${stageNumber}', response.data)
+        self.assertIn(b'Promise.all(requested.map(stageNumber=>processStoredReader', response.data)
+        self.assertIn(b'item.cloudStartedAt=item.cloudAttempted?Date.now()', response.data)
+        self.assertIn(b'nextCaptureSequence===captureSequence+1', response.data)
+        self.assertIn(b'NOT SAVED', response.data)
         self.assertNotIn(b'Speech Services', response.data)
         self.assertIn(b'function translatedWord', response.data)
         self.assertIn(b'function loadSharedImage', response.data)
@@ -706,7 +711,7 @@ class ApiTests(unittest.TestCase):
         self, provider: object, store: object,
     ) -> None:
         provider.return_value.status_code = 200
-        provider.return_value.json.return_value = {"output": [{"content": [{
+        provider.return_value.json.return_value = {"service_tier": "priority", "output": [{"content": [{
             "type": "output_text",
             "text": json.dumps({
                 "words": [], "lines": [],
@@ -763,7 +768,9 @@ class ApiTests(unittest.TestCase):
         self.assertIn("spoken_sections", request_payload["text"]["format"]["schema"]["required"])
         self.assertNotIn("words", request_payload["text"]["format"]["schema"]["properties"])
         self.assertEqual(request_payload["reasoning"]["effort"], "none")
+        self.assertEqual(request_payload["service_tier"], "fast")
         self.assertEqual(request_payload["text"]["verbosity"], "low")
+        self.assertEqual(value["service_tier"], "priority")
         store.assert_called_once_with(capture_id, 3, value)
 
     def test_mixed_script_kannada_output_is_not_marked_ready(self) -> None:
@@ -831,6 +838,72 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.get_json()["errors"]["3"], "READER_FAILED")
         self.assertFalse(response.get_json()["complete"])
         process.assert_called_once_with(capture_id, "a5")
+
+    @patch("api.app._process_stored_stage")
+    def test_stored_stage_processing_returns_independently(self, process: object) -> None:
+        capture_id = "e" * 32
+        process.return_value = {"stage": 2, "latency_ms": 321, "words": []}
+
+        response = self.client.post(
+            f"/api/captures/{capture_id}/process/2",
+            headers={"X-VillageLens-Tester-ID": "A3"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["result"]["latency_ms"], 321)
+        process.assert_called_once_with(capture_id, "a3", 2)
+
+        missing = self.client.post(f"/api/captures/{capture_id}/process/4")
+        self.assertEqual(missing.status_code, 404)
+
+    @patch("api.app._store_reader_evidence")
+    @patch("api.app._reader_cooling_down", return_value=False)
+    @patch("api.app._vision_reader")
+    @patch("api.app._storage_bucket")
+    def test_stored_stage_forwards_compact_jpeg_independently(
+        self, storage_bucket: object, vision: object, cooling: object, store: object,
+    ) -> None:
+        capture_id = "f" * 32
+        source = MagicMock()
+        source.exists.return_value = True
+        source.download_as_bytes.return_value = image_bytes(800, 600)
+
+        def blob_for(name: str) -> MagicMock:
+            if name == f"captures/{capture_id}/source":
+                return source
+            blob = MagicMock(name=name)
+            if name == f"captures/{capture_id}/result.json":
+                blob.exists.return_value = True
+                blob.download_as_text.return_value = json.dumps({
+                    "capture_id": capture_id, "tester_id": "a3",
+                })
+            else:
+                blob.exists.return_value = False
+            return blob
+
+        storage_bucket.return_value.blob.side_effect = blob_for
+        vision.return_value = {"stage": 2, "latency_ms": 321, "words": []}
+
+        value = _process_stored_stage(capture_id, "a3", 2)
+
+        forwarded = vision.call_args.args[0]
+        self.assertTrue(forwarded.startswith(b"\xff\xd8"))
+        self.assertEqual(vision.call_args.args[1:], (800, 600))
+        self.assertEqual(value["tester_id"], "a3")
+        cooling.assert_called_once_with(storage_bucket.return_value, capture_id, 2)
+        store.assert_called_once_with(capture_id, 2, value)
+
+    @patch("api.app._process_stored_stage", side_effect=RuntimeError("READER_COOLDOWN"))
+    def test_stored_stage_cooldown_returns_without_retry(self, process: object) -> None:
+        capture_id = "a" * 32
+        response = self.client.post(
+            f"/api/captures/{capture_id}/process/3",
+            headers={"X-VillageLens-Tester-ID": "A3"},
+        )
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.get_json()["error"], "READER_COOLDOWN")
+        process.assert_called_once_with(capture_id, "a3", 3)
 
     @patch("api.app._openai_reader")
     @patch("api.app._vision_reader")
