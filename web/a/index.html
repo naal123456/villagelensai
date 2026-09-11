@@ -111,7 +111,7 @@
         <span class="bar" id="quality-1"></span><span class="bar" id="quality-2"></span>
         <span class="bar" id="quality-3"></span>
         <span id="quality-timer">—</span>
-        <span id="app-version" aria-label="App version">v2026.09.10.5</span>
+        <span id="app-version" aria-label="App version">v2026.09.10.6</span>
       </div>
       <p id="mic-status" role="status" aria-live="assertive" hidden></p>
     </section>
@@ -165,6 +165,7 @@
     let audioContext=null, activeAudioSource=null, activeRecorder=null, recordingTimer=0, micTimerId=0;
     let cameraStream=null, cameraAnalysisTimer=0, previousCameraFrame=null;
     let cameraCapturing=false, lastCameraPrompt='', lastCameraPromptAt=0, latestCameraQuality=null;
+    let nextCaptureSequence=1;
     const speechAudioCache=new Map();
     const translationCache=new Map();
     const controlIds=['mode-word','mode-sentence','mode-translate','camera','play-words','play-sentences',
@@ -173,7 +174,7 @@
       'what_is_it_kn','what_it_does_kn','important_points_kn','action_needed_kn','warning_kn','uncertainty_kn',
       'transcription_kn','spoken_sections','verified_regions','confidence','needs_independent_review'];
     const analysisVersion='context-v2';
-    const appVersion='2026-09-10.5';
+    const appVersion='2026-09-10.6';
     const captureBurstFrames=4;
     let speechVoices=[];
     const testerId=configureTesterId();
@@ -732,7 +733,9 @@
     async function loadGallery() {
       try {
         const response=await fetch('/api/gallery',{headers:testerHeaders()}); if (response.status===401) return location.href='/access';
-        if (!response.ok) throw new Error('GALLERY_FAILED'); gallery=(await response.json()).items||[]; await showGallery(0);
+        if (!response.ok) throw new Error('GALLERY_FAILED');
+        const payload=await response.json(); gallery=payload.items||[];
+        nextCaptureSequence=Math.max(1,Number(payload.next_capture_sequence)||1); await showGallery(0);
       } catch (_) { status.textContent='ಉಳಿಸಿದ ಚಿತ್ರಗಳನ್ನು ತೆರೆಯಲು ಆಗಲಿಲ್ಲ.'; }
     }
     function applyVerifiedReadingRegions(items) {
@@ -1005,7 +1008,7 @@
       if (!file) return; stop(); defaultWordMode(); const navigation=++navigationGeneration; resetQuality(); status.textContent='ಚಿತ್ರವನ್ನು ಓದುತ್ತಿದೆ…';
       const captureId=newCaptureId();
       const objectUrl=URL.createObjectURL(file); image.src=objectUrl; stage.style.display='inline-block';
-      const captureCode=`${(testerId||'UN').toUpperCase()}-${captureId.slice(0,6).toUpperCase()}`;
+      const captureCode=`${(testerId||'UN').toUpperCase()}-${nextCaptureSequence++}`;
       const item={id:captureId,label:'Captured photo',capture_code:captureCode,kind:'capture',image_url:objectUrl,result:null,
         tester_id:testerId,tester_name:testerId==='a3'?'Reviewer':'',startedAt:Date.now()};
       renderConversation(item);

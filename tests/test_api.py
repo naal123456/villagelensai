@@ -59,10 +59,12 @@ class ApiTests(unittest.TestCase):
         self.assertNotIn(b'id="quality-4"', response.data)
         self.assertIn(b'id="owner-badge"', response.data)
         self.assertIn(b'id="app-version"', response.data)
-        self.assertIn(b'v2026.09.10.5', response.data)
+        self.assertIn(b'v2026.09.10.6', response.data)
         self.assertIn(b"'UNASSIGNED \xc2\xb7 OLDER CAPTURE'", response.data)
         self.assertIn(b"`${owner}${ownerName}`", response.data)
         self.assertIn(b'navigationGeneration', response.data)
+        self.assertIn(b'nextCaptureSequence', response.data)
+        self.assertIn(b'payload.next_capture_sequence', response.data)
         self.assertIn(b'localStorage.setItem', response.data)
         self.assertIn(b'X-VillageLens-Tester-ID', response.data)
         self.assertIn(b'function speechSegments', response.data)
@@ -334,6 +336,8 @@ class ApiTests(unittest.TestCase):
 
         self.assertEqual(items[2]["stage2"], {"stage": 2, "words": []})
         self.assertTrue(items[2]["retained"])
+        self.assertEqual(items[2]["capture_code"], "A1-1")
+        self.assertEqual(items[2]["capture_sequence"], 1)
         other_items = self.client.get(
             "/api/gallery", headers={"X-VillageLens-Tester-ID": "a2"},
         ).get_json()["items"]
@@ -345,6 +349,38 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(len(reviewer["items"]), 3)
         self.assertEqual(reviewer["items"][2]["tester_id"], "a1")
         self.assertEqual(reviewer["items"][2]["tester_name"], "Eeregowda")
+        self.assertEqual(reviewer["next_capture_sequence"], 1)
+
+    @patch("api.app._storage_bucket")
+    def test_gallery_assigns_stable_chronological_codes_per_tester(
+        self, storage_bucket: object,
+    ) -> None:
+        captures = [
+            ("a" * 32, "2026-09-01T10:00:00+00:00", "a3"),
+            ("b" * 32, "2026-09-01T11:00:00+00:00", "a1"),
+            ("c" * 32, "2026-09-01T12:00:00+00:00", "a3"),
+        ]
+        blobs = []
+        for capture_id, captured_at, tester_id in captures:
+            blob = MagicMock()
+            blob.name = f"captures/{capture_id}/result.json"
+            blob.download_as_text.return_value = json.dumps({
+                "capture_id": capture_id, "captured_at": captured_at,
+                "label": "Captured photo", "tester_id": tester_id,
+            })
+            blobs.append(blob)
+        storage_bucket.return_value.list_blobs.return_value = list(reversed(blobs))
+
+        gallery = self.client.get(
+            "/api/gallery", headers={"X-VillageLens-Tester-ID": "a3"},
+        ).get_json()
+        stored = gallery["items"][2:]
+
+        self.assertEqual([item["capture_code"] for item in stored], [
+            "A3-2", "A1-1", "A3-1",
+        ])
+        self.assertEqual(gallery["next_capture_sequence"], 3)
+        self.assertEqual(stored[0]["result"]["capture_code"], "A3-2")
 
     @patch("api.app._storage_bucket")
     def test_gallery_attaches_owner_verified_handwriting_regions(

@@ -1326,6 +1326,8 @@ def speech() -> Response | tuple[Response, int]:
 
 @app.get("/api/gallery")
 def gallery() -> tuple[Response, int]:
+    requested_tester_id = _tester_id()
+    next_capture_sequence = 1
     items: list[dict[str, Any]] = [
         {
             "id": "demo-i2", "label": "I2", "kind": "demo",
@@ -1348,7 +1350,6 @@ def gallery() -> tuple[Response, int]:
                 and (match := re.fullmatch(r"stage-([23])\.json", parts[2]))
                 and _valid_capture_id(parts[1])
             }
-            requested_tester_id = _tester_id()
             for blob in blobs:
                 if not blob.name.endswith("/result.json"):
                     continue
@@ -1370,7 +1371,6 @@ def gallery() -> tuple[Response, int]:
                 item = {
                     "id": capture_id,
                     "label": value.get("label") or "Captured page",
-                    "capture_code": f"{(owner_id or 'UN').upper()}-{capture_id[:6].upper()}",
                     "kind": "capture",
                     "retained": True,
                     "captured_at": value.get("captured_at"),
@@ -1400,12 +1400,25 @@ def gallery() -> tuple[Response, int]:
                                 stage, capture_id,
                             )
                 stored.append(item)
-            stored.sort(key=lambda item: item.get("captured_at") or "", reverse=True)
+            stored.sort(key=lambda item: (item.get("captured_at") or "", item["id"]))
+            sequence_counts: defaultdict[str, int] = defaultdict(int)
+            for item in stored:
+                owner_id = item["tester_id"]
+                sequence_counts[owner_id] += 1
+                sequence = sequence_counts[owner_id]
+                capture_code = f"{('UN' if owner_id == 'unassigned' else owner_id.upper())}-{sequence}"
+                item["capture_sequence"] = sequence
+                item["capture_code"] = capture_code
+                item["result"]["capture_sequence"] = sequence
+                item["result"]["capture_code"] = capture_code
+            next_capture_sequence = sequence_counts[requested_tester_id or "unassigned"] + 1
+            stored.reverse()
             items.extend(stored if _is_reviewer(requested_tester_id) else stored[:20])
     except Exception:
         app.logger.exception("Capture gallery is temporarily unavailable")
     return jsonify(
         schema="villagelens.gallery.v1", items=items,
+        next_capture_sequence=next_capture_sequence,
         review_mode=_is_reviewer(_tester_id()),
     ), 200
 
