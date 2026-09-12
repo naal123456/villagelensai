@@ -57,10 +57,10 @@ class ApiTests(unittest.TestCase):
         self.assertIn(b'id="select-object"', response.data)
         self.assertIn(b'id="infer-global"', response.data)
         self.assertIn(b'id="ask"', response.data)
-        self.assertIn(b'id="quality-4"', response.data)
+        self.assertIn(b'id="quality-4" hidden', response.data)
         self.assertIn(b'id="owner-badge"', response.data)
         self.assertIn(b'id="app-version"', response.data)
-        self.assertIn(b'v2026.09.11.1', response.data)
+        self.assertIn(b'v2026.09.12.1', response.data)
         self.assertIn(b"'UNASSIGNED \xc2\xb7 OLDER CAPTURE'", response.data)
         self.assertIn(b"`${owner}${ownerName}`", response.data)
         self.assertIn(b'navigationGeneration', response.data)
@@ -82,7 +82,8 @@ class ApiTests(unittest.TestCase):
         self.assertIn(b'keepalive:true', response.data)
         self.assertIn(b'/process/${stageNumber}', response.data)
         self.assertIn(b'Promise.all(primary.map(stageNumber=>processStoredReader', response.data)
-        self.assertIn(b"const missing=[1,2,3,4]", response.data)
+        self.assertIn(b"const astraEnabled=false", response.data)
+        self.assertIn(b"const missing=enabledStages", response.data)
         self.assertIn(b"requested.includes(4)&&readCachedStage(item,3)", response.data)
         self.assertIn(b'item.cloudStartedAt=item.cloudAttempted?Date.now()', response.data)
         self.assertIn(b'nextCaptureSequence===captureSequence+1', response.data)
@@ -186,6 +187,12 @@ class ApiTests(unittest.TestCase):
         )[0])
         self.assertIn(b"Swipe the page", response.data)
         self.assertIn("ಅ ಆ ಇ".encode(), response.data)
+
+    def test_health_reports_astra_disabled(self) -> None:
+        response = self.client.get("/health")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["astra_reader"], "disabled")
 
     def test_english_reader_page_is_isolated_at_b(self) -> None:
         response = self.client.get("/b/?tester=a3")
@@ -1089,6 +1096,7 @@ class ApiTests(unittest.TestCase):
     @patch("api.app._openai_reader")
     @patch("api.app._vision_reader")
     @patch("api.app._storage_bucket")
+    @patch("api.app.ASTRA_ENABLED", True)
     def test_stored_processing_reuses_all_existing_stages(
         self, storage_bucket: object, vision: object, openai: object,
     ) -> None:
@@ -1135,6 +1143,28 @@ class ApiTests(unittest.TestCase):
 
         with self.assertRaises(FileNotFoundError):
             _process_stored_capture(capture_id, "a4")
+
+    @patch("api.app._process_stored_stage")
+    def test_stored_processing_does_not_request_astra_when_disabled(self, process: object) -> None:
+        capture_id = "e" * 32
+        process.side_effect = lambda _capture_id, _tester_id, stage, _language="kn": {
+            "stage": stage, "reader": "cloud_ocr" if stage == 1 else "vision_language",
+        }
+
+        with patch("api.app._storage_bucket", return_value=MagicMock()), \
+                patch("api.app._authorized_capture"), patch("api.app.ASTRA_ENABLED", False):
+            stages, errors = _process_stored_capture(capture_id, "a3")
+
+        self.assertEqual(set(stages), {1, 2, 3})
+        self.assertEqual(errors, {})
+        self.assertNotIn(4, [call.args[2] for call in process.call_args_list])
+
+    @patch("api.app.ASTRA_ENABLED", False)
+    def test_stage_four_endpoint_is_disabled_without_provider_call(self) -> None:
+        response = self.client.post(f"/api/captures/{'f' * 32}/process/4")
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.get_json()["error"], "READER_DISABLED")
 
     @patch("api.app.requests.post")
     def test_spoken_question_returns_scaled_evidence_without_storage(self, provider: object) -> None:

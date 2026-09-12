@@ -15,13 +15,15 @@ OCR engines or model names.
 
 ## Quality indicators
 
-1. Yellow: repository-local Tesseract `kan+eng` is ready.
-2. Light green: Google Vision document OCR is ready.
-3. Green: the current vision-language reading is ready.
-4. Dark green: a future validated consensus across high-quality readers is ready.
+1. Yellow changing to light green: repository-local Tesseract `kan+eng`, then
+   Google Vision document OCR, is ready.
+2. Light green: the fast, compact vision-language understanding is ready.
+3. Green: the full contextual vision-language reading is ready.
+4. Dark green: an optional independent consensus review.
 
-The phone strip displays all four stages. The fourth remains gray until the
-multi-reader consensus work is implemented and validated.
+The independent Astra review is temporarily disabled for cost evaluation, so
+the phone currently displays only the three enabled stages. Direct stage-four
+requests are rejected before a provider call is made.
 
 The colors are processing/evidence stages, not calibrated accuracy percentages.
 
@@ -57,14 +59,12 @@ then sends one small keep-alive request. The server reloads the private stored
 image and starts Google Vision document OCR and the OpenAI image reader
 concurrently, so the phone does not upload the photograph two more times.
 Saved-page navigation reuses complete server evidence without new provider
-requests. Yellow appears for
-Tesseract, light green for Vision, and
-green for the current OpenAI reader; dark green remains reserved for validated
-multi-reader consensus. The elapsed clock runs until enabled readers finish or
+requests. The elapsed clock runs until the three enabled readers finish or
 fail. An incomplete saved image can resume through the same idempotent server
 endpoint, while recent failures use a short cooldown to avoid repeated paid
-calls. The OpenAI stage remains gray
-when its server-side API secret is not configured. Feedback persistence and
+calls. Astra stage four is disabled and cannot make new provider calls. An
+OpenAI stage remains gray when its server-side API secret is not configured or
+funded. Feedback persistence and
 feedback persistence remain future work. Anonymous tester enrollment uses a
 dedicated `?tester=a1`-style link; the choice persists on that phone and filters
 its saved gallery so test cohorts are not mixed.

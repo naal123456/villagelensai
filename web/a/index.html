@@ -24,7 +24,7 @@
     button.working { border-color: #62d7ff; background: #174b5f; animation: working 1s infinite alternate; }
     @keyframes working { to { box-shadow: 0 0 15px #62d7ff; } }
     button:focus-visible { outline: 4px solid #65d6ff; outline-offset: 2px; }
-    .quality { display: grid; grid-template-columns: repeat(4, 1fr) auto auto; gap: 6px; align-items: center; }
+    .quality { display: grid; grid-template-columns: repeat(3, 1fr) auto auto; gap: 6px; align-items: center; }
     .bar { height: 14px; border: 1px solid #64717d; border-radius: 5px; background: #46515b; }
     #quality-1.local { background: #e5bc27; border-color: #ffe071; }
     #quality-1.ready { background: #b9e8a9; }
@@ -111,9 +111,9 @@
       </nav>
       <div class="quality" aria-label="Reading confidence">
         <span class="bar" id="quality-1"></span><span class="bar" id="quality-2"></span>
-        <span class="bar" id="quality-3"></span><span class="bar" id="quality-4"></span>
+        <span class="bar" id="quality-3"></span><span class="bar" id="quality-4" hidden></span>
         <span id="quality-timer">—</span>
-        <span id="app-version" aria-label="App version">v2026.09.11.1</span>
+        <span id="app-version" aria-label="App version">v2026.09.12.1</span>
       </div>
       <p id="mic-status" role="status" aria-live="assertive" hidden></p>
     </section>
@@ -179,7 +179,8 @@
       'transcription_kn','spoken_sections','verified_regions','confidence','needs_independent_review'];
     const analysisVersion='context-v2';
     const instantAnalysisVersion='instant-v2',astraAnalysisVersion='astra-review-v2';
-    const appVersion='2026-09-11.1';
+    const astraEnabled=false,enabledStages=astraEnabled?[1,2,3,4]:[1,2,3];
+    const appVersion='2026-09-12.1';
     const captureBurstFrames=4;
     let speechVoices=[];
     const testerId=configureTesterId();
@@ -295,7 +296,7 @@
       else for (const id of ['play-words','play-sentences','infer-global','ask']) if (id!==activeControl) working(id,false);
     }
     function resetQuality() {
-      for (let n=1;n<=4;n++) $('quality-'+n).classList.remove('local','ready','failed');
+      for (const n of enabledStages) $('quality-'+n).classList.remove('local','ready','failed');
       clearInterval(timerId); timerOwner=null; timer.textContent='—';
     }
     function beginTimer(owner,originalStart=Date.now()) {
@@ -306,8 +307,9 @@
     function endTimer(owner) {
       if (timerOwner!==owner) return;
       clearInterval(timerId); timerId=0;
-      const review=readCachedStage(owner,4);
-      timer.textContent=`${Math.round((Date.now()-started)/1000)}s ${review&&review.consensus_validated===true?'✓':'!'}`;
+      const review=astraEnabled?readCachedStage(owner,4):null;
+      const complete=astraEnabled?review&&review.consensus_validated===true:Boolean(readCachedStage(owner,3));
+      timer.textContent=`${Math.round((Date.now()-started)/1000)}s ${complete?'✓':'!'}`;
       timerOwner=null;
     }
     function cacheKey(item,stageNumber) { return `villagelens.reader.v1:${outputLanguage}:${item.id}:${stageNumber}`; }
@@ -755,14 +757,14 @@
       try {
         const loaded=await loadItem(item); if (navigation!==navigationGeneration) return;
         render(loaded);
-        for (const stageNumber of [1,2,3,4]) {
+        for (const stageNumber of enabledStages) {
           const cached=readCachedStage(item,stageNumber);
           if (cached) applyReaderResult(item,stageNumber,cached);
         }
         renderConversation(item); restoreQuestionFocus(item);
-        const review=readCachedStage(item,4);
+        const review=astraEnabled?readCachedStage(item,4):null;
         timer.textContent=review&&review.consensus_validated===true?'review ✓':(readCachedStage(item,3)?'meaning ✓':(readCachedStage(item,1)?'OCR ✓':'local'));
-        if (item.kind==='capture'&&[1,2,3,4].some(stageNumber=>!readCachedStage(item,stageNumber))) {
+        if (item.kind==='capture'&&enabledStages.some(stageNumber=>!readCachedStage(item,stageNumber))) {
           startCloudReaders(item);
         }
       }
@@ -1005,14 +1007,14 @@
       }
     }
     async function startCloudReaders(item,blob) {
-      const missing=[1,2,3,4].filter(stageNumber=>!readCachedStage(item,stageNumber));
+      const missing=enabledStages.filter(stageNumber=>!readCachedStage(item,stageNumber));
       const cooling=missing.filter(stageNumber=>coolingDown(item,stageNumber));
       cooling.filter(stageNumber=>stageNumber!==1).forEach(stageNumber=>$('quality-'+stageNumber).classList.add('failed'));
       const requested=missing.filter(stageNumber=>!cooling.includes(stageNumber));
       if (!missing.length) {
         endTimer(item);
-        const review=readCachedStage(item,4);
-        status.textContent=review&&review.consensus_validated===true?'4/4 reading stages ready.':'3/4 reading stages ready; independent review differed.';
+        const review=astraEnabled?readCachedStage(item,4):null;
+        status.textContent=review&&review.consensus_validated===true?'4/4 reading stages ready.':'3/3 reading stages ready.';
         return;
       }
       if (!requested.length) { endTimer(item); status.textContent='ಮೊದಲ ಓದುವಿಕೆ ಸಿದ್ಧವಾಗಿದೆ. Cloud reading is cooling down.'; return; }
@@ -1037,11 +1039,11 @@
         }
         if (gallery[galleryIndex]===item) {
           completed.forEach(({stageNumber,outcome})=>{ if (!outcome.ok&&stageNumber!==1) $('quality-'+stageNumber).classList.add('failed'); });
-          const ready=1+[2,3,4].filter(stageNumber=>{
+          const ready=1+enabledStages.filter(stageNumber=>stageNumber>1).filter(stageNumber=>{
             const cached=readCachedStage(item,stageNumber);
             return Boolean(cached)&&(stageNumber!==4||cached.consensus_validated===true);
           }).length;
-          status.textContent=`${ready}/4 reading stages ready.`;
+          status.textContent=`${ready}/${enabledStages.length} reading stages ready.`;
         }
       } catch (_) {
         if (gallery[galleryIndex]===item) status.textContent='ಮೊದಲ ಓದುವಿಕೆ ಸಿದ್ಧವಾಗಿದೆ. Slow connection; cloud reading was not completed.';

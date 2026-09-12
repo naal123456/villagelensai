@@ -42,6 +42,9 @@ CAPTURE_BUCKET = os.environ.get("VILLAGELENS_CAPTURE_BUCKET", "")
 OPENAI_MODEL = os.environ.get("VILLAGELENS_OPENAI_MODEL", "gpt-5.6-sol")
 OPENAI_INSTANT_MODEL = os.environ.get("VILLAGELENS_OPENAI_INSTANT_MODEL", OPENAI_MODEL)
 OPENAI_ASTRA_MODEL = os.environ.get("VILLAGELENS_OPENAI_ASTRA_MODEL", "gpt-6-astra")
+ASTRA_ENABLED = os.environ.get("VILLAGELENS_ASTRA_ENABLED", "false").strip().lower() in {
+    "1", "true", "yes", "on",
+}
 OPENAI_INSTANT_SERVICE_TIER = os.environ.get("VILLAGELENS_OPENAI_SERVICE_TIER", "fast")
 OPENAI_FULL_SERVICE_TIER = os.environ.get("VILLAGELENS_OPENAI_FULL_SERVICE_TIER", "fast")
 OPENAI_ASTRA_SERVICE_TIER = os.environ.get("VILLAGELENS_OPENAI_ASTRA_SERVICE_TIER", "fast")
@@ -420,6 +423,7 @@ def health() -> tuple[Response, int]:
         status="ok" if status == 200 else "not_ready",
         missing_models=missing,
         access_gate="enabled" if _access_configured() else "disabled",
+        astra_reader="enabled" if ASTRA_ENABLED else "disabled",
     ), status
 
 
@@ -1387,6 +1391,8 @@ def _process_stored_stage(
 ) -> dict[str, Any]:
     if stage not in {1, 2, 3, 4}:
         raise ValueError("READER_NOT_FOUND")
+    if stage == 4 and not ASTRA_ENABLED:
+        raise RuntimeError("READER_DISABLED")
     bucket = _storage_bucket()
     if bucket is None:
         raise FileNotFoundError
@@ -1490,7 +1496,7 @@ def _process_stored_capture(
             except Exception as exc:
                 app.logger.exception("Stored reader stage %s failed for capture %s", stage, capture_id)
                 errors[stage] = str(exc) if isinstance(exc, RuntimeError) else f"STAGE_{stage}_UNAVAILABLE"
-    if 3 in stages:
+    if ASTRA_ENABLED and 3 in stages:
         try:
             stages[4] = _process_stored_stage(capture_id, tester_id, 4, output_language)
         except Exception as exc:
@@ -1770,9 +1776,13 @@ def process_captured_image(capture_id: str) -> tuple[Response, int]:
             capture_id=capture_id,
             stages={str(stage): value for stage, value in stages.items()},
             errors={str(stage): error for stage, error in errors.items()},
+            astra_enabled=ASTRA_ENABLED,
             complete=(
-                all(stage in stages for stage in (1, 2, 3, 4))
-                and stages[4].get("consensus_validated") is True
+                all(stage in stages for stage in (1, 2, 3))
+                and (
+                    not ASTRA_ENABLED
+                    or 4 in stages and stages[4].get("consensus_validated") is True
+                )
             ),
         ), 200
     except FileNotFoundError:
@@ -1790,6 +1800,8 @@ def process_captured_stage(capture_id: str, stage: int) -> tuple[Response, int]:
         return jsonify(error="CAPTURE_NOT_FOUND"), 404
     if stage not in {1, 2, 3, 4}:
         return jsonify(error="READER_NOT_FOUND"), 404
+    if stage == 4 and not ASTRA_ENABLED:
+        return jsonify(error="READER_DISABLED"), 409
     try:
         output_language = _output_language()
         result = (
