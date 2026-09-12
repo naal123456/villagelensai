@@ -60,7 +60,7 @@ class ApiTests(unittest.TestCase):
         self.assertIn(b'id="quality-4"', response.data)
         self.assertIn(b'id="owner-badge"', response.data)
         self.assertIn(b'id="app-version"', response.data)
-        self.assertIn(b'v2026.09.10.10', response.data)
+        self.assertIn(b'v2026.09.11.1', response.data)
         self.assertIn(b"'UNASSIGNED \xc2\xb7 OLDER CAPTURE'", response.data)
         self.assertIn(b"`${owner}${ownerName}`", response.data)
         self.assertIn(b'navigationGeneration', response.data)
@@ -118,6 +118,7 @@ class ApiTests(unittest.TestCase):
         self.assertIn(b"requestCenterFocus('single-shot')", response.data)
         self.assertIn(b'settings.pointsOfInterest=[{x:.5,y:.5}]', response.data)
         self.assertIn(b'burst_frames:captureBurstFrames', response.data)
+
         self.assertNotIn(b'cameraCandidates', response.data)
         camera_guide = response.data.split(b'function updateCameraGuide', 1)[1].split(
             b'async function openGuidedCamera', 1,
@@ -185,6 +186,21 @@ class ApiTests(unittest.TestCase):
         )[0])
         self.assertIn(b"Swipe the page", response.data)
         self.assertIn("ಅ ಆ ಇ".encode(), response.data)
+
+    def test_english_reader_page_is_isolated_at_b(self) -> None:
+        response = self.client.get("/b/?tester=a3")
+        self.addCleanup(response.close)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["Cache-Control"], "no-store, max-age=0")
+        self.assertIn(b"const englishMode=location.pathname==='/b/'", response.data)
+        self.assertIn(b"'X-VillageLens-Output-Language':outputLanguage", response.data)
+        self.assertIn(b"Translate selected word to English", response.data)
+
+    def test_protected_english_reader_routes_reviewer_to_access(self) -> None:
+        self.enable_access_gate()
+        response = self.client.get("/b/")
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.headers["Location"], "/access?tester=a3")
 
     def test_demo_assets_are_served(self) -> None:
         image = self.client.get("/a/demo/i2.jpeg")
@@ -760,6 +776,53 @@ class ApiTests(unittest.TestCase):
         self.assertNotIn("objects", schema["properties"])
         self.assertIn("Do not transcribe", payload["input"][0]["content"][0]["text"])
         self.assertTrue(value["quality_validated"])
+
+    @patch("api.app.requests.post")
+    def test_quick_reader_can_return_english_for_any_source_script(self, provider: object) -> None:
+        provider.return_value.status_code = 200
+        provider.return_value.json.return_value = {"service_tier": "priority", "output": [{"content": [{
+            "type": "output_text", "text": json.dumps({
+                "scene_type": "book", "what_is_it_kn": "This is a Kannada-language book.",
+                "what_it_does_kn": "It teaches the subject shown on this page.",
+                "brief_spoken_kn": "This is a Kannada book translated and explained in English.",
+                "important_points_kn": ["The visible page contains a lesson."],
+                "uncertainty_kn": "Some smaller text is unclear.", "confidence": "medium",
+            }),
+        }]}]}
+
+        with patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"}):
+            value = _openai_reader(
+                image_bytes(), "image/jpeg", 320, 120, stage=2,
+                model="gpt-5.6-sol", service_tier="fast",
+                analysis_version="instant-v2", quick=True, output_language="en",
+            )
+
+        prompt = provider.call_args.kwargs["json"]["input"][0]["content"][0]["text"]
+        self.assertIn("OUTPUT LANGUAGE OVERRIDE", prompt)
+        self.assertEqual(value["output_language"], "en")
+        self.assertTrue(value["quality_validated"])
+
+    @patch("api.app._store_reader_evidence")
+    @patch("api.app._openai_reader")
+    def test_english_stage_request_uses_separate_processing_and_storage(
+        self, reader: object, store: object,
+    ) -> None:
+        reader.return_value = {
+            "schema": "villagelens.reader.v1", "stage": 2,
+            "reader": "vision_language", "analysis_version": "instant-v2",
+            "output_language": "en", "summary_kn": "This is a book.",
+        }
+        capture_id = "8" * 32
+        with patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"}):
+            response = self.client.post(
+                "/api/read/2", data=image_bytes(), content_type="image/jpeg",
+                headers={"X-VillageLens-Capture-ID": capture_id,
+                         "X-VillageLens-Output-Language": "en"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(reader.call_args.kwargs["output_language"], "en")
+        store.assert_called_once_with(capture_id, 2, reader.return_value, "en")
 
     @patch("api.app._store_reader_evidence")
     @patch("api.app.requests.post")

@@ -113,7 +113,7 @@
         <span class="bar" id="quality-1"></span><span class="bar" id="quality-2"></span>
         <span class="bar" id="quality-3"></span><span class="bar" id="quality-4"></span>
         <span id="quality-timer">—</span>
-        <span id="app-version" aria-label="App version">v2026.09.10.10</span>
+        <span id="app-version" aria-label="App version">v2026.09.11.1</span>
       </div>
       <p id="mic-status" role="status" aria-live="assertive" hidden></p>
     </section>
@@ -155,6 +155,8 @@
   </section>
   <script>
     const $ = id => document.getElementById(id);
+    const englishMode=location.pathname==='/b/'||location.pathname.startsWith('/b/');
+    const outputLanguage=englishMode?'en':'kn';
     const input=$('camera-input'), image=$('source-image'), overlay=$('overlay'), stage=$('stage');
     const status=$('status'), current=$('current'), position=$('position'), timer=$('quality-timer');
     const ownerBadge=$('owner-badge'), micStatus=$('mic-status'), askButton=$('ask');
@@ -177,10 +179,27 @@
       'transcription_kn','spoken_sections','verified_regions','confidence','needs_independent_review'];
     const analysisVersion='context-v2';
     const instantAnalysisVersion='instant-v2',astraAnalysisVersion='astra-review-v2';
-    const appVersion='2026-09-10.10';
+    const appVersion='2026-09-11.1';
     const captureBurstFrames=4;
     let speechVoices=[];
     const testerId=configureTesterId();
+
+    if (englishMode) {
+      document.documentElement.lang='en'; document.title='VillageLens English Reader';
+      $('mode-word').textContent='A'; $('mode-sentence').innerHTML='<small>A B C</small>';
+      $('mode-translate').innerHTML='<small>→ EN</small>';
+      $('mode-translate').setAttribute('aria-label','Translate selected word to English');
+      $('mode-translate').dataset.tip='Translate to English';
+      $('play-words').innerHTML='▶ A'; $('play-sentences').innerHTML='<small>▶ A B C</small>';
+      $('current').lang='en'; $('conversation').querySelector('h2').textContent='Questions and answers';
+      $('status').textContent='Preparing the image…';
+      $('camera-guidance').textContent='Fit the object or page inside the box';
+      $('camera-capture').textContent='📷 Take now';
+      document.querySelector('.note').textContent='AI-assisted reading may make mistakes. Swipe the image to see saved tests.';
+      $('app-version').textContent=`EN · v${appVersion}`;
+      $('mode-word').classList.remove('active'); $('mode-translate').classList.add('active');
+      mode='translate'; activeControl='mode-translate';
+    }
 
     function refreshSpeechVoices() {
       speechVoices='speechSynthesis' in window?speechSynthesis.getVoices():[];
@@ -204,7 +223,8 @@
       catch (_) { return ''; }
     }
     function testerHeaders(headers={}) {
-      return testerId ? {...headers,'X-VillageLens-Tester-ID':testerId} : headers;
+      const configured={...headers,'X-VillageLens-Output-Language':outputLanguage};
+      return testerId ? {...configured,'X-VillageLens-Tester-ID':testerId} : configured;
     }
 
     function captureId() {
@@ -250,7 +270,9 @@
       renderContextRegions();
     }
     function defaultWordMode() {
-      clearControls(); mode='word'; activeControl='mode-word'; $('mode-word').classList.add('active');
+      clearControls();
+      mode=englishMode?'translate':'word'; activeControl=englishMode?'mode-translate':'mode-word';
+      $(activeControl).classList.add('active');
     }
     function startAction(id) {
       if (activeControl===id) { stop(); return false; }
@@ -288,14 +310,15 @@
       timer.textContent=`${Math.round((Date.now()-started)/1000)}s ${review&&review.consensus_validated===true?'✓':'!'}`;
       timerOwner=null;
     }
-    function cacheKey(item,stageNumber) { return `villagelens.reader.v1:${item.id}:${stageNumber}`; }
-    function failureKey(item,stageNumber) { return `villagelens.reader.failure.v1:${item.id}:${stageNumber}`; }
+    function cacheKey(item,stageNumber) { return `villagelens.reader.v1:${outputLanguage}:${item.id}:${stageNumber}`; }
+    function failureKey(item,stageNumber) { return `villagelens.reader.failure.v1:${outputLanguage}:${item.id}:${stageNumber}`; }
     function readCachedStage(item,stageNumber) {
       let value=item[`stage${stageNumber}`]||null;
       try { value=value||JSON.parse(localStorage.getItem(cacheKey(item,stageNumber))||'null'); } catch (_) { value=null; }
       if (stageNumber===2&&value&&value.analysis_version!==instantAnalysisVersion) return null;
       if (stageNumber===3&&value&&value.analysis_version!==analysisVersion) return null;
       if (stageNumber===4&&value&&value.analysis_version!==astraAnalysisVersion) return null;
+      if (stageNumber>1&&value&&String(value.output_language||'kn')!==outputLanguage) return null;
       return value;
     }
     function saveCachedStage(item,stageNumber,value) {
@@ -346,7 +369,12 @@
       }
     }
     function normalizedSpeech(text) {
-      return String(text||'').replace(/\bSmt\.?\s*/gi,'Shrimati ').replace(/\bSri\.?\s*/gi,'Shri ')
+      const source=String(text||'');
+      if (englishMode) return source.replace(/\bSmt\.?\s*/gi,'Shrimati ').replace(/\bSri\.?\s*/gi,'Shri ')
+        .replace(/\bProf\.?\s*/gi,'Professor ').replace(/\bDr\.?\s*/gi,'Doctor ')
+        .replace(/(\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)\s*V\b/gi,'$1 volts or $2 volts')
+        .replace(/(\d+(?:\.\d+)?)\s*(kW|HP|Hz|V|A|W|kg|ml|°C)\b/gi,(_,n,u)=>`${n} ${{kw:'kilowatts',hp:'horsepower',hz:'hertz',v:'volts',a:'amperes',w:'watts',kg:'kilograms',ml:'milliliters','°c':'degrees Celsius'}[u.toLowerCase()]||u}`);
+      return source.replace(/\bSmt\.?\s*/gi,'Shrimati ').replace(/\bSri\.?\s*/gi,'Shri ')
         .replace(/\bProf\.?\s*/gi,'Professor ').replace(/\bDr\.?\s*/gi,'Doctor ')
         .replace(/\bPuliyog(?:a)?re\b/gi,'ಪುಳಿಯೋಗರೆ').replace(/\bShavige\b/gi,'ಶಾವಿಗೆ')
         .replace(/\bPayasa\b/gi,'ಪಾಯಸ').replace(/\bKosumbari\b/gi,'ಕೋಸಂಬರಿ')
@@ -522,20 +550,21 @@
       } finally { finishAction('infer-global'); }
     }
     function translatedWord(word) {
-      if (!word||!/[A-Za-z]/.test(word.text||'')) return '';
-      const normalized=String(word.text).toLocaleLowerCase('en-IN').replace(/[^a-z0-9]+/g,'');
+      if (!word) return '';
+      const normalized=String(word.text).toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu,'');
+      if (!normalized) return '';
       const match=(result&&result.translations||[]).find(candidate=>{
-        const source=String(candidate.source||'').toLocaleLowerCase('en-IN');
-        return source.replace(/[^a-z0-9]+/g,'')===normalized||source.split(/[^a-z0-9]+/).includes(normalized);
+        const source=String(candidate.source||'').toLocaleLowerCase();
+        return source.replace(/[^\p{L}\p{N}]+/gu,'')===normalized||source.split(/[^\p{L}\p{N}]+/u).includes(normalized);
       });
       return match&&match.translation_kn||'';
     }
     async function translateOnDemand(text) {
-      const key=String(text||'').toLocaleLowerCase('en-IN').replace(/[^a-z0-9]+/g,'');
+      const key=String(text||'').toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu,'');
       if (!key) return '';
       if (translationCache.has(key)) return translationCache.get(key);
       try {
-        const saved=localStorage.getItem(`villagelens.translation.v1:${key}`)||'';
+        const saved=localStorage.getItem(`villagelens.translation.v1:${outputLanguage}:${key}`)||'';
         if (saved) { translationCache.set(key,saved); return saved; }
       } catch (_) {}
       try {
@@ -543,7 +572,7 @@
           body:JSON.stringify({text:String(text).slice(0,80)})});
         const value=await response.json(); if (!response.ok) throw new Error(value.error||'TRANSLATION_FAILED');
         translationCache.set(key,value.translation_kn);
-        try { localStorage.setItem(`villagelens.translation.v1:${key}`,value.translation_kn); } catch (_) {}
+        try { localStorage.setItem(`villagelens.translation.v1:${outputLanguage}:${key}`,value.translation_kn); } catch (_) {}
         return value.translation_kn;
       } catch (_) { return ''; }
     }
@@ -551,17 +580,18 @@
       if (mode==='object') return;
       if (mode==='none') return;
       if (mode==='translate') {
-        if (/[ಀ-೿]/.test(word.text||'')) {
-          stop(true); activate(word,word.text); status.textContent='ಕನ್ನಡ ಪದ · Kannada word'; track('translate'); await speak(word.text); return;
+        const alreadyTarget=englishMode?/[A-Za-z]/.test(word.text||''):/[ಀ-೿]/.test(word.text||'');
+        if (alreadyTarget) {
+          stop(true); activate(word,word.text); status.textContent=englishMode?'English word':'ಕನ್ನಡ ಪದ · Kannada word'; track('translate'); await speak(word.text); return;
         }
         stop(true); working('mode-translate',true); activate(word,word.text);
-        status.textContent='ಕನ್ನಡ ಅರ್ಥ ಸಿದ್ಧಪಡಿಸುತ್ತಿದೆ… · Translating…';
+        status.textContent=englishMode?'Translating to English…':'ಕನ್ನಡ ಅರ್ಥ ಸಿದ್ಧಪಡಿಸುತ್ತಿದೆ… · Translating…';
         let translation=translatedWord(word);
         if (!translation) translation=await translateOnDemand(word.text);
         working('mode-translate',false);
         if (mode!=='translate') return;
         activate(word,translation||word.text);
-        if (translation) { status.textContent='ಇಂಗ್ಲಿಷ್ ಪದದ ಕನ್ನಡ ಅರ್ಥ'; track('translate'); await speak(translation); return; }
+        if (translation) { status.textContent=englishMode?'English meaning':'ಇಂಗ್ಲಿಷ್ ಪದದ ಕನ್ನಡ ಅರ್ಥ'; track('translate'); await speak(translation); return; }
         status.textContent='ಕನ್ನಡ ಅರ್ಥ ಸಿಗಲಿಲ್ಲ. · Translation unavailable.'; track('translate',false); return;
       }
       const semanticGroup=groupedWords(result.words||[]).find(item=>item.ids&&item.ids.includes(word.id));
@@ -870,11 +900,11 @@
       // require steadier hands so motion is not mistaken for useful edge detail.
       const clearlySharp=quality.sharpness>=7, moving=quality.motion>(clearlySharp?24:16);
       const soft=quality.sharpness<4.5;
-      if (dark) return ['bad','dark','ಬೆಳಕು ಬೇಕು · Need more light','ಬೆಳಕು ಬೇಕು.'];
-      if (glare) return ['wait','glare','ಪ್ರತಿಫಲನ ತಪ್ಪಿಸಲು ಸ್ವಲ್ಪ ಓರೆಯಾಗಿಸಿ · Tilt slightly to remove glare','ಬೆಳಕಿನ ಪ್ರತಿಫಲನ ತಪ್ಪಿಸಲು ಸ್ವಲ್ಪ ಓರೆಯಾಗಿಸಿ.'];
-      if (moving) return ['wait','motion','ಫೋನ್ ಸ್ಥಿರವಾಗಿ ಹಿಡಿಯಿರಿ · Hold the phone steady','ಫೋನ್ ಸ್ಥಿರವಾಗಿ ಹಿಡಿಯಿರಿ.'];
-      if (soft) return ['wait','soft','ಸ್ಪಷ್ಟವಾಗಲು ನಿಧಾನವಾಗಿ ಹತ್ತಿರ ಅಥವಾ ದೂರ ಸರಿಸಿ · Move slowly until clear','ಚಿತ್ರ ಸ್ಪಷ್ಟವಾಗುವವರೆಗೆ ನಿಧಾನವಾಗಿ ಹತ್ತಿರ ಅಥವಾ ದೂರ ಸರಿಸಿ.'];
-      return ['ready','ready','ಚೆನ್ನಾಗಿದೆ—ಸ್ಥಿರವಾಗಿ ಹಿಡಿಯಿರಿ · Good—hold steady','ಚೆನ್ನಾಗಿದೆ. ಸ್ಥಿರವಾಗಿ ಹಿಡಿಯಿರಿ.'];
+      if (dark) return ['bad','dark',englishMode?'Need more light':'ಬೆಳಕು ಬೇಕು · Need more light',englishMode?'Need more light.':'ಬೆಳಕು ಬೇಕು.'];
+      if (glare) return ['wait','glare',englishMode?'Tilt slightly to remove glare':'ಪ್ರತಿಫಲನ ತಪ್ಪಿಸಲು ಸ್ವಲ್ಪ ಓರೆಯಾಗಿಸಿ · Tilt slightly to remove glare',englishMode?'Tilt slightly to remove glare.':'ಬೆಳಕಿನ ಪ್ರತಿಫಲನ ತಪ್ಪಿಸಲು ಸ್ವಲ್ಪ ಓರೆಯಾಗಿಸಿ.'];
+      if (moving) return ['wait','motion',englishMode?'Hold the phone steady':'ಫೋನ್ ಸ್ಥಿರವಾಗಿ ಹಿಡಿಯಿರಿ · Hold the phone steady',englishMode?'Hold the phone steady.':'ಫೋನ್ ಸ್ಥಿರವಾಗಿ ಹಿಡಿಯಿರಿ.'];
+      if (soft) return ['wait','soft',englishMode?'Move slowly until the image is clear':'ಸ್ಪಷ್ಟವಾಗಲು ನಿಧಾನವಾಗಿ ಹತ್ತಿರ ಅಥವಾ ದೂರ ಸರಿಸಿ · Move slowly until clear',englishMode?'Move slowly until the image is clear.':'ಚಿತ್ರ ಸ್ಪಷ್ಟವಾಗುವವರೆಗೆ ನಿಧಾನವಾಗಿ ಹತ್ತಿರ ಅಥವಾ ದೂರ ಸರಿಸಿ.'];
+      return ['ready','ready',englishMode?'Good—hold steady':'ಚೆನ್ನಾಗಿದೆ—ಸ್ಥಿರವಾಗಿ ಹಿಡಿಯಿರಿ · Good—hold steady',englishMode?'Good. Hold steady.':'ಚೆನ್ನಾಗಿದೆ. ಸ್ಥಿರವಾಗಿ ಹಿಡಿಯಿರಿ.'];
     }
     function updateCameraGuide() {
       if (!cameraStream||cameraCapturing) return;
@@ -885,7 +915,7 @@
       cameraGuide.dataset.quality=state; cameraPrompt(key,message,spoken);
       cameraMetrics.textContent=`Light ${Math.round(quality.brightness)} · Sharp ${quality.sharpness.toFixed(1)} · Motion ${quality.motion.toFixed(1)} · Glare ${Math.round(quality.glare_percent)}%`;
       if (state==='ready'&&key==='ready') {
-        cameraGuidance.textContent='ಚಿತ್ರ ಸಿದ್ಧವಾಗಿದೆ—ಹಸಿರು ಕ್ಯಾಮೆರಾ ಒತ್ತಿ · Ready—tap the green camera';
+        cameraGuidance.textContent=englishMode?'Ready—tap the green camera':'ಚಿತ್ರ ಸಿದ್ಧವಾಗಿದೆ—ಹಸಿರು ಕ್ಯಾಮೆರಾ ಒತ್ತಿ · Ready—tap the green camera';
       }
       cameraAnalysisTimer=setTimeout(updateCameraGuide,320);
     }
@@ -895,7 +925,7 @@
       try {
         cameraStream=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:{ideal:'environment'},width:{ideal:1920},height:{ideal:1080}}});
         cameraPreview.srcObject=cameraStream; cameraGuide.hidden=false; cameraGuide.dataset.quality='wait';
-        cameraGuidance.textContent='ಚಿತ್ರ ಅಥವಾ ಪುಟವನ್ನು ಚೌಕದೊಳಗೆ ಇರಿಸಿ · Fit the object or page inside the box';
+        cameraGuidance.textContent=englishMode?'Fit the object or page inside the box':'ಚಿತ್ರ ಅಥವಾ ಪುಟವನ್ನು ಚೌಕದೊಳಗೆ ಇರಿಸಿ · Fit the object or page inside the box';
         cameraMetrics.textContent='Checking light and focus…'; cameraCapturing=false; latestCameraQuality=null;
         await cameraPreview.play();
         await requestCenterFocus('continuous');
@@ -1185,7 +1215,7 @@
       if (Math.abs(dx)>45&&Math.abs(dx)>Math.abs(dy)) { suppressTap=true; showGallery(galleryIndex+(dx<0?1:-1)); setTimeout(()=>suppressTap=false,250); }
     });
     const isStandalone=matchMedia('(display-mode: standalone)').matches||navigator.standalone===true;
-    if (isStandalone) $('install').hidden=true;
+    if (isStandalone||englishMode) $('install').hidden=true;
     let installPrompt=null;
     window.addEventListener('beforeinstallprompt',event=>{
       event.preventDefault(); installPrompt=event;
@@ -1224,7 +1254,7 @@
       }
     }
     async function startApp() {
-      if ('serviceWorker' in navigator) {
+      if (!englishMode&&'serviceWorker' in navigator) {
         try {
           const hadController=Boolean(navigator.serviceWorker.controller);
           let reloading=false;

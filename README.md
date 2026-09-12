@@ -39,6 +39,10 @@ docs/                 architecture, operations, and evaluation records
 The tester route is `web/a/index.html`, published at
 `https://villagelensai.com/a/` after access-code entry.
 
+An isolated English-output experiment is served at `/b/?tester=a3`. It reuses
+the reviewer gallery and reading pipeline but stores browser and cloud evidence
+separately from the Kannada-first `/a/` experience.
+
 See [the Google Cloud POC architecture](docs/GOOGLE_CLOUD_POC.md).
 
 ## Current boundary

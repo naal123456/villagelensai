@@ -88,6 +88,7 @@ DEMO_ASSETS = {
 APP_ASSETS = {
     "manifest.webmanifest", "sw.js", "icon.svg", "icon-192.png", "icon-512.png",
 }
+OUTPUT_LANGUAGES = {"kn", "en"}
 VERIFIED_CAPTURE_REGIONS = {
     "fac3bcfd6b5d43d79fa1652e10159b95": [
         {
@@ -205,6 +206,8 @@ def _require_access() -> Response | tuple[Response, int] | None:
     if request.path.startswith("/api/"):
         return jsonify(error="ACCESS_REQUIRED"), 401
     tester_id = request.args.get("tester", "").strip().lower()
+    if request.path in {"/b", "/b/"} and not tester_id:
+        tester_id = "a3"
     destination = f"/access?tester={tester_id}" if TESTER_ID_PATTERN.fullmatch(tester_id) else "/access"
     return redirect(destination, code=302)
 
@@ -220,6 +223,11 @@ def _allowed_origins() -> set[str]:
 def _tester_id() -> str:
     candidate = request.headers.get("X-VillageLens-Tester-ID", "").strip().lower()
     return candidate if TESTER_ID_PATTERN.fullmatch(candidate) else ""
+
+
+def _output_language() -> str:
+    candidate = request.headers.get("X-VillageLens-Output-Language", "").strip().lower()
+    return candidate if candidate in OUTPUT_LANGUAGES else "kn"
 
 
 def _is_reviewer(tester_id: str) -> bool:
@@ -240,7 +248,7 @@ def _response_headers(response: Response) -> Response:
         if origin and origin in _allowed_origins():
             response.headers["Access-Control-Allow-Origin"] = origin
             response.headers["Vary"] = "Origin"
-    if request.path in {"/a", "/a/"}:
+    if request.path in {"/a", "/a/", "/b", "/b/"}:
         response.headers["Cache-Control"] = "no-store, max-age=0"
         response.headers["Pragma"] = "no-cache"
     return response
@@ -365,6 +373,14 @@ def tester_page() -> Response:
             shared = "&shared=1" if request.args.get("shared") == "1" else ""
             return redirect(f"/a/?tester={installed_tester}{shared}", code=302)
         return redirect("/access", code=302)
+    return send_from_directory(WEB_ROOT / "a", "index.html")
+
+
+@app.get("/b/")
+def english_tester_page() -> Response:
+    tester_id = request.args.get("tester", "").strip().lower()
+    if _access_configured() and not TESTER_ID_PATTERN.fullmatch(tester_id):
+        return redirect("/access?tester=a3", code=302)
     return send_from_directory(WEB_ROOT / "a", "index.html")
 
 
@@ -656,20 +672,33 @@ def _valid_kannada_text(value: Any) -> bool:
     )
 
 
-def _validated_kannada_output(parsed: dict[str, Any]) -> tuple[list[dict[str, str]], str, bool]:
+def _valid_output_text(value: Any, output_language: str) -> bool:
+    text = str(value or "").strip()
+    if output_language == "en":
+        return bool(text and re.search(r"[A-Za-z]", text))
+    return _valid_kannada_text(text)
+
+
+def _validated_kannada_output(
+    parsed: dict[str, Any], output_language: str = "kn",
+) -> tuple[list[dict[str, str]], str, bool]:
     candidates = parsed.get("translations", [])
     translations = [
         {"source": str(item.get("source", "")).strip(),
          "translation_kn": str(item.get("translation_kn", "")).strip()}
         for item in candidates if isinstance(item, dict)
         and str(item.get("source", "")).strip()
-        and _valid_kannada_text(item.get("translation_kn"))
+        and _valid_output_text(item.get("translation_kn"), output_language)
     ] if isinstance(candidates, list) else []
     summary = str(parsed.get("brief_spoken_kn") or parsed.get("summary_kn", "")).strip()
-    summary_valid = _valid_kannada_text(summary)
+    summary_valid = _valid_output_text(summary, output_language)
     expected = sum(
         1 for item in candidates if isinstance(item, dict)
-        and re.search(r"[A-Za-z]", str(item.get("source", "")))
+        and str(item.get("source", "")).strip()
+        and (
+            output_language == "en"
+            or re.search(r"[A-Za-z]", str(item.get("source", "")))
+        )
     ) if isinstance(candidates, list) else 0
     translations_valid = expected == len(translations)
     return translations, summary if summary_valid else "", summary_valid and translations_valid
@@ -677,8 +706,9 @@ def _validated_kannada_output(parsed: dict[str, Any]) -> tuple[list[dict[str, st
 
 def _normalize_stage_three(value: dict[str, Any]) -> dict[str, Any]:
     normalized = dict(value)
-    translations, summary, valid = _validated_kannada_output(normalized)
-    context, context_valid = _validated_context(normalized)
+    output_language = str(normalized.get("output_language", "kn"))
+    translations, summary, valid = _validated_kannada_output(normalized, output_language)
+    context, context_valid = _validated_context(normalized, output_language)
     has_context = any(key in normalized for key in ("brief_spoken_kn", "objects", "what_is_it_kn"))
     normalized.update(
         translations=translations, summary_kn=summary,
@@ -755,7 +785,9 @@ def _scale_context_boxes(context: dict[str, Any], width: int, height: int) -> No
                 item.pop("box", None)
 
 
-def _validated_context(parsed: dict[str, Any]) -> tuple[dict[str, Any], bool]:
+def _validated_context(
+    parsed: dict[str, Any], output_language: str = "kn",
+) -> tuple[dict[str, Any], bool]:
     required_text = ("what_is_it_kn", "what_it_does_kn", "brief_spoken_kn", "detailed_spoken_kn")
     context = {
         "scene_type": str(parsed.get("scene_type", "unknown")).strip() or "unknown",
@@ -768,7 +800,7 @@ def _validated_context(parsed: dict[str, Any]) -> tuple[dict[str, Any], bool]:
     }
     points = parsed.get("important_points_kn", [])
     context["important_points_kn"] = [
-        str(point).strip() for point in points if _valid_kannada_text(point)
+        str(point).strip() for point in points if _valid_output_text(point, output_language)
     ] if isinstance(points, list) else []
     objects = parsed.get("objects", [])
     context["objects"] = [
@@ -782,8 +814,8 @@ def _validated_context(parsed: dict[str, Any]) -> tuple[dict[str, Any], bool]:
         }
         for item in objects
         if isinstance(item, dict)
-        and _valid_kannada_text(item.get("name_kn"))
-        and _valid_kannada_text(item.get("purpose_kn"))
+        and _valid_output_text(item.get("name_kn"), output_language)
+        and _valid_output_text(item.get("purpose_kn"), output_language)
         and _selectable_object_box(item.get("box"), parsed) is not None
     ] if isinstance(objects, list) else []
     transcription = parsed.get("transcription_kn", [])
@@ -794,7 +826,7 @@ def _validated_context(parsed: dict[str, Any]) -> tuple[dict[str, Any], bool]:
             "uncertain": bool(item.get("uncertain", False)),
         }
         for item in transcription
-        if isinstance(item, dict) and _valid_kannada_text(item.get("text_kn"))
+        if isinstance(item, dict) and _valid_output_text(item.get("text_kn"), output_language)
     ] if isinstance(transcription, list) else []
     sections = parsed.get("spoken_sections", [])
     context["spoken_sections"] = [
@@ -803,11 +835,11 @@ def _validated_context(parsed: dict[str, Any]) -> tuple[dict[str, Any], bool]:
             "box": _context_box(item.get("box")),
         }
         for item in sections
-        if isinstance(item, dict) and _valid_kannada_text(item.get("text_kn"))
+        if isinstance(item, dict) and _valid_output_text(item.get("text_kn"), output_language)
     ] if isinstance(sections, list) else []
     if context["confidence"] not in {"high", "medium", "low"}:
         context["confidence"] = "low"
-    valid = all(_valid_kannada_text(context[key]) for key in required_text)
+    valid = all(_valid_output_text(context[key], output_language) for key in required_text)
     return context, valid
 
 
@@ -816,6 +848,7 @@ def _openai_reader(
     model: str | None = None, service_tier: str | None = None,
     analysis_version: str | None = None, quick: bool = False,
     prior_analysis: dict[str, Any] | None = None,
+    output_language: str = "kn",
 ) -> dict[str, Any]:
     api_key = os.environ.get("OPENAI_API_KEY", "").strip()
     if not api_key:
@@ -886,11 +919,15 @@ def _openai_reader(
     selected_version = analysis_version or OPENAI_ANALYSIS_VERSION
     prompt_prefix = ""
     if quick:
-        prompt_prefix = ("Give a fast first understanding for a low-literacy Kannada-speaking adult. Identify "
-                         "the visible item or page and its purpose. Explain up to three immediately useful "
-                         "details in simple spoken Kannada. Preserve important visible numbers and units. Do not "
-                         "transcribe the page, find bounding boxes, or provide a long lesson. State uncertainty "
-                         "instead of guessing. ")
+        audience = (
+            "an English-speaking reader. Translate every non-English script into clear, natural English"
+            if output_language == "en" else
+            "a low-literacy Kannada-speaking adult. Explain in simple spoken Kannada"
+        )
+        prompt_prefix = (f"Give a fast first understanding for {audience}. Identify the visible item or page "
+                         "and its purpose. Explain up to three immediately useful details. Preserve important "
+                         "visible numbers and units. Do not transcribe the page, find bounding boxes, or provide "
+                         "a long lesson. State uncertainty instead of guessing. ")
     if prior_analysis is not None:
         prior_keys = ("scene_type", "what_is_it_kn", "what_it_does_kn", "important_points_kn",
                       "action_needed_kn", "warning_kn", "uncertainty_kn", "brief_spoken_kn",
@@ -899,20 +936,35 @@ def _openai_reader(
             {key: prior_analysis[key] for key in prior_keys if key in prior_analysis},
             ensure_ascii=False, separators=(",", ":"),
         )[:7000]
+        answer_language = "English" if output_language == "en" else "Kannada"
         prompt_prefix = ("You are the strongest independent reviewer. Inspect the image yourself, compare the "
-                         "earlier Sol analysis below, correct it when needed, and return the best final Kannada "
-                         "explanation. Set agrees_with_sol false and describe the material disagreement in Kannada "
+                         f"earlier Sol analysis below, correct it when needed, and return the best final {answer_language} "
+                         f"explanation. Set agrees_with_sol false and describe the material disagreement in {answer_language} "
                          "when identity, important text or numbers, purpose, safety, or teaching meaning differs. "
                          f"Earlier Sol analysis: {prior}\n")
+    language_override = ""
+    if output_language == "en":
+        language_override = (
+            "OUTPUT LANGUAGE OVERRIDE: Return every explanatory, translated, transcription, object-name, "
+            "warning, uncertainty, and spoken field in clear natural English. Translate all readable non-English "
+            "scripts into English while preserving names, source text, numbers, and units when useful. The JSON "
+            "property names retain the suffix _kn only for API compatibility; their values MUST be English. "
+        )
     payload = {"model": selected_model, "service_tier": selected_tier,
                "store": False,
                "reasoning": {"effort": "low" if selected_model == OPENAI_ASTRA_MODEL else "none"},
                "max_output_tokens": 700 if quick else 3500,
                "input": [{"role": "user", "content": [
-                   {"type": "input_text", "text": prompt_prefix + ("" if quick else """Help a low-literacy Kannada-speaking adult understand this image. Read clearly visible Kannada and English for comprehension. Do not recreate all OCR boxes. Translate each distinct clearly visible English word into simple Kannada. Identify up to six useful visible objects and give each one bounding box [left,top,width,height] normalized 0 to 1000. Object boxes must tightly localize a touchable object or useful sub-part; never return the whole image, page, background, ground, or soil as an object box. If this is handwriting or a handwritten list, first identify its likely purpose and organization, such as a menu, shopping list, homework, names, dates, or tasks. Transcribe every readable line exactly into transcription_kn with a line box and mark uncertain lines; for uncertain words give a plausible reading only when the visible letters and list context support it, otherwise abstain. Distinguish recognition failure from blur, distance, perspective, cropping, and low contrast, and give specific capture guidance. Never label readable Kannada as another script. Treat joined measurements such as 300V, 2.0 HP, 50Hz, 10A, kg, ml, and degrees C as semantic units: preserve the printed characters and explain the unit naturally in Kannada. Explain what the image is, its purpose, important details, action, safety, and uncertainty in short natural spoken Kannada. For a textbook or educational page, use all readable text and pictures to teach the page rather than merely naming it or repeating its first lines: identify the central topic, connect the main ideas, explain difficult Kannada terms in very simple conversational Kannada, say why the topic matters, and give one concrete example when the page supports it. If cropping prevents a complete lesson, describe exactly which edge is missing and do not invent the missing text. Divide the explanation into three to six spoken_sections that together form the useful lesson, including any important uncertainty, with each section tied to the image region it discusses so the interface can highlight evidence while speaking. brief_spoken_kn is the most useful one- or two-sentence global answer; for an educational page detailed_spoken_kn should be five to eight short teaching sentences, while other images may be shorter. Do not mechanically repeat OCR. For calendars, summarize month, year, highlighted date and notable events rather than reciting the grid. For electrical equipment or medicine, report only visible or strongly supported identity, purpose, and ratings; never advise wiring, energizing, repair, or medication. Set confidence high only when important identity, text, numbers, and purpose are clear; set needs_independent_review true for handwriting uncertainty, safety-critical content, ambiguous units, or any important doubt. Never invent hidden facts, intent, diagnosis, species, or disease.""")},
+                   {"type": "input_text", "text": language_override + prompt_prefix + ("" if quick else """Help a low-literacy Kannada-speaking adult understand this image. Read clearly visible Kannada and English for comprehension. Do not recreate all OCR boxes. Translate each distinct clearly visible English word into simple Kannada. Identify up to six useful visible objects and give each one bounding box [left,top,width,height] normalized 0 to 1000. Object boxes must tightly localize a touchable object or useful sub-part; never return the whole image, page, background, ground, or soil as an object box. If this is handwriting or a handwritten list, first identify its likely purpose and organization, such as a menu, shopping list, homework, names, dates, or tasks. Transcribe every readable line exactly into transcription_kn with a line box and mark uncertain lines; for uncertain words give a plausible reading only when the visible letters and list context support it, otherwise abstain. Distinguish recognition failure from blur, distance, perspective, cropping, and low contrast, and give specific capture guidance. Never label readable Kannada as another script. Treat joined measurements such as 300V, 2.0 HP, 50Hz, 10A, kg, ml, and degrees C as semantic units: preserve the printed characters and explain the unit naturally in Kannada. Explain what the image is, its purpose, important details, action, safety, and uncertainty in short natural spoken Kannada. For a textbook or educational page, use all readable text and pictures to teach the page rather than merely naming it or repeating its first lines: identify the central topic, connect the main ideas, explain difficult Kannada terms in very simple conversational Kannada, say why the topic matters, and give one concrete example when the page supports it. If cropping prevents a complete lesson, describe exactly which edge is missing and do not invent the missing text. Divide the explanation into three to six spoken_sections that together form the useful lesson, including any important uncertainty, with each section tied to the image region it discusses so the interface can highlight evidence while speaking. brief_spoken_kn is the most useful one- or two-sentence global answer; for an educational page detailed_spoken_kn should be five to eight short teaching sentences, while other images may be shorter. Do not mechanically repeat OCR. For calendars, summarize month, year, highlighted date and notable events rather than reciting the grid. For electrical equipment or medicine, report only visible or strongly supported identity, purpose, and ratings; never advise wiring, energizing, repair, or medication. Set confidence high only when important identity, text, numbers, and purpose are clear; set needs_independent_review true for handwriting uncertainty, safety-critical content, ambiguous units, or any important doubt. Never invent hidden facts, intent, diagnosis, species, or disease.""")},
                    {"type": "input_image", "image_url": f"data:{media_type};base64,{encoded}",
                     "detail": "low" if quick else "high"}]}],
                "text": {"verbosity": "low", "format": {"type": "json_schema", "name": "villagelens_reading", "strict": True, "schema": schema}}}
+    if output_language == "en" and not quick:
+        payload["input"][0]["content"][0]["text"] = prompt_prefix + """Help an English-speaking reader understand this image, regardless of the language or script visible in it. Translate readable non-English content into clear natural English. Preserve important names, source expressions, numbers, dates, measurements, and units. The structured JSON property names ending in _kn are retained only for API compatibility; every value in those fields must be English.
+
+Identify up to six useful visible objects and give each a tight touchable bounding box [left,top,width,height] normalized from 0 to 1000. Never use the whole image, page, background, ground, or soil as an object box. For handwriting or a handwritten list, identify its likely purpose and organization, then translate every readable line into English in transcription_kn with a line box and uncertainty flag. Give a plausible reading only when the visible letters and context support it; otherwise abstain. Distinguish recognition failure from blur, distance, perspective, cropping, and low contrast, and provide specific capture guidance.
+
+Explain what the image is, what it does, its important details, any useful action, safety concerns, and uncertainty. For a textbook or educational page, teach the page: identify the central topic, connect its main ideas, explain difficult terms in plain English, say why it matters, and provide one concrete example when supported. Do not mechanically repeat OCR. If cropping prevents a complete lesson, state which edge is missing and never invent hidden material. Divide the explanation into three to six spoken_sections tied to the relevant image regions. brief_spoken_kn should be the most useful one- or two-sentence answer; detailed_spoken_kn should be five to eight short teaching sentences for an educational page. For calendars, summarize the month, year, highlighted date, and notable events instead of reciting the grid. For electrical equipment or medicine, report only visible or strongly supported identity, purpose, and ratings; never advise wiring, energizing, repair, or medication. Set confidence high only when important identity, text, numbers, and purpose are clear. Require independent review for handwriting uncertainty, safety-critical content, ambiguous units, or important doubt. Never invent facts, intent, diagnosis, species, or disease."""
     response = requests.post(
         "https://api.openai.com/v1/responses", json=payload,
         headers={"Authorization": f"Bearer {api_key}"},
@@ -934,11 +986,12 @@ def _openai_reader(
             "transcription_kn": [], "spoken_sections": [],
             "needs_independent_review": parsed.get("confidence") != "high",
         })
-    translations, summary_kn, quality_validated = _validated_kannada_output(parsed)
-    context, context_validated = _validated_context(parsed)
+    translations, summary_kn, quality_validated = _validated_kannada_output(parsed, output_language)
+    context, context_validated = _validated_context(parsed, output_language)
     _scale_context_boxes(context, width, height)
     result = {"schema": "villagelens.reader.v1", "stage": stage, "reader": "vision_language",
             "model": selected_model, "analysis_version": selected_version,
+            "output_language": output_language,
             "service_tier": str(response_value.get("service_tier", "unknown")),
             "latency_ms": round((time.monotonic()-started)*1000),
             "image_size": {"width": width, "height": height}, "words": [], "lines": [], "text": "",
@@ -959,6 +1012,7 @@ def _openai_question(
     history: list[dict[str, str]] | None = None,
     focus_box: dict[str, Any] | None = None,
     scene_context: dict[str, Any] | None = None,
+    output_language: str = "kn",
 ) -> dict[str, Any]:
     api_key = os.environ.get("OPENAI_API_KEY", "").strip()
     if not api_key:
@@ -988,12 +1042,19 @@ def _openai_question(
         "saved_semantic_scene": scene_context or None,
         "current_question": question,
     }, ensure_ascii=False)
+    answer_language = "clear natural English" if output_language == "en" else "simple natural Kannada"
+    number_instruction = (
+        "Read numbers naturally in English and explain their unit or role. "
+        if output_language == "en" else
+        "When the user asks to read numbers in Kannada, say every relevant visible number using "
+        "Kannada number words and explain its unit or calendar role; do not merely repeat digits. "
+    )
     payload = {
         "model": OPENAI_MODEL, "store": False, "reasoning": {"effort": "none"},
         "max_output_tokens": 1200,
         "input": [{"role": "user", "content": [
             {"type": "input_text", "text": (
-                "Answer the user's spoken question about this image in simple natural Kannada. "
+                f"Answer the user's spoken question about this image in {answer_language}. "
                 "This is one continuing conversation about the same unchanged image. Use prior turns and "
                 "the current referent region to resolve words such as this, it, that leaf, or this part. "
                 "When there is no current referent, a general question such as 'what is this?' refers to "
@@ -1003,8 +1064,7 @@ def _openai_question(
                 "the image contradicts it. For plant health questions, describe visible signs and uncertainty; "
                 "do not claim a disease diagnosis from an image alone. "
                 "Use only visible or strongly supported facts, preserve numbers and units, and state uncertainty. "
-                "When the user asks to read numbers in Kannada, say every relevant visible number using "
-                "Kannada number words and explain its unit or calendar role; do not merely repeat digits. "
+                + number_instruction +
                 "Include a safety warning when relevant. evidence_box is the single most relevant image "
                 "region [left,top,width,height] normalized 0 to 1000. Conversation context JSON: " + context
             )},
@@ -1024,7 +1084,7 @@ def _openai_question(
         raise RuntimeError("OPENAI_QUESTION_FAILED")
     parsed = json.loads(_openai_output_text(response.json()))
     answer = str(parsed.get("answer_kn", "")).strip()
-    if not _valid_kannada_text(answer):
+    if not _valid_output_text(answer, output_language):
         raise RuntimeError("OPENAI_QUESTION_INVALID_RESPONSE")
     result = {
         "answer_kn": answer,
@@ -1032,6 +1092,7 @@ def _openai_question(
         "uncertainty_kn": str(parsed.get("uncertainty_kn", "")).strip(),
         "evidence": [{"box": _context_box(parsed.get("evidence_box"))}],
         "image_size": {"width": width, "height": height},
+        "output_language": output_language,
     }
     _scale_context_boxes({"spoken_sections": result["evidence"]}, width, height)
     return result
@@ -1064,7 +1125,7 @@ def _question_scene_context(value: dict[str, Any] | None) -> dict[str, Any]:
 
 
 def _saved_scene_identity_answer(
-    question: str, scene: dict[str, Any], width: int, height: int,
+    question: str, scene: dict[str, Any], width: int, height: int, output_language: str = "kn",
 ) -> dict[str, Any] | None:
     normalized = re.sub(r"[^a-z0-9\u0c80-\u0cff]+", " ", question.casefold()).strip()
     generic_questions = {
@@ -1072,8 +1133,8 @@ def _saved_scene_identity_answer(
         "ಇದು ಏನು", "ಇದೇನು", "ಇದು ಏನು ಹೇಳಿ", "ಇದು ಏನು ಅಂತ ಹೇಳಿ",
     }
     detailed = str(scene.get("detailed_spoken_kn", "")).strip()
-    answer = detailed if _valid_kannada_text(detailed) else str(scene.get("brief_spoken_kn", "")).strip()
-    if normalized not in generic_questions or not _valid_kannada_text(answer):
+    answer = detailed if _valid_output_text(detailed, output_language) else str(scene.get("brief_spoken_kn", "")).strip()
+    if normalized not in generic_questions or not _valid_output_text(answer, output_language):
         return None
     evidence_box = None
     objects = scene.get("objects", [])
@@ -1152,7 +1213,7 @@ def _openai_transcribe(audio: bytes, filename: str, media_type: str) -> str:
     return transcript[:MAX_QUESTION_CHARACTERS]
 
 
-def _openai_translate(text: str) -> dict[str, str]:
+def _openai_translate(text: str, output_language: str = "kn") -> dict[str, str]:
     api_key = os.environ.get("OPENAI_API_KEY", "").strip()
     if not api_key:
         raise RuntimeError("OPENAI_READER_NOT_CONFIGURED")
@@ -1161,15 +1222,21 @@ def _openai_translate(text: str) -> dict[str, str]:
         "required": ["translation_kn"],
         "properties": {"translation_kn": {"type": "string"}},
     }
+    instruction = (
+        "Translate the word or short visible label below from its detected language into clear, natural "
+        "English. If it is already English, explain it briefly in plain English. Preserve numbers and joined "
+        "units such as 110V, 50Hz, and 2.0 HP."
+        if output_language == "en" else
+        "Translate the English word or short visible label below into simple, natural Kannada for a "
+        "low-literacy adult. Preserve numbers and joined units such as 110V, 50Hz, and 2.0 HP, and explain "
+        "the unit briefly in Kannada."
+    )
     payload = {
         "model": OPENAI_TRANSLATION_MODEL, "store": False,
         "reasoning": {"effort": "minimal"}, "max_output_tokens": 160,
         "input": [{"role": "user", "content": [{
             "type": "input_text", "text": (
-                "Translate the English word or short visible label below into simple, natural Kannada "
-                "for a low-literacy adult. Preserve numbers and joined units such as 110V, 50Hz, and "
-                "2.0 HP, and explain the unit briefly in Kannada. Return only the requested structured "
-                "field.\n\nVisible text:\n" + text
+                instruction + " Return only the requested structured field.\n\nVisible text:\n" + text
             ),
         }]}],
         "text": {"verbosity": "low", "format": {
@@ -1186,9 +1253,10 @@ def _openai_translate(text: str) -> dict[str, str]:
         raise RuntimeError("OPENAI_TRANSLATION_FAILED")
     parsed = json.loads(_openai_output_text(response.json()))
     translation = str(parsed.get("translation_kn", "")).strip()
-    if not _valid_kannada_text(translation):
+    if not _valid_output_text(translation, output_language):
         raise RuntimeError("OPENAI_TRANSLATION_INVALID_RESPONSE")
-    return {"translation_kn": translation, "model": OPENAI_TRANSLATION_MODEL}
+    return {"translation_kn": translation, "model": OPENAI_TRANSLATION_MODEL,
+            "output_language": output_language}
 
 
 def _storage_bucket() -> Any:
@@ -1216,10 +1284,17 @@ def _store_capture(data: bytes, media_type: str, result: dict[str, Any]) -> bool
     return True
 
 
-def _store_reader_evidence(capture_id: str, stage: int, result: dict[str, Any]) -> None:
+def _reader_stage_name(capture_id: str, stage: int, output_language: str = "kn") -> str:
+    suffix = "" if output_language == "kn" else f"-{output_language}"
+    return f"captures/{capture_id}/stage-{stage}{suffix}.json"
+
+
+def _store_reader_evidence(
+    capture_id: str, stage: int, result: dict[str, Any], output_language: str = "kn",
+) -> None:
     if not _valid_capture_id(capture_id) or (bucket := _storage_bucket()) is None:
         return
-    bucket.blob(f"captures/{capture_id}/stage-{stage}.json").upload_from_string(
+    bucket.blob(_reader_stage_name(capture_id, stage, output_language)).upload_from_string(
         json.dumps(result, ensure_ascii=False, separators=(",", ":")),
         content_type="application/json; charset=utf-8",
     )
@@ -1237,12 +1312,17 @@ def _stored_json(bucket: Any, name: str) -> dict[str, Any] | None:
         return None
 
 
-def _reader_failure_name(capture_id: str, stage: int) -> str:
-    return f"captures/{capture_id}/stage-{stage}-failure.json"
+def _reader_failure_name(capture_id: str, stage: int, output_language: str = "kn") -> str:
+    suffix = "" if output_language == "kn" else f"-{output_language}"
+    return f"captures/{capture_id}/stage-{stage}{suffix}-failure.json"
 
 
-def _current_reader_stage(value: dict[str, Any] | None, stage: int) -> bool:
+def _current_reader_stage(
+    value: dict[str, Any] | None, stage: int, output_language: str = "kn",
+) -> bool:
     if not value:
+        return False
+    if value.get("output_language", "kn") != output_language:
         return False
     if stage == 1:
         return value.get("reader") == "cloud_ocr"
@@ -1260,8 +1340,10 @@ def _current_reader_stage(value: dict[str, Any] | None, stage: int) -> bool:
     )
 
 
-def _reader_cooling_down(bucket: Any, capture_id: str, stage: int) -> bool:
-    failure = _stored_json(bucket, _reader_failure_name(capture_id, stage))
+def _reader_cooling_down(
+    bucket: Any, capture_id: str, stage: int, output_language: str = "kn",
+) -> bool:
+    failure = _stored_json(bucket, _reader_failure_name(capture_id, stage, output_language))
     try:
         failed_at = datetime.fromisoformat(str((failure or {}).get("failed_at", "")))
         if failed_at.tzinfo is None:
@@ -1271,8 +1353,10 @@ def _reader_cooling_down(bucket: Any, capture_id: str, stage: int) -> bool:
         return False
 
 
-def _store_reader_failure(bucket: Any, capture_id: str, stage: int, error: str) -> None:
-    bucket.blob(_reader_failure_name(capture_id, stage)).upload_from_string(
+def _store_reader_failure(
+    bucket: Any, capture_id: str, stage: int, error: str, output_language: str = "kn",
+) -> None:
+    bucket.blob(_reader_failure_name(capture_id, stage, output_language)).upload_from_string(
         json.dumps({
             "schema": "villagelens.reader-failure.v1", "stage": stage,
             "failed_at": datetime.now(timezone.utc).isoformat(), "error": error[:80],
@@ -1290,29 +1374,36 @@ def _authorized_capture(bucket: Any, capture_id: str, tester_id: str) -> dict[st
     return capture
 
 
-def _process_stored_stage(capture_id: str, tester_id: str, stage: int) -> dict[str, Any]:
+def _process_stored_stage(
+    capture_id: str, tester_id: str, stage: int, output_language: str = "kn",
+) -> dict[str, Any]:
     if stage not in {1, 2, 3, 4}:
         raise ValueError("READER_NOT_FOUND")
     bucket = _storage_bucket()
     if bucket is None:
         raise FileNotFoundError
-    with _capture_processing_locks[(capture_id, stage)]:
+    with _capture_processing_locks[(capture_id, stage, output_language)]:
         capture = _authorized_capture(bucket, capture_id, tester_id)
-        existing = _stored_json(bucket, f"captures/{capture_id}/stage-{stage}.json")
-        if stage == 1 and not _current_reader_stage(existing, 1):
+        existing = _stored_json(bucket, _reader_stage_name(capture_id, stage, output_language))
+        if stage == 1 and output_language == "kn" and not _current_reader_stage(existing, 1):
             legacy_google = _stored_json(bucket, f"captures/{capture_id}/stage-2.json")
             existing = legacy_google if _current_reader_stage(legacy_google, 1) else existing
-        if _current_reader_stage(existing, stage):
+        if _current_reader_stage(existing, stage, output_language):
             normalized = dict(existing)
             normalized["stage"] = stage
             return _normalize_stage_three(normalized) if stage in {2, 3, 4} else normalized
-        if stage == 2 and _current_reader_stage(existing, 1):
+        if stage == 2 and _current_reader_stage(existing, 1, output_language):
             migrated = dict(existing)
             migrated["stage"] = 1
-            _store_reader_evidence(capture_id, 1, migrated)
+            _store_reader_evidence(capture_id, 1, migrated, output_language)
         if stage in {2, 3, 4} and not os.environ.get("OPENAI_API_KEY", "").strip():
             raise RuntimeError("OPENAI_READER_NOT_CONFIGURED")
-        if _reader_cooling_down(bucket, capture_id, stage):
+        cooling_down = (
+            _reader_cooling_down(bucket, capture_id, stage)
+            if output_language == "kn" else
+            _reader_cooling_down(bucket, capture_id, stage, output_language)
+        )
+        if cooling_down:
             raise RuntimeError("READER_COOLDOWN")
 
         source = bucket.blob(f"captures/{capture_id}/source")
@@ -1326,30 +1417,37 @@ def _process_stored_stage(capture_id: str, tester_id: str, stage: int) -> dict[s
             if stage == 1:
                 value = _vision_reader(data, image.width, image.height)
                 value["stage"] = 1
+                value["output_language"] = output_language
             elif stage == 2:
                 value = _openai_reader(
                     data, "image/jpeg", image.width, image.height, stage=2,
                     model=OPENAI_INSTANT_MODEL, service_tier=OPENAI_INSTANT_SERVICE_TIER,
                     analysis_version=OPENAI_INSTANT_ANALYSIS_VERSION, quick=True,
+                    output_language=output_language,
                 )
             elif stage == 3:
                 value = _openai_reader(
                     data, "image/jpeg", image.width, image.height, stage=3,
                     model=OPENAI_MODEL, service_tier=OPENAI_FULL_SERVICE_TIER,
                     analysis_version=OPENAI_ANALYSIS_VERSION,
+                    output_language=output_language,
                 )
             else:
-                sol = _process_stored_stage(capture_id, tester_id, 3)
+                sol = _process_stored_stage(capture_id, tester_id, 3, output_language)
                 value = _openai_reader(
                     data, "image/jpeg", image.width, image.height, stage=4,
                     model=OPENAI_ASTRA_MODEL, service_tier=OPENAI_ASTRA_SERVICE_TIER,
                     analysis_version=OPENAI_ASTRA_ANALYSIS_VERSION,
                     prior_analysis=sol,
+                    output_language=output_language,
                 )
         except Exception as exc:
             error = str(exc) if isinstance(exc, RuntimeError) else f"STAGE_{stage}_UNAVAILABLE"
             try:
-                _store_reader_failure(bucket, capture_id, stage, error)
+                if output_language == "kn":
+                    _store_reader_failure(bucket, capture_id, stage, error)
+                else:
+                    _store_reader_failure(bucket, capture_id, stage, error, output_language)
             except Exception:
                 app.logger.warning("Could not retain stage %s cooldown for capture %s", stage, capture_id)
             raise
@@ -1358,11 +1456,16 @@ def _process_stored_stage(capture_id: str, tester_id: str, stage: int) -> dict[s
             owner_id if TESTER_ID_PATTERN.fullmatch(owner_id)
             else tester_id or "unassigned"
         )
-        _store_reader_evidence(capture_id, stage, value)
+        if output_language == "kn":
+            _store_reader_evidence(capture_id, stage, value)
+        else:
+            _store_reader_evidence(capture_id, stage, value, output_language)
         return value
 
 
-def _process_stored_capture(capture_id: str, tester_id: str) -> tuple[dict[int, dict[str, Any]], dict[int, str]]:
+def _process_stored_capture(
+    capture_id: str, tester_id: str, output_language: str = "kn",
+) -> tuple[dict[int, dict[str, Any]], dict[int, str]]:
     bucket = _storage_bucket()
     if bucket is None:
         raise FileNotFoundError
@@ -1370,7 +1473,7 @@ def _process_stored_capture(capture_id: str, tester_id: str) -> tuple[dict[int, 
     stages: dict[int, dict[str, Any]] = {}
     errors: dict[int, str] = {}
     with ThreadPoolExecutor(max_workers=3) as executor:
-        futures = {executor.submit(_process_stored_stage, capture_id, tester_id, stage): stage
+        futures = {executor.submit(_process_stored_stage, capture_id, tester_id, stage, output_language): stage
                    for stage in (1, 2, 3)}
         for future in as_completed(futures):
             stage = futures[future]
@@ -1381,7 +1484,7 @@ def _process_stored_capture(capture_id: str, tester_id: str) -> tuple[dict[int, 
                 errors[stage] = str(exc) if isinstance(exc, RuntimeError) else f"STAGE_{stage}_UNAVAILABLE"
     if 3 in stages:
         try:
-            stages[4] = _process_stored_stage(capture_id, tester_id, 4)
+            stages[4] = _process_stored_stage(capture_id, tester_id, 4, output_language)
         except Exception as exc:
             app.logger.exception("Stored reader stage 4 failed for capture %s", capture_id)
             errors[4] = str(exc) if isinstance(exc, RuntimeError) else "STAGE_4_UNAVAILABLE"
@@ -1447,10 +1550,18 @@ def translate() -> Response | tuple[Response, int]:
         return jsonify(error="TRANSLATION_TEXT_REQUIRED"), 400
     if len(text) > 80:
         return jsonify(error="TRANSLATION_TEXT_TOO_LONG"), 400
-    if not re.search(r"[A-Za-z]", text):
+    output_language = _output_language()
+    if (
+        output_language == "kn" and not re.search(r"[A-Za-z]", text)
+    ) or (
+        output_language == "en" and not any(character.isalpha() for character in text)
+    ):
         return jsonify(error="TRANSLATION_LANGUAGE_UNSUPPORTED"), 400
     try:
-        return jsonify(_openai_translate(text)), 200
+        return jsonify(
+            _openai_translate(text) if output_language == "kn"
+            else _openai_translate(text, output_language)
+        ), 200
     except RuntimeError as exc:
         app.logger.exception("English-to-Kannada translation failed")
         return jsonify(error=str(exc)), 503
@@ -1506,6 +1617,7 @@ def speech() -> Response | tuple[Response, int]:
 @app.get("/api/gallery")
 def gallery() -> tuple[Response, int]:
     requested_tester_id = _tester_id()
+    output_language = _output_language()
     next_capture_sequence = 1
     items: list[dict[str, Any]] = [
         {
@@ -1522,11 +1634,12 @@ def gallery() -> tuple[Response, int]:
         if bucket is not None:
             stored: list[dict[str, Any]] = []
             blobs = list(bucket.list_blobs(prefix="captures/"))
+            suffix = "" if output_language == "kn" else f"-{output_language}"
             evidence = {
                 (parts[1], int(match.group(1))): blob
                 for blob in blobs
                 if len(parts := blob.name.split("/")) == 3
-                and (match := re.fullmatch(r"stage-([1-4])\.json", parts[2]))
+                and (match := re.fullmatch(rf"stage-([1-4]){re.escape(suffix)}\.json", parts[2]))
                 and _valid_capture_id(parts[1])
             }
             for blob in blobs:
@@ -1572,11 +1685,11 @@ def gallery() -> tuple[Response, int]:
                                 "Ignoring invalid stage %s evidence for capture %s",
                                 stored_stage, capture_id,
                             )
-                if 1 not in stage_values and _current_reader_stage(stage_values.get(2), 1):
+                if 1 not in stage_values and _current_reader_stage(stage_values.get(2), 1, output_language):
                     stage_values[1] = dict(stage_values[2])
                 for stage in (1, 2, 3, 4):
                     stage_value = stage_values.get(stage)
-                    if not _current_reader_stage(stage_value, stage):
+                    if not _current_reader_stage(stage_value, stage, output_language):
                         continue
                     normalized = dict(stage_value)
                     normalized["stage"] = stage
@@ -1638,7 +1751,12 @@ def process_captured_image(capture_id: str) -> tuple[Response, int]:
     if not _valid_capture_id(capture_id):
         return jsonify(error="CAPTURE_NOT_FOUND"), 404
     try:
-        stages, errors = _process_stored_capture(capture_id, _tester_id())
+        output_language = _output_language()
+        stages, errors = (
+            _process_stored_capture(capture_id, _tester_id())
+            if output_language == "kn" else
+            _process_stored_capture(capture_id, _tester_id(), output_language)
+        )
         return jsonify(
             schema="villagelens.processing.v1",
             capture_id=capture_id,
@@ -1665,7 +1783,12 @@ def process_captured_stage(capture_id: str, stage: int) -> tuple[Response, int]:
     if stage not in {1, 2, 3, 4}:
         return jsonify(error="READER_NOT_FOUND"), 404
     try:
-        result = _process_stored_stage(capture_id, _tester_id(), stage)
+        output_language = _output_language()
+        result = (
+            _process_stored_stage(capture_id, _tester_id(), stage)
+            if output_language == "kn" else
+            _process_stored_stage(capture_id, _tester_id(), stage, output_language)
+        )
         return jsonify(
             schema="villagelens.stage-processing.v1",
             capture_id=capture_id, stage=stage, result=result,
@@ -1690,6 +1813,7 @@ def ask_about_capture(capture_id: str) -> tuple[Response, int]:
     if len(question) > MAX_QUESTION_CHARACTERS:
         return jsonify(error="QUESTION_TOO_LONG"), 400
     try:
+        output_language = _output_language()
         bucket = _storage_bucket()
         if bucket is None:
             raise FileNotFoundError
@@ -1707,15 +1831,15 @@ def ask_about_capture(capture_id: str) -> tuple[Response, int]:
         image.save(normalized, format="PNG")
         focus = _question_focus(payload.get("focus_box"), image.width, image.height)
         scene = _question_scene_context(
-            _stored_json(bucket, f"captures/{capture_id}/stage-4.json")
-            or _stored_json(bucket, f"captures/{capture_id}/stage-3.json")
-            or _stored_json(bucket, f"captures/{capture_id}/stage-2.json")
+            _stored_json(bucket, _reader_stage_name(capture_id, 4, output_language))
+            or _stored_json(bucket, _reader_stage_name(capture_id, 3, output_language))
+            or _stored_json(bucket, _reader_stage_name(capture_id, 2, output_language))
         )
         answer = (None if focus else _saved_scene_identity_answer(
-            question, scene, image.width, image.height,
+            question, scene, image.width, image.height, output_language,
         )) or _openai_question(
             normalized.getvalue(), "image/png", image.width, image.height, question,
-            _question_history(payload.get("history")), focus, scene,
+            _question_history(payload.get("history")), focus, scene, output_language,
         )
         answer["question"] = question
         return jsonify(answer), 200
@@ -1740,6 +1864,7 @@ def ask_about_capture_audio(capture_id: str) -> tuple[Response, int]:
     if len(audio) > MAX_QUESTION_AUDIO_BYTES:
         return jsonify(error="QUESTION_AUDIO_TOO_LARGE"), 413
     try:
+        output_language = _output_language()
         bucket = _storage_bucket()
         if bucket is None:
             raise FileNotFoundError
@@ -1760,15 +1885,15 @@ def ask_about_capture_audio(capture_id: str) -> tuple[Response, int]:
         image.save(normalized, format="PNG")
         focus = _question_focus(request.form.get("focus_box"), image.width, image.height)
         scene = _question_scene_context(
-            _stored_json(bucket, f"captures/{capture_id}/stage-4.json")
-            or _stored_json(bucket, f"captures/{capture_id}/stage-3.json")
-            or _stored_json(bucket, f"captures/{capture_id}/stage-2.json")
+            _stored_json(bucket, _reader_stage_name(capture_id, 4, output_language))
+            or _stored_json(bucket, _reader_stage_name(capture_id, 3, output_language))
+            or _stored_json(bucket, _reader_stage_name(capture_id, 2, output_language))
         )
         answer = (None if focus else _saved_scene_identity_answer(
-            question, scene, image.width, image.height,
+            question, scene, image.width, image.height, output_language,
         )) or _openai_question(
             normalized.getvalue(), "image/png", image.width, image.height, question,
-            _question_history(request.form.get("history")), focus, scene,
+            _question_history(request.form.get("history")), focus, scene, output_language,
         )
         answer["question"] = question
         return jsonify(answer), 200
@@ -1805,6 +1930,7 @@ def ask_about_demo_audio(demo_id: str) -> tuple[Response, int]:
             normalized.getvalue(), "image/png", image.width, image.height, question,
             _question_history(request.form.get("history")),
             _question_focus(request.form.get("focus_box"), image.width, image.height),
+            output_language=_output_language(),
         )
         answer["question"] = question
         return jsonify(answer), 200
@@ -1922,26 +2048,34 @@ def cloud_read(stage: int) -> tuple[Response, int]:
     if stage in {2, 3} and not os.environ.get("OPENAI_API_KEY", "").strip():
         return jsonify(error="OPENAI_READER_NOT_CONFIGURED"), 503
     try:
+        output_language = _output_language()
         image, _ = _normalized_image(data)
         normalized = io.BytesIO()
         image.save(normalized, format="JPEG", quality=88, optimize=True)
         if stage == 1:
             payload = _vision_reader(normalized.getvalue(), image.width, image.height)
             payload["stage"] = 1
+            payload["output_language"] = output_language
         elif stage == 2:
             payload = _openai_reader(
                 normalized.getvalue(), "image/jpeg", image.width, image.height, stage=2,
                 model=OPENAI_INSTANT_MODEL, service_tier=OPENAI_INSTANT_SERVICE_TIER,
                 analysis_version=OPENAI_INSTANT_ANALYSIS_VERSION, quick=True,
+                output_language=output_language,
             )
         else:
             payload = _openai_reader(
                 normalized.getvalue(), "image/jpeg", image.width, image.height, stage=3,
                 model=OPENAI_MODEL, service_tier=OPENAI_FULL_SERVICE_TIER,
                 analysis_version=OPENAI_ANALYSIS_VERSION,
+                output_language=output_language,
             )
         payload["tester_id"] = _tester_id() or "unassigned"
-        _store_reader_evidence(request.headers.get("X-VillageLens-Capture-ID", ""), stage, payload)
+        capture_id = request.headers.get("X-VillageLens-Capture-ID", "")
+        if output_language == "kn":
+            _store_reader_evidence(capture_id, stage, payload)
+        else:
+            _store_reader_evidence(capture_id, stage, payload, output_language)
         return jsonify(payload), 200
     except ValueError as exc:
         return jsonify(error=str(exc)), 400
