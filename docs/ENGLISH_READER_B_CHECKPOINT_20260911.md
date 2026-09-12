@@ -33,11 +33,13 @@ language in English, while preserving the Kannada-first `/a/` field test.
   experiment; `/a/` remains the installed Kannada PWA.
 - API compatibility field names such as `brief_spoken_kn` remain unchanged
   internally, although their `/b/` values are English.
+- A Fast-lane HTTP 429 receives one bounded retry on the provider's default
+  service tier. Other failures are not retried by this rule.
 
 ## Validation
 
 - `python3 -m py_compile api/app.py`
-- `.venv/bin/python -m unittest tests.test_api` — 57 tests passed.
+- `.venv/bin/python -m unittest tests.test_api` — 58 tests passed.
 - The embedded browser script compiled successfully with Node `vm.Script`.
 - Focused tests cover `/b/` routing, access behavior, English reader validation,
   language request forwarding, and English evidence storage isolation.

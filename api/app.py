@@ -970,6 +970,14 @@ Explain what the image is, what it does, its important details, any useful actio
         headers={"Authorization": f"Bearer {api_key}"},
         timeout=85 if selected_model == OPENAI_ASTRA_MODEL else 75,
     )
+    if response.status_code == 429 and selected_tier == "fast":
+        app.logger.warning("OpenAI Fast reader returned HTTP 429; retrying on default tier")
+        retry_payload = {**payload, "service_tier": "default"}
+        response = requests.post(
+            "https://api.openai.com/v1/responses", json=retry_payload,
+            headers={"Authorization": f"Bearer {api_key}"},
+            timeout=85 if selected_model == OPENAI_ASTRA_MODEL else 75,
+        )
     if response.status_code != 200:
         app.logger.warning("OpenAI reader failed with HTTP %s", response.status_code)
         raise RuntimeError("OPENAI_READER_FAILED")

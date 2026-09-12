@@ -802,6 +802,33 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(value["output_language"], "en")
         self.assertTrue(value["quality_validated"])
 
+    @patch("api.app.requests.post")
+    def test_reader_retries_fast_capacity_limit_once_on_default_tier(self, provider: object) -> None:
+        limited = MagicMock(status_code=429)
+        completed = MagicMock(status_code=200)
+        completed.json.return_value = {"service_tier": "default", "output": [{"content": [{
+            "type": "output_text", "text": json.dumps({
+                "scene_type": "sign", "what_is_it_kn": "ಇದು ಫಲಕ.",
+                "what_it_does_kn": "ಇದು ಮಾಹಿತಿ ನೀಡುತ್ತದೆ.",
+                "brief_spoken_kn": "ಇದು ಮಾಹಿತಿ ಫಲಕ.",
+                "important_points_kn": ["ಮಾಹಿತಿ ಓದಿ."], "uncertainty_kn": "",
+                "confidence": "high",
+            }),
+        }]}]}
+        provider.side_effect = [limited, completed]
+
+        with patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"}):
+            value = _openai_reader(
+                image_bytes(), "image/jpeg", 320, 120, stage=2,
+                model="gpt-5.6-sol", service_tier="fast",
+                analysis_version="instant-v2", quick=True,
+            )
+
+        self.assertEqual(provider.call_count, 2)
+        self.assertEqual(provider.call_args_list[0].kwargs["json"]["service_tier"], "fast")
+        self.assertEqual(provider.call_args_list[1].kwargs["json"]["service_tier"], "default")
+        self.assertEqual(value["service_tier"], "default")
+
     @patch("api.app._store_reader_evidence")
     @patch("api.app._openai_reader")
     def test_english_stage_request_uses_separate_processing_and_storage(
