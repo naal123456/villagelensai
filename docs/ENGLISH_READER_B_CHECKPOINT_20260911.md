@@ -44,16 +44,37 @@ language in English, while preserving the Kannada-first `/a/` field test.
 - Focused tests cover `/b/` routing, access behavior, English reader validation,
   language request forwarding, and English evidence storage isolation.
 
-Public iPhone Safari camera and English audio validation remains required after
-deployment; this checkpoint does not claim that validation.
+The protected production page was verified to contain version
+`v2026.09.11.1` and the English output-language header. Public health returned
+`ok`, with the access gate enabled and both local OCR models present.
+
+A controlled stage-two production request used the repository demo image, not
+a private tester photograph. Both Fast and default service tiers returned HTTP
+429. A minimal diagnostic request established the provider error as
+`insufficient_quota` with code `credit_balance_exhausted`. Therefore the route
+is deployed, but model-backed English inference cannot be claimed ready until
+the OpenAI project has credits or a deliberately selected funded provider is
+configured. This same account condition affects the model-backed stages on
+`/a/`; local and Google OCR are separate.
+
+Public iPhone Safari camera and English audio validation also remains required;
+this checkpoint does not claim that physical validation.
 
 ## Deployment configuration
 
 No new secret, provider, model, service, or billable resource is required. The
 existing Cloud Run limits and provider configuration remain unchanged.
 
+- Source commits: `470455c`, `05a38f7`
+- Cloud Build: `d8f8ec68-3cbc-4fc0-8da3-1c7f36fff7bb`
+- Container digest:
+  `sha256:085bf8682182c1147e6aa42d83f19376ba5ceb3cc025489d7b36187b50b4cda2`
+- Production service: `vlens-a`, `us-central1`
+- Production revision: `vlens-a-00049-274`, 100 percent traffic
+
 ## Rollback
 
-Roll back to the preceding Cloud Run revision. This removes `/b/` and the
-language-aware request behavior without deleting captures or existing Kannada
-evidence. English `stage-*-en.json` evidence may remain inert in storage.
+Route traffic to `vlens-a-00047-sdz` to remove `/b/` and the language-aware
+request behavior without deleting captures or existing Kannada evidence.
+Revision `vlens-a-00048-klv` retains `/b/` without the bounded Fast-to-default
+429 fallback. English `stage-*-en.json` evidence may remain inert in storage.
