@@ -115,7 +115,7 @@
         <span class="bar" id="quality-1"></span><span class="bar" id="quality-2"></span>
         <span class="bar" id="quality-3"></span><button class="bar" id="quality-4" aria-label="Request strongest reading" data-tip="Request strongest reading"></button>
         <span id="quality-timer">—</span>
-        <span id="app-version" aria-label="App version">v2026.09.13.2</span>
+        <span id="app-version" aria-label="App version">v2026.09.13.3</span>
       </div>
       <p id="mic-status" role="status" aria-live="assertive" hidden></p>
     </section>
@@ -182,7 +182,7 @@
     const stageTwoAnalysisVersion='luna-compact-v1';
     const stageThreeAnalysisVersion='terra-context-v2',stageFourAnalysisVersion='sol-review-v2';
     const automaticStages=[1,2,3],enabledStages=[1,2,3,4];
-    const appVersion='2026-09-13.2';
+    const appVersion='2026-09-13.3';
     const captureBurstFrames=4;
     let speechVoices=[];
     const testerId=configureTesterId();
@@ -592,11 +592,27 @@
         return value.translation_kn;
       } catch (_) { return ''; }
     }
-    async function readForUser(target) {
+    function overlapScore(left,right) {
+      if (!left||!right) return 0;
+      const width=Math.max(0,Math.min(left.x+left.width,right.x+right.width)-Math.max(left.x,right.x));
+      const height=Math.max(0,Math.min(left.y+left.height,right.y+right.height)-Math.max(left.y,right.y));
+      const intersection=width*height,smaller=Math.min(left.width*left.height,right.width*right.height);
+      return smaller?intersection/smaller:0;
+    }
+    function contextualTranslation(target) {
+      if (target&&target.translation) return target.translation;
+      if (!target||!target.box||!result) return '';
+      const match=(result.transcription_kn||[]).filter(region=>region.box&&region.text_kn)
+        .map(region=>({region,score:overlapScore(target.box,region.box)}))
+        .filter(candidate=>candidate.score>=.55).sort((left,right)=>right.score-left.score)[0];
+      return match&&match.region.text_kn||'';
+    }
+    async function readForUser(target,useContext=false) {
       const source=String(target&&target.text||'').trim(); if (!source) return false;
       activate(target,source);
       if (!needsTargetTranslation(source)) return speak(source);
-      let translation=translatedWord({text:source});
+      let translation=useContext?contextualTranslation(target):'';
+      if (!translation) translation=translatedWord({text:source});
       if (!translation) translation=await translateOnDemand(source);
       if (!translation) return speak(source);
       const bridge=englishMode?'In English, this means:':'ಕನ್ನಡದಲ್ಲಿ ಇದರ ಅರ್ಥ:';
@@ -624,7 +640,7 @@
       }
       const semanticGroup=groupedWords(result.words||[]).find(item=>item.ids&&item.ids.includes(word.id));
       const target=mode==='sentence' ? lineForWord(word) : (semanticGroup||word);
-      if (!target) return; track(mode==='sentence'?'line':'word'); await readForUser(target);
+      if (!target) return; track(mode==='sentence'?'line':'word'); await readForUser(target,mode==='sentence');
     }
     function addUnderline(target,box) {
       const line=document.createElementNS('http://www.w3.org/2000/svg','line');
@@ -691,9 +707,15 @@
       status.textContent=englishMode?(objects.length?'Tap a blue box to read and understand it.':'Object information is not ready yet.'):
         (objects.length?'ಮಾಹಿತಿಗಾಗಿ ನೀಲಿ ಚೌಕಟ್ಟಿನ ವಸ್ತುವನ್ನು ಸ್ಪರ್ಶಿಸಿ.':'ವಸ್ತುಗಳ ಮಾಹಿತಿ ಇನ್ನೂ ಸಿದ್ಧವಾಗಿಲ್ಲ.');
     }
+    function sourceTextForBox(box) {
+      if (!result||!box) return '';
+      return (result.lines||[]).filter(line=>overlapScore(line.box,box)>=.55)
+        .map(line=>String(line.text||'').trim()).filter(Boolean).join('. ');
+    }
     function transcriptionLines() {
       return (result&&result.transcription_kn||[]).filter(line=>line.box&&line.text_kn).map((line,index)=>({
-        id:`transcription-${index}`,text:line.text_kn,box:line.box,word_ids:[],uncertain:line.uncertain,
+        id:`transcription-${index}`,text:sourceTextForBox(line.box)||line.text_kn,translation:line.text_kn,
+        box:line.box,word_ids:[],uncertain:line.uncertain,
       }));
     }
     function verifiedRegions() { return result&&result.verified_regions||[]; }
@@ -722,7 +744,7 @@
         const hit=document.createElementNS('http://www.w3.org/2000/svg','rect');
         for (const key of ['x','y','width','height']) hit.setAttribute(key,line.box[key]);
         hit.setAttribute('rx','6'); hit.setAttribute('class','transcription-region');
-        hit.addEventListener('click',event=>{ event.stopPropagation(); activate(line,line.text); track('line'); readForUser(line); });
+        hit.addEventListener('click',event=>{ event.stopPropagation(); activate(line,line.text); track('line'); readForUser(line,true); });
         overlay.appendChild(hit);
       }
       if (transcriptionLines().length) status.textContent='ಕೈಬರಹದ ಸಾಲನ್ನು ಸ್ಪರ್ಶಿಸಿ.';
@@ -871,7 +893,7 @@
       for (const item of queue) {
         if (generation!==playbackGeneration) { ok=false; break; }
         activate(item,item.text);
-        if (!await readForUser(item) || generation!==playbackGeneration) { ok=false; break; }
+        if (!await readForUser(item,eventName==='line') || generation!==playbackGeneration) { ok=false; break; }
       }
       finishAction(buttonId); track(eventName,ok,Date.now()-began);
       if (generation===playbackGeneration) { stage.classList.remove('playing'); document.querySelectorAll('.underline').forEach(n=>n.classList.remove('active')); }
