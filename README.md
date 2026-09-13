@@ -17,13 +17,13 @@ OCR engines or model names.
 
 1. Yellow changing to light green: repository-local Tesseract `kan+eng`, then
    Google Vision document OCR, is ready.
-2. Light green: the fast, compact vision-language understanding is ready.
-3. Green: the full contextual vision-language reading is ready.
-4. Dark green: an optional independent consensus review.
+2. Light green: a compact Luna understanding is ready.
+3. Green: the full contextual Terra reading is ready.
+4. Dark green: an optional strongest Sol review, requested by tapping the bar.
 
-The independent Astra review is temporarily disabled for cost evaluation, so
-the phone currently displays only the three enabled stages. Direct stage-four
-requests are rejected before a provider call is made.
+Stages 1–3 run automatically. Stage 4 never runs automatically and therefore
+cannot spend Sol credits until the user explicitly requests it. All three model
+stages use Standard processing; Astra is not part of this reader pipeline.
 
 The colors are processing/evidence stages, not calibrated accuracy percentages.
 
@@ -59,13 +59,13 @@ then sends one small keep-alive request. The server reloads the private stored
 image and starts Google Vision document OCR and the OpenAI image reader
 concurrently, so the phone does not upload the photograph two more times.
 Saved-page navigation reuses complete server evidence without new provider
-requests. The elapsed clock runs until the three enabled readers finish or
-fail. An incomplete saved image can resume through the same idempotent server
-endpoint, while recent failures use a short cooldown to avoid repeated paid
-calls. Astra stage four is disabled and cannot make new provider calls. An
+requests. The elapsed clock runs until the three automatic stages finish or
+fail, and runs again when an optional stage-four review is requested. An
+incomplete saved image can resume through the same idempotent server endpoint,
+while recent failures use a short cooldown to avoid repeated paid calls. An
 OpenAI stage remains gray when its server-side API secret is not configured or
 funded. Feedback persistence and
-feedback persistence remain future work. Anonymous tester enrollment uses a
+Anonymous tester enrollment uses a
 dedicated `?tester=a1`-style link; the choice persists on that phone and filters
 its saved gallery so test cohorts are not mixed.
 

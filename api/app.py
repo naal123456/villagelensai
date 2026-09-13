@@ -39,19 +39,22 @@ LOCAL_OCR_TIMEOUT_SECONDS = int(os.environ.get("VILLAGELENS_LOCAL_OCR_TIMEOUT_SE
 MAX_SPEECH_CHARACTERS = int(os.environ.get("VILLAGELENS_MAX_SPEECH_CHARACTERS", 500))
 ALLOWED_MEDIA_TYPES = {"image/jpeg", "image/png", "image/webp"}
 CAPTURE_BUCKET = os.environ.get("VILLAGELENS_CAPTURE_BUCKET", "")
-OPENAI_MODEL = os.environ.get("VILLAGELENS_OPENAI_MODEL", "gpt-5.6-sol")
-OPENAI_INSTANT_MODEL = os.environ.get("VILLAGELENS_OPENAI_INSTANT_MODEL", OPENAI_MODEL)
-OPENAI_ASTRA_MODEL = os.environ.get("VILLAGELENS_OPENAI_ASTRA_MODEL", "gpt-6-astra")
-ASTRA_ENABLED = os.environ.get("VILLAGELENS_ASTRA_ENABLED", "false").strip().lower() in {
-    "1", "true", "yes", "on",
-}
-OPENAI_INSTANT_SERVICE_TIER = os.environ.get("VILLAGELENS_OPENAI_SERVICE_TIER", "fast")
-OPENAI_FULL_SERVICE_TIER = os.environ.get("VILLAGELENS_OPENAI_FULL_SERVICE_TIER", "fast")
-OPENAI_ASTRA_SERVICE_TIER = os.environ.get("VILLAGELENS_OPENAI_ASTRA_SERVICE_TIER", "fast")
+OPENAI_STAGE_TWO_MODEL = os.environ.get("VILLAGELENS_OPENAI_STAGE_TWO_MODEL", "gpt-5.6-luna")
+OPENAI_STAGE_THREE_MODEL = os.environ.get("VILLAGELENS_OPENAI_STAGE_THREE_MODEL", "gpt-5.6-terra")
+OPENAI_STAGE_FOUR_MODEL = os.environ.get("VILLAGELENS_OPENAI_STAGE_FOUR_MODEL", "gpt-5.6-sol")
+OPENAI_STAGE_TWO_SERVICE_TIER = os.environ.get(
+    "VILLAGELENS_OPENAI_STAGE_TWO_SERVICE_TIER", "default"
+)
+OPENAI_STAGE_THREE_SERVICE_TIER = os.environ.get(
+    "VILLAGELENS_OPENAI_STAGE_THREE_SERVICE_TIER", "default"
+)
+OPENAI_STAGE_FOUR_SERVICE_TIER = os.environ.get(
+    "VILLAGELENS_OPENAI_STAGE_FOUR_SERVICE_TIER", "default"
+)
 OPENAI_TRANSLATION_MODEL = os.environ.get("VILLAGELENS_TRANSLATION_MODEL", "gpt-5-mini")
-OPENAI_ANALYSIS_VERSION = "context-v2"
-OPENAI_INSTANT_ANALYSIS_VERSION = "instant-v2"
-OPENAI_ASTRA_ANALYSIS_VERSION = "astra-review-v2"
+OPENAI_STAGE_TWO_ANALYSIS_VERSION = "luna-compact-v1"
+OPENAI_STAGE_THREE_ANALYSIS_VERSION = "terra-context-v1"
+OPENAI_STAGE_FOUR_ANALYSIS_VERSION = "sol-review-v1"
 KANNADA_TTS_VOICE = os.environ.get("VILLAGELENS_KANNADA_TTS_VOICE", "kn-IN-Standard-A")
 ACCESS_COOKIE_NAME = "villagelens_access_v2"
 TESTER_COOKIE_NAME = "villagelens_tester_v1"
@@ -423,7 +426,12 @@ def health() -> tuple[Response, int]:
         status="ok" if status == 200 else "not_ready",
         missing_models=missing,
         access_gate="enabled" if _access_configured() else "disabled",
-        astra_reader="enabled" if ASTRA_ENABLED else "disabled",
+        reader_models={
+            "stage_2": OPENAI_STAGE_TWO_MODEL,
+            "stage_3": OPENAI_STAGE_THREE_MODEL,
+            "stage_4": OPENAI_STAGE_FOUR_MODEL,
+        },
+        stage_4="manual",
     ), status
 
 
@@ -728,7 +736,11 @@ def _normalize_stage_three(value: dict[str, Any]) -> dict[str, Any]:
 
 
 def _current_stage_three(value: dict[str, Any] | None) -> bool:
-    return bool(value and value.get("analysis_version") == OPENAI_ANALYSIS_VERSION)
+    return bool(
+        value
+        and value.get("model") == OPENAI_STAGE_THREE_MODEL
+        and value.get("analysis_version") == OPENAI_STAGE_THREE_ANALYSIS_VERSION
+    )
 
 
 def _context_box(value: Any) -> list[float] | dict[str, float] | None:
@@ -912,15 +924,15 @@ def _openai_reader(
             },
         }
     if prior_analysis is not None:
-        schema["required"].extend(["agrees_with_sol", "material_disagreement_kn"])
+        schema["required"].extend(["agrees_with_prior", "material_disagreement_kn"])
         schema["properties"].update({
-            "agrees_with_sol": {"type": "boolean"},
+            "agrees_with_prior": {"type": "boolean"},
             "material_disagreement_kn": {"type": "string"},
         })
     encoded = base64.b64encode(data).decode("ascii")
-    selected_model = model or OPENAI_MODEL
-    selected_tier = service_tier or OPENAI_FULL_SERVICE_TIER
-    selected_version = analysis_version or OPENAI_ANALYSIS_VERSION
+    selected_model = model or OPENAI_STAGE_THREE_MODEL
+    selected_tier = service_tier or OPENAI_STAGE_THREE_SERVICE_TIER
+    selected_version = analysis_version or OPENAI_STAGE_THREE_ANALYSIS_VERSION
     prompt_prefix = ""
     if quick:
         audience = (
@@ -942,10 +954,10 @@ def _openai_reader(
         )[:7000]
         answer_language = "English" if output_language == "en" else "Kannada"
         prompt_prefix = ("You are the strongest independent reviewer. Inspect the image yourself, compare the "
-                         f"earlier Sol analysis below, correct it when needed, and return the best final {answer_language} "
-                         f"explanation. Set agrees_with_sol false and describe the material disagreement in {answer_language} "
+                         f"earlier analysis below, correct it when needed, and return the best final {answer_language} "
+                         f"explanation. Set agrees_with_prior false and describe the material disagreement in {answer_language} "
                          "when identity, important text or numbers, purpose, safety, or teaching meaning differs. "
-                         f"Earlier Sol analysis: {prior}\n")
+                         f"Earlier analysis: {prior}\n")
     language_override = ""
     if output_language == "en":
         language_override = (
@@ -956,7 +968,7 @@ def _openai_reader(
         )
     payload = {"model": selected_model, "service_tier": selected_tier,
                "store": False,
-               "reasoning": {"effort": "low" if selected_model == OPENAI_ASTRA_MODEL else "none"},
+               "reasoning": {"effort": "low" if prior_analysis is not None else "none"},
                "max_output_tokens": 700 if quick else 3500,
                "input": [{"role": "user", "content": [
                    {"type": "input_text", "text": language_override + prompt_prefix + ("" if quick else """Help a low-literacy Kannada-speaking adult understand this image. Read clearly visible Kannada and English for comprehension. Do not recreate all OCR boxes. Translate each distinct clearly visible English word into simple Kannada. Identify up to six useful visible objects and give each one bounding box [left,top,width,height] normalized 0 to 1000. Object boxes must tightly localize a touchable object or useful sub-part; never return the whole image, page, background, ground, or soil as an object box. If this is handwriting or a handwritten list, first identify its likely purpose and organization, such as a menu, shopping list, homework, names, dates, or tasks. Transcribe every readable line exactly into transcription_kn with a line box and mark uncertain lines; for uncertain words give a plausible reading only when the visible letters and list context support it, otherwise abstain. Distinguish recognition failure from blur, distance, perspective, cropping, and low contrast, and give specific capture guidance. Never label readable Kannada as another script. Treat joined measurements such as 300V, 2.0 HP, 50Hz, 10A, kg, ml, and degrees C as semantic units: preserve the printed characters and explain the unit naturally in Kannada. Explain what the image is, its purpose, important details, action, safety, and uncertainty in short natural spoken Kannada. For a textbook or educational page, use all readable text and pictures to teach the page rather than merely naming it or repeating its first lines: identify the central topic, connect the main ideas, explain difficult Kannada terms in very simple conversational Kannada, say why the topic matters, and give one concrete example when the page supports it. If cropping prevents a complete lesson, describe exactly which edge is missing and do not invent the missing text. Divide the explanation into three to six spoken_sections that together form the useful lesson, including any important uncertainty, with each section tied to the image region it discusses so the interface can highlight evidence while speaking. brief_spoken_kn is the most useful one- or two-sentence global answer; for an educational page detailed_spoken_kn should be five to eight short teaching sentences, while other images may be shorter. Do not mechanically repeat OCR. For calendars, summarize month, year, highlighted date and notable events rather than reciting the grid. For electrical equipment or medicine, report only visible or strongly supported identity, purpose, and ratings; never advise wiring, energizing, repair, or medication. Set confidence high only when important identity, text, numbers, and purpose are clear; set needs_independent_review true for handwriting uncertainty, safety-critical content, ambiguous units, or any important doubt. Never invent hidden facts, intent, diagnosis, species, or disease.""")},
@@ -972,7 +984,7 @@ Explain what the image is, what it does, its important details, any useful actio
     response = requests.post(
         "https://api.openai.com/v1/responses", json=payload,
         headers={"Authorization": f"Bearer {api_key}"},
-        timeout=85 if selected_model == OPENAI_ASTRA_MODEL else 75,
+        timeout=85 if prior_analysis is not None else 75,
     )
     if response.status_code == 429 and selected_tier == "fast":
         app.logger.warning("OpenAI Fast reader returned HTTP 429; retrying on default tier")
@@ -980,7 +992,7 @@ Explain what the image is, what it does, its important details, any useful actio
         response = requests.post(
             "https://api.openai.com/v1/responses", json=retry_payload,
             headers={"Authorization": f"Bearer {api_key}"},
-            timeout=85 if selected_model == OPENAI_ASTRA_MODEL else 75,
+            timeout=85 if prior_analysis is not None else 75,
         )
     if response.status_code != 200:
         app.logger.warning("OpenAI reader failed with HTTP %s", response.status_code)
@@ -1011,10 +1023,10 @@ Explain what the image is, what it does, its important details, any useful actio
             "quality_validated": quality_validated and context_validated}
     if prior_analysis is not None:
         disagreement = str(parsed.get("material_disagreement_kn", "")).strip()
-        result["agrees_with_sol"] = bool(parsed.get("agrees_with_sol", False))
+        result["agrees_with_prior"] = bool(parsed.get("agrees_with_prior", False))
         result["material_disagreement_kn"] = disagreement
         result["consensus_validated"] = bool(
-            result["quality_validated"] and result["agrees_with_sol"] and not disagreement
+            result["quality_validated"] and result["agrees_with_prior"] and not disagreement
         )
     return result
 
@@ -1062,7 +1074,8 @@ def _openai_question(
         "Kannada number words and explain its unit or calendar role; do not merely repeat digits. "
     )
     payload = {
-        "model": OPENAI_MODEL, "store": False, "reasoning": {"effort": "none"},
+        "model": OPENAI_STAGE_THREE_MODEL, "service_tier": OPENAI_STAGE_THREE_SERVICE_TIER,
+        "store": False, "reasoning": {"effort": "none"},
         "max_output_tokens": 1200,
         "input": [{"role": "user", "content": [
             {"type": "input_text", "text": (
@@ -1341,14 +1354,15 @@ def _current_reader_stage(
     if stage == 2:
         return (
             value.get("reader") == "vision_language"
-            and value.get("analysis_version") == OPENAI_INSTANT_ANALYSIS_VERSION
+            and value.get("model") == OPENAI_STAGE_TWO_MODEL
+            and value.get("analysis_version") == OPENAI_STAGE_TWO_ANALYSIS_VERSION
         )
     if stage == 3:
-        return _current_stage_three(value) and value.get("model") != OPENAI_ASTRA_MODEL
+        return _current_stage_three(value)
     return (
         stage == 4 and value.get("reader") == "vision_language"
-        and value.get("model") == OPENAI_ASTRA_MODEL
-        and value.get("analysis_version") == OPENAI_ASTRA_ANALYSIS_VERSION
+        and value.get("model") == OPENAI_STAGE_FOUR_MODEL
+        and value.get("analysis_version") == OPENAI_STAGE_FOUR_ANALYSIS_VERSION
     )
 
 
@@ -1391,8 +1405,6 @@ def _process_stored_stage(
 ) -> dict[str, Any]:
     if stage not in {1, 2, 3, 4}:
         raise ValueError("READER_NOT_FOUND")
-    if stage == 4 and not ASTRA_ENABLED:
-        raise RuntimeError("READER_DISABLED")
     bucket = _storage_bucket()
     if bucket is None:
         raise FileNotFoundError
@@ -1435,24 +1447,24 @@ def _process_stored_stage(
             elif stage == 2:
                 value = _openai_reader(
                     data, "image/jpeg", image.width, image.height, stage=2,
-                    model=OPENAI_INSTANT_MODEL, service_tier=OPENAI_INSTANT_SERVICE_TIER,
-                    analysis_version=OPENAI_INSTANT_ANALYSIS_VERSION, quick=True,
+                    model=OPENAI_STAGE_TWO_MODEL, service_tier=OPENAI_STAGE_TWO_SERVICE_TIER,
+                    analysis_version=OPENAI_STAGE_TWO_ANALYSIS_VERSION, quick=True,
                     output_language=output_language,
                 )
             elif stage == 3:
                 value = _openai_reader(
                     data, "image/jpeg", image.width, image.height, stage=3,
-                    model=OPENAI_MODEL, service_tier=OPENAI_FULL_SERVICE_TIER,
-                    analysis_version=OPENAI_ANALYSIS_VERSION,
+                    model=OPENAI_STAGE_THREE_MODEL, service_tier=OPENAI_STAGE_THREE_SERVICE_TIER,
+                    analysis_version=OPENAI_STAGE_THREE_ANALYSIS_VERSION,
                     output_language=output_language,
                 )
             else:
-                sol = _process_stored_stage(capture_id, tester_id, 3, output_language)
+                prior = _process_stored_stage(capture_id, tester_id, 3, output_language)
                 value = _openai_reader(
                     data, "image/jpeg", image.width, image.height, stage=4,
-                    model=OPENAI_ASTRA_MODEL, service_tier=OPENAI_ASTRA_SERVICE_TIER,
-                    analysis_version=OPENAI_ASTRA_ANALYSIS_VERSION,
-                    prior_analysis=sol,
+                    model=OPENAI_STAGE_FOUR_MODEL, service_tier=OPENAI_STAGE_FOUR_SERVICE_TIER,
+                    analysis_version=OPENAI_STAGE_FOUR_ANALYSIS_VERSION,
+                    prior_analysis=prior,
                     output_language=output_language,
                 )
         except Exception as exc:
@@ -1496,12 +1508,6 @@ def _process_stored_capture(
             except Exception as exc:
                 app.logger.exception("Stored reader stage %s failed for capture %s", stage, capture_id)
                 errors[stage] = str(exc) if isinstance(exc, RuntimeError) else f"STAGE_{stage}_UNAVAILABLE"
-    if ASTRA_ENABLED and 3 in stages:
-        try:
-            stages[4] = _process_stored_stage(capture_id, tester_id, 4, output_language)
-        except Exception as exc:
-            app.logger.exception("Stored reader stage 4 failed for capture %s", capture_id)
-            errors[4] = str(exc) if isinstance(exc, RuntimeError) else "STAGE_4_UNAVAILABLE"
     return stages, errors
 
 
@@ -1776,14 +1782,8 @@ def process_captured_image(capture_id: str) -> tuple[Response, int]:
             capture_id=capture_id,
             stages={str(stage): value for stage, value in stages.items()},
             errors={str(stage): error for stage, error in errors.items()},
-            astra_enabled=ASTRA_ENABLED,
-            complete=(
-                all(stage in stages for stage in (1, 2, 3))
-                and (
-                    not ASTRA_ENABLED
-                    or 4 in stages and stages[4].get("consensus_validated") is True
-                )
-            ),
+            stage_4="manual",
+            complete=all(stage in stages for stage in (1, 2, 3)),
         ), 200
     except FileNotFoundError:
         return jsonify(error="CAPTURE_NOT_FOUND"), 404
@@ -1800,8 +1800,6 @@ def process_captured_stage(capture_id: str, stage: int) -> tuple[Response, int]:
         return jsonify(error="CAPTURE_NOT_FOUND"), 404
     if stage not in {1, 2, 3, 4}:
         return jsonify(error="READER_NOT_FOUND"), 404
-    if stage == 4 and not ASTRA_ENABLED:
-        return jsonify(error="READER_DISABLED"), 409
     try:
         output_language = _output_language()
         result = (
@@ -2079,15 +2077,15 @@ def cloud_read(stage: int) -> tuple[Response, int]:
         elif stage == 2:
             payload = _openai_reader(
                 normalized.getvalue(), "image/jpeg", image.width, image.height, stage=2,
-                model=OPENAI_INSTANT_MODEL, service_tier=OPENAI_INSTANT_SERVICE_TIER,
-                analysis_version=OPENAI_INSTANT_ANALYSIS_VERSION, quick=True,
+                model=OPENAI_STAGE_TWO_MODEL, service_tier=OPENAI_STAGE_TWO_SERVICE_TIER,
+                analysis_version=OPENAI_STAGE_TWO_ANALYSIS_VERSION, quick=True,
                 output_language=output_language,
             )
         else:
             payload = _openai_reader(
                 normalized.getvalue(), "image/jpeg", image.width, image.height, stage=3,
-                model=OPENAI_MODEL, service_tier=OPENAI_FULL_SERVICE_TIER,
-                analysis_version=OPENAI_ANALYSIS_VERSION,
+                model=OPENAI_STAGE_THREE_MODEL, service_tier=OPENAI_STAGE_THREE_SERVICE_TIER,
+                analysis_version=OPENAI_STAGE_THREE_ANALYSIS_VERSION,
                 output_language=output_language,
             )
         payload["tester_id"] = _tester_id() or "unassigned"

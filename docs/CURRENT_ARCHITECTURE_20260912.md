@@ -1,9 +1,8 @@
 # VillageLensAI current architecture
 
-Status: as built and deployed on 2026-09-12. This document describes the
-running proof of concept, not the proposed lower-cost model cascade. Historical
-deployment records in this directory explain how individual capabilities
-arrived.
+Status: updated for the 2026-09-13 cost-controlled reader release. This document
+describes the running proof of concept. Historical deployment records in this
+directory explain how individual capabilities arrived.
 
 ## Product boundary
 
@@ -123,8 +122,15 @@ sequenceDiagram
         API->>OpenAI: full structured image understanding
         OpenAI-->>API: meaning, translation, objects, teaching, safety
     end
-    API->>Storage: versioned stage JSON names
+    API->>Storage: stage JSON with model/version metadata
     API-->>Phone: each stage independently
+    opt user taps fourth bar after stage 3
+        Phone->>API: POST /api/captures/:id/process/4
+        API->>OpenAI: Sol Standard review of image + Terra result
+        OpenAI-->>API: corrected strongest explanation
+        API->>Storage: versioned stage-4 JSON
+        API-->>Phone: strongest reading
+    end
 ```
 
 The source image is uploaded once. Retained-stage endpoints reload the private
@@ -134,20 +140,20 @@ instance.
 
 ## Current evidence stages
 
-The browser currently displays three bars because Astra is paused.
+The browser displays four bars. The first three run automatically; the fourth
+is an explicit user request.
 
 | Bar | Current implementation | State and output |
 |---|---|---|
 | 1 | Repository-pinned Tesseract `kan+eng`, strengthened by Google Vision document OCR | Words, lines, mixed-script geometry and immediate reading |
-| 2 | `gpt-5.6-sol`, Fast service tier, compact `instant-v2` contract | Fast identity, purpose, up to three useful details, confidence |
-| 3 | `gpt-5.6-sol`, Fast service tier, full `context-v2` contract | Translation, scene meaning, objects, handwriting/page teaching, numbers, units, safety and uncertainty |
-| 4 | Formerly `gpt-6-astra` independent review | Disabled server-side and hidden; direct calls are rejected before provider use |
+| 2 | `gpt-5.6-luna`, Standard tier, compact `luna-compact-v1` contract | Fast identity, purpose, up to three useful details, confidence |
+| 3 | `gpt-5.6-terra`, Standard tier, full `terra-context-v1` contract | Translation, scene meaning, objects, handwriting/page teaching, numbers, units, safety and uncertainty |
+| 4 | `gpt-5.6-sol`, Standard tier, `sol-review-v1` contract | On-demand strongest review that compares and corrects the Terra result |
 
-“Instant” is an application contract, not a cheaper OpenAI model. Bars 2 and 3
-currently use the same Sol model with different output schemas and budgets.
-
-The planned cost-controlled cascade—Luna, Terra, then selective standard-tier
-Sol—is a target architecture and must be evaluated before promotion.
+Stages 1–3 may run concurrently for responsiveness. Stage 4 is never scheduled
+by page loading, navigation, capture, or the bulk processing endpoint. The user
+must tap the fourth bar after stage 3 is available. Completed evidence is reused
+only when output language, exact model role, and analysis version match.
 
 ## Structured inference contract
 
@@ -235,8 +241,8 @@ phones from repeatedly spending money during provider failures.
 
 ## Known constraints and active risks
 
-1. Bars 2 and 3 duplicate Sol-class image processing and currently request the
-   Fast tier, which is costly relative to the field workload.
+1. Stages 2 and 3 still send the same image to two cloud models; evaluation must
+   determine whether confidence routing can safely skip stage 3 for easy cases.
 2. Historical provider usage was not retained per capture; exact per-user token
    cost requires new response-usage accounting.
 3. Google Gemini model experiments have not been reliable enough for production;

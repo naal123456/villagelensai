@@ -24,8 +24,10 @@
     button.working { border-color: #62d7ff; background: #174b5f; animation: working 1s infinite alternate; }
     @keyframes working { to { box-shadow: 0 0 15px #62d7ff; } }
     button:focus-visible { outline: 4px solid #65d6ff; outline-offset: 2px; }
-    .quality { display: grid; grid-template-columns: repeat(3, 1fr) auto auto; gap: 6px; align-items: center; }
-    .bar { height: 14px; border: 1px solid #64717d; border-radius: 5px; background: #46515b; }
+    .quality { display: grid; grid-template-columns: repeat(4, 1fr) auto auto; gap: 6px; align-items: center; }
+    .bar { height: 14px; min-height: 14px; padding: 0; border: 1px solid #64717d; border-radius: 5px; background: #46515b; }
+    #quality-4 { cursor: pointer; }
+    #quality-4:not(.ready):not(.failed) { border-color: #55d38a; box-shadow: inset 0 0 0 1px #167a45; }
     #quality-1.local { background: #e5bc27; border-color: #ffe071; }
     #quality-1.ready { background: #b9e8a9; }
     #quality-2.ready { background: #82d996; } #quality-3.ready { background: #39ad68; }
@@ -111,9 +113,9 @@
       </nav>
       <div class="quality" aria-label="Reading confidence">
         <span class="bar" id="quality-1"></span><span class="bar" id="quality-2"></span>
-        <span class="bar" id="quality-3"></span><span class="bar" id="quality-4" hidden></span>
+        <span class="bar" id="quality-3"></span><button class="bar" id="quality-4" aria-label="Request strongest reading" data-tip="Request strongest reading"></button>
         <span id="quality-timer">—</span>
-        <span id="app-version" aria-label="App version">v2026.09.12.1</span>
+        <span id="app-version" aria-label="App version">v2026.09.13.1</span>
       </div>
       <p id="mic-status" role="status" aria-live="assertive" hidden></p>
     </section>
@@ -177,10 +179,10 @@
     const meaningFields=['summary_kn','brief_spoken_kn','detailed_spoken_kn','scene_type','objects',
       'what_is_it_kn','what_it_does_kn','important_points_kn','action_needed_kn','warning_kn','uncertainty_kn',
       'transcription_kn','spoken_sections','verified_regions','confidence','needs_independent_review'];
-    const analysisVersion='context-v2';
-    const instantAnalysisVersion='instant-v2',astraAnalysisVersion='astra-review-v2';
-    const astraEnabled=false,enabledStages=astraEnabled?[1,2,3,4]:[1,2,3];
-    const appVersion='2026-09-12.1';
+    const stageTwoAnalysisVersion='luna-compact-v1';
+    const stageThreeAnalysisVersion='terra-context-v1',stageFourAnalysisVersion='sol-review-v1';
+    const automaticStages=[1,2,3],enabledStages=[1,2,3,4];
+    const appVersion='2026-09-13.1';
     const captureBurstFrames=4;
     let speechVoices=[];
     const testerId=configureTesterId();
@@ -307,19 +309,18 @@
     function endTimer(owner) {
       if (timerOwner!==owner) return;
       clearInterval(timerId); timerId=0;
-      const review=astraEnabled?readCachedStage(owner,4):null;
-      const complete=astraEnabled?review&&review.consensus_validated===true:Boolean(readCachedStage(owner,3));
+      const complete=Boolean(readCachedStage(owner,3));
       timer.textContent=`${Math.round((Date.now()-started)/1000)}s ${complete?'✓':'!'}`;
       timerOwner=null;
     }
-    function cacheKey(item,stageNumber) { return `villagelens.reader.v1:${outputLanguage}:${item.id}:${stageNumber}`; }
+    function cacheKey(item,stageNumber) { return `villagelens.reader.v2:${outputLanguage}:${item.id}:${stageNumber}`; }
     function failureKey(item,stageNumber) { return `villagelens.reader.failure.v1:${outputLanguage}:${item.id}:${stageNumber}`; }
     function readCachedStage(item,stageNumber) {
       let value=item[`stage${stageNumber}`]||null;
       try { value=value||JSON.parse(localStorage.getItem(cacheKey(item,stageNumber))||'null'); } catch (_) { value=null; }
-      if (stageNumber===2&&value&&value.analysis_version!==instantAnalysisVersion) return null;
-      if (stageNumber===3&&value&&value.analysis_version!==analysisVersion) return null;
-      if (stageNumber===4&&value&&value.analysis_version!==astraAnalysisVersion) return null;
+      if (stageNumber===2&&value&&value.analysis_version!==stageTwoAnalysisVersion) return null;
+      if (stageNumber===3&&value&&value.analysis_version!==stageThreeAnalysisVersion) return null;
+      if (stageNumber===4&&value&&value.analysis_version!==stageFourAnalysisVersion) return null;
       if (stageNumber>1&&value&&String(value.output_language||'kn')!==outputLanguage) return null;
       return value;
     }
@@ -354,7 +355,7 @@
         if (gallery[galleryIndex]===item&&result) copyMeaning(result,item);
       }
       if (gallery[galleryIndex]===item) {
-        const validated=stageNumber!==4||value.consensus_validated===true;
+        const validated=stageNumber!==4||value.quality_validated===true;
         $('quality-'+stageNumber).classList.toggle('ready',validated);
         $('quality-'+stageNumber).classList.toggle('failed',!validated);
         if (stageNumber===1) $('quality-1').classList.remove('local');
@@ -762,9 +763,8 @@
           if (cached) applyReaderResult(item,stageNumber,cached);
         }
         renderConversation(item); restoreQuestionFocus(item);
-        const review=astraEnabled?readCachedStage(item,4):null;
-        timer.textContent=review&&review.consensus_validated===true?'review ✓':(readCachedStage(item,3)?'meaning ✓':(readCachedStage(item,1)?'OCR ✓':'local'));
-        if (item.kind==='capture'&&enabledStages.some(stageNumber=>!readCachedStage(item,stageNumber))) {
+        timer.textContent=readCachedStage(item,4)?'best ✓':(readCachedStage(item,3)?'meaning ✓':(readCachedStage(item,1)?'OCR ✓':'local'));
+        if (item.kind==='capture'&&automaticStages.some(stageNumber=>!readCachedStage(item,stageNumber))) {
           startCloudReaders(item);
         }
       }
@@ -1007,14 +1007,13 @@
       }
     }
     async function startCloudReaders(item,blob) {
-      const missing=enabledStages.filter(stageNumber=>!readCachedStage(item,stageNumber));
+      const missing=automaticStages.filter(stageNumber=>!readCachedStage(item,stageNumber));
       const cooling=missing.filter(stageNumber=>coolingDown(item,stageNumber));
       cooling.filter(stageNumber=>stageNumber!==1).forEach(stageNumber=>$('quality-'+stageNumber).classList.add('failed'));
       const requested=missing.filter(stageNumber=>!cooling.includes(stageNumber));
       if (!missing.length) {
         endTimer(item);
-        const review=astraEnabled?readCachedStage(item,4):null;
-        status.textContent=review&&review.consensus_validated===true?'4/4 reading stages ready.':'3/3 reading stages ready.';
+        status.textContent=readCachedStage(item,4)?'4/4 reading stages ready.':'3/4 reading stages ready. Tap the fourth bar for the strongest reading.';
         return;
       }
       if (!requested.length) { endTimer(item); status.textContent='ಮೊದಲ ಓದುವಿಕೆ ಸಿದ್ಧವಾಗಿದೆ. Cloud reading is cooling down.'; return; }
@@ -1024,24 +1023,20 @@
       item.cloudPromise=(async()=>{
       try {
         const captureId=/^[0-9a-f]{32}$/.test(item.id)?item.id:'';
-        const primary=requested.filter(stageNumber=>stageNumber<4);
         const completed=[];
         if (captureId&&(item.retained||item.result&&item.result.retained)) {
-          const outcomes=await Promise.all(primary.map(stageNumber=>processStoredReader(item,stageNumber)));
-          primary.forEach((stageNumber,index)=>completed.push({stageNumber,outcome:outcomes[index]}));
-          if (requested.includes(4)&&readCachedStage(item,3)) {
-            completed.push({stageNumber:4,outcome:await processStoredReader(item,4)});
-          }
+          const outcomes=await Promise.all(requested.map(stageNumber=>processStoredReader(item,stageNumber)));
+          requested.forEach((stageNumber,index)=>completed.push({stageNumber,outcome:outcomes[index]}));
         } else {
           if (!blob) { const response=await fetch(item.image_url); if (!response.ok) throw new Error('IMAGE_FAILED'); blob=await response.blob(); }
-          const outcomes=await Promise.all(primary.map(stageNumber=>callReader(stageNumber,blob,captureId,item)));
-          primary.forEach((stageNumber,index)=>completed.push({stageNumber,outcome:outcomes[index]}));
+          const outcomes=await Promise.all(requested.map(stageNumber=>callReader(stageNumber,blob,captureId,item)));
+          requested.forEach((stageNumber,index)=>completed.push({stageNumber,outcome:outcomes[index]}));
         }
         if (gallery[galleryIndex]===item) {
           completed.forEach(({stageNumber,outcome})=>{ if (!outcome.ok&&stageNumber!==1) $('quality-'+stageNumber).classList.add('failed'); });
           const ready=1+enabledStages.filter(stageNumber=>stageNumber>1).filter(stageNumber=>{
             const cached=readCachedStage(item,stageNumber);
-            return Boolean(cached)&&(stageNumber!==4||cached.consensus_validated===true);
+            return Boolean(cached)&&(stageNumber!==4||cached.quality_validated===true);
           }).length;
           status.textContent=`${ready}/${enabledStages.length} reading stages ready.`;
         }
@@ -1050,6 +1045,38 @@
       } finally { endTimer(item); item.cloudPromise=null; }
       })();
       await item.cloudPromise;
+    }
+    async function requestStrongestReading() {
+      const item=gallery[galleryIndex];
+      if (!item) return;
+      if (readCachedStage(item,4)) {
+        status.textContent='4/4 reading stages ready.'; return;
+      }
+      const retained=item.kind==='capture'&&/^[0-9a-f]{32}$/.test(item.id)&&
+        (item.retained===true||item.result&&item.result.retained===true);
+      if (!retained) {
+        status.textContent=englishMode?'The strongest reading is available for saved photos.':'ಉಳಿಸಿದ ಚಿತ್ರಕ್ಕೆ ಮಾತ್ರ ಅತ್ಯುತ್ತಮ ಓದುವಿಕೆ ಲಭ್ಯ.';
+        return;
+      }
+      if (!readCachedStage(item,3)) {
+        status.textContent=englishMode?'Wait for the third bar first.':'ಮೊದಲು ಮೂರನೇ ಹಸಿರು ಪಟ್ಟಿಗಾಗಿ ಕಾಯಿರಿ.';
+        return;
+      }
+      if (coolingDown(item,4)) {
+        $('quality-4').classList.add('failed');
+        status.textContent=englishMode?'The strongest reader is cooling down. Try again shortly.':'ಅತ್ಯುತ್ತಮ ಓದುವಿಕೆ ಸ್ವಲ್ಪ ವಿರಾಮದಲ್ಲಿದೆ. ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.';
+        return;
+      }
+      beginTimer(item); working('quality-4',true);
+      status.textContent=englishMode?'Preparing the strongest reading…':'ಅತ್ಯುತ್ತಮ ಓದುವಿಕೆ ಸಿದ್ಧವಾಗುತ್ತಿದೆ…';
+      const outcome=await processStoredReader(item,4);
+      working('quality-4',false); endTimer(item);
+      if (!outcome.ok) {
+        $('quality-4').classList.add('failed');
+        status.textContent=englishMode?'Strongest reading was not completed. Tap the fourth bar to retry.':'ಅತ್ಯುತ್ತಮ ಓದುವಿಕೆ ಪೂರ್ಣವಾಗಲಿಲ್ಲ. ಮತ್ತೆ ನಾಲ್ಕನೇ ಪಟ್ಟಿಯನ್ನು ಒತ್ತಿ.';
+        return;
+      }
+      status.textContent='4/4 reading stages ready.';
     }
     async function useCapture(file,captureMeta={}) {
       if (!file) return; stop(); defaultWordMode(); const navigation=++navigationGeneration; resetQuality(); status.textContent='ಚಿತ್ರವನ್ನು ಓದುತ್ತಿದೆ…';
@@ -1203,6 +1230,7 @@
     }
     $('mode-word').onclick=()=>setMode('word','mode-word'); $('mode-sentence').onclick=()=>setMode('sentence','mode-sentence');
     $('mode-translate').onclick=()=>setMode('translate','mode-translate'); $('camera').onclick=openGuidedCamera;
+    $('quality-4').onclick=requestStrongestReading;
     $('play-words').onclick=()=>result&&play(result.words||[],'play-words','word');
     $('play-sentences').onclick=()=>result&&play(effectiveLines(),'play-sentences','line');
     $('select-object').onclick=chooseObjectMode; $('infer-global').onclick=explainGlobal; $('ask').onclick=askImageQuestion; $('stop').onclick=()=>stop();

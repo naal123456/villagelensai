@@ -11,7 +11,8 @@ from PIL import Image
 from api.app import (
     _access_token, _filter_local_regions, _normalize_stage_three,
     _openai_question, _openai_reader, _openai_transcribe, _openai_translate, _parse_tsv,
-    _process_stored_capture, _process_stored_stage, _saved_scene_identity_answer,
+    _process_stored_capture, _process_stored_stage, _current_reader_stage,
+    _saved_scene_identity_answer,
     _tester_link_token, app,
 )
 
@@ -57,10 +58,10 @@ class ApiTests(unittest.TestCase):
         self.assertIn(b'id="select-object"', response.data)
         self.assertIn(b'id="infer-global"', response.data)
         self.assertIn(b'id="ask"', response.data)
-        self.assertIn(b'id="quality-4" hidden', response.data)
+        self.assertIn(b'id="quality-4" aria-label="Request strongest reading"', response.data)
         self.assertIn(b'id="owner-badge"', response.data)
         self.assertIn(b'id="app-version"', response.data)
-        self.assertIn(b'v2026.09.12.1', response.data)
+        self.assertIn(b'v2026.09.13.1', response.data)
         self.assertIn(b"'UNASSIGNED \xc2\xb7 OLDER CAPTURE'", response.data)
         self.assertIn(b"`${owner}${ownerName}`", response.data)
         self.assertIn(b'navigationGeneration', response.data)
@@ -81,10 +82,10 @@ class ApiTests(unittest.TestCase):
         self.assertIn(b'speechAudioCache', response.data)
         self.assertIn(b'keepalive:true', response.data)
         self.assertIn(b'/process/${stageNumber}', response.data)
-        self.assertIn(b'Promise.all(primary.map(stageNumber=>processStoredReader', response.data)
-        self.assertIn(b"const astraEnabled=false", response.data)
-        self.assertIn(b"const missing=enabledStages", response.data)
-        self.assertIn(b"requested.includes(4)&&readCachedStage(item,3)", response.data)
+        self.assertIn(b'Promise.all(requested.map(stageNumber=>processStoredReader', response.data)
+        self.assertIn(b"const automaticStages=[1,2,3],enabledStages=[1,2,3,4]", response.data)
+        self.assertIn(b"const missing=automaticStages", response.data)
+        self.assertIn(b"function requestStrongestReading", response.data)
         self.assertIn(b'item.cloudStartedAt=item.cloudAttempted?Date.now()', response.data)
         self.assertIn(b'nextCaptureSequence===captureSequence+1', response.data)
         self.assertIn(b'NOT SAVED', response.data)
@@ -130,7 +131,7 @@ class ApiTests(unittest.TestCase):
         self.assertIn(b"source:'guided-camera-v1'", response.data)
         self.assertIn(b"X-VillageLens-Capture-Quality", response.data)
         self.assertIn(b'function selectableObjects', response.data)
-        self.assertIn(b"?'review \xe2\x9c\x93'", response.data)
+        self.assertIn(b"?'best \xe2\x9c\x93'", response.data)
         self.assertIn(b'function clearControls', response.data)
         self.assertIn(b'function startAction', response.data)
         self.assertIn(b'function defaultWordMode', response.data)
@@ -141,7 +142,7 @@ class ApiTests(unittest.TestCase):
         self.assertIn(b'villagelens.translation.v1:', response.data)
         self.assertIn(b"if (activeControl===id) { stop(); return false; }", response.data)
         self.assertIn(b"result.detailed_spoken_kn", response.data)
-        self.assertIn(b"analysisVersion='context-v2'", response.data)
+        self.assertIn(b"stageThreeAnalysisVersion='terra-context-v1'", response.data)
         self.assertIn(b"function groupedWords", response.data)
         self.assertIn(b"const semanticGroup=groupedWords", response.data)
         self.assertIn(b"function renderObjects", response.data)
@@ -166,7 +167,7 @@ class ApiTests(unittest.TestCase):
         self.assertIn(b"Add to Home Screen", response.data)
         self.assertNotIn(b'id="mode-meaning"', response.data)
         self.assertNotIn(b'id="play-meanings"', response.data)
-        self.assertIn(b"?'review \xe2\x9c\x93'", response.data)
+        self.assertIn(b"?'best \xe2\x9c\x93'", response.data)
         stage_three = response.data.split(b"if ([2,3,4].includes(stageNumber))", 1)[1].split(
             b"if (gallery[galleryIndex]===item)", 1,
         )[0]
@@ -188,11 +189,34 @@ class ApiTests(unittest.TestCase):
         self.assertIn(b"Swipe the page", response.data)
         self.assertIn("ಅ ಆ ಇ".encode(), response.data)
 
-    def test_health_reports_astra_disabled(self) -> None:
+    def test_health_reports_model_cascade(self) -> None:
         response = self.client.get("/health")
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.get_json()["astra_reader"], "disabled")
+        self.assertEqual(response.get_json()["reader_models"], {
+            "stage_2": "gpt-5.6-luna",
+            "stage_3": "gpt-5.6-terra",
+            "stage_4": "gpt-5.6-sol",
+        })
+        self.assertEqual(response.get_json()["stage_4"], "manual")
+
+    def test_old_sol_and_astra_evidence_is_not_current(self) -> None:
+        self.assertFalse(_current_reader_stage({
+            "reader": "vision_language", "model": "gpt-5.6-sol",
+            "analysis_version": "instant-v2",
+        }, 2))
+        self.assertFalse(_current_reader_stage({
+            "reader": "vision_language", "model": "gpt-5.6-sol",
+            "analysis_version": "context-v2",
+        }, 3))
+        self.assertFalse(_current_reader_stage({
+            "reader": "vision_language", "model": "gpt-6-astra",
+            "analysis_version": "astra-review-v2",
+        }, 4))
+        self.assertTrue(_current_reader_stage({
+            "reader": "vision_language", "model": "gpt-5.6-luna",
+            "analysis_version": "luna-compact-v1",
+        }, 2))
 
     def test_english_reader_page_is_isolated_at_b(self) -> None:
         response = self.client.get("/b/?tester=a3")
@@ -736,10 +760,10 @@ class ApiTests(unittest.TestCase):
 
     @patch("api.app._store_reader_evidence")
     @patch("api.app._openai_reader")
-    def test_stage_two_uses_sol_fast_first_pass(self, reader: object, store: object) -> None:
+    def test_stage_two_uses_luna_standard_first_pass(self, reader: object, store: object) -> None:
         reader.return_value = {
             "schema": "villagelens.reader.v1", "stage": 2,
-            "reader": "vision_language", "analysis_version": "instant-v2",
+            "reader": "vision_language", "analysis_version": "luna-compact-v1",
             "summary_kn": "ಇದು ಪುಸ್ತಕ.",
         }
         capture_id = "9" * 32
@@ -750,9 +774,10 @@ class ApiTests(unittest.TestCase):
             )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.get_json()["analysis_version"], "instant-v2")
+        self.assertEqual(response.get_json()["analysis_version"], "luna-compact-v1")
         self.assertEqual(reader.call_args.kwargs["stage"], 2)
-        self.assertEqual(reader.call_args.kwargs["service_tier"], "fast")
+        self.assertEqual(reader.call_args.kwargs["model"], "gpt-5.6-luna")
+        self.assertEqual(reader.call_args.kwargs["service_tier"], "default")
         self.assertTrue(reader.call_args.kwargs["quick"])
         store.assert_called_once_with(capture_id, 2, reader.return_value)
 
@@ -772,8 +797,8 @@ class ApiTests(unittest.TestCase):
         with patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"}):
             value = _openai_reader(
                 image_bytes(), "image/jpeg", 320, 120, stage=2,
-                model="gpt-5.6-sol", service_tier="fast",
-                analysis_version="instant-v2", quick=True,
+                model="gpt-5.6-luna", service_tier="default",
+                analysis_version="luna-compact-v1", quick=True,
             )
 
         payload = provider.call_args.kwargs["json"]
@@ -800,8 +825,8 @@ class ApiTests(unittest.TestCase):
         with patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"}):
             value = _openai_reader(
                 image_bytes(), "image/jpeg", 320, 120, stage=2,
-                model="gpt-5.6-sol", service_tier="fast",
-                analysis_version="instant-v2", quick=True, output_language="en",
+                model="gpt-5.6-luna", service_tier="default",
+                analysis_version="luna-compact-v1", quick=True, output_language="en",
             )
 
         prompt = provider.call_args.kwargs["json"]["input"][0]["content"][0]["text"]
@@ -843,7 +868,7 @@ class ApiTests(unittest.TestCase):
     ) -> None:
         reader.return_value = {
             "schema": "villagelens.reader.v1", "stage": 2,
-            "reader": "vision_language", "analysis_version": "instant-v2",
+            "reader": "vision_language", "analysis_version": "luna-compact-v1",
             "output_language": "en", "summary_kn": "This is a book.",
         }
         capture_id = "8" * 32
@@ -903,7 +928,8 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(value["objects"][0]["name_kn"], "ಪುಸ್ತಕ")
         self.assertEqual(value["summary_kn"], value["brief_spoken_kn"])
         self.assertTrue(value["quality_validated"])
-        self.assertEqual(value["analysis_version"], "context-v2")
+        self.assertEqual(value["analysis_version"], "terra-context-v1")
+        self.assertEqual(value["model"], "gpt-5.6-terra")
         self.assertEqual(value["objects"][0]["box"], {"x": 32, "y": 12, "width": 160, "height": 84})
         self.assertEqual(value["tester_id"], "a1")
         request_payload = provider.call_args.kwargs["json"]
@@ -921,13 +947,13 @@ class ApiTests(unittest.TestCase):
         self.assertIn("spoken_sections", request_payload["text"]["format"]["schema"]["required"])
         self.assertNotIn("words", request_payload["text"]["format"]["schema"]["properties"])
         self.assertEqual(request_payload["reasoning"]["effort"], "none")
-        self.assertEqual(request_payload["service_tier"], "fast")
+        self.assertEqual(request_payload["service_tier"], "default")
         self.assertEqual(request_payload["text"]["verbosity"], "low")
         self.assertEqual(value["service_tier"], "priority")
         store.assert_called_once_with(capture_id, 3, value)
 
     @patch("api.app.requests.post")
-    def test_astra_review_requires_explicit_consensus(self, provider: object) -> None:
+    def test_sol_review_compares_terra_and_requires_explicit_consensus(self, provider: object) -> None:
         provider.return_value.status_code = 200
         provider.return_value.json.return_value = {"service_tier": "default", "output": [{"content": [{
             "type": "output_text", "text": json.dumps({
@@ -937,7 +963,7 @@ class ApiTests(unittest.TestCase):
                 "uncertainty_kn": "", "brief_spoken_kn": "ಇದು ಪುಸ್ತಕ.",
                 "detailed_spoken_kn": "ಇದು ಓದಲು ಬಳಸುವ ಪುಸ್ತಕ.", "transcription_kn": [],
                 "spoken_sections": [], "confidence": "high",
-                "needs_independent_review": False, "agrees_with_sol": True,
+                "needs_independent_review": False, "agrees_with_prior": True,
                 "material_disagreement_kn": "",
             }),
         }]}]}
@@ -945,18 +971,18 @@ class ApiTests(unittest.TestCase):
         with patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"}):
             value = _openai_reader(
                 image_bytes(), "image/jpeg", 320, 120, stage=4,
-                model="gpt-6-astra", service_tier="fast",
-                analysis_version="astra-review-v2",
+                model="gpt-5.6-sol", service_tier="default",
+                analysis_version="sol-review-v1",
                 prior_analysis={"brief_spoken_kn": "ಇದು ಪುಸ್ತಕ."},
             )
 
         payload = provider.call_args.kwargs["json"]
-        self.assertEqual(payload["model"], "gpt-6-astra")
-        self.assertEqual(payload["service_tier"], "fast")
+        self.assertEqual(payload["model"], "gpt-5.6-sol")
+        self.assertEqual(payload["service_tier"], "default")
         self.assertEqual(payload["reasoning"]["effort"], "low")
         self.assertEqual(provider.call_args.kwargs["timeout"], 85)
-        self.assertIn("Earlier Sol analysis", payload["input"][0]["content"][0]["text"])
-        self.assertIn("agrees_with_sol", payload["text"]["format"]["schema"]["required"])
+        self.assertIn("Earlier analysis", payload["input"][0]["content"][0]["text"])
+        self.assertIn("agrees_with_prior", payload["text"]["format"]["schema"]["required"])
         self.assertTrue(value["consensus_validated"])
 
     def test_mixed_script_kannada_output_is_not_marked_ready(self) -> None:
@@ -976,7 +1002,7 @@ class ApiTests(unittest.TestCase):
 
     def test_kannada_context_allows_normal_unicode_punctuation(self) -> None:
         value = _normalize_stage_three({
-            "analysis_version": "context-v2",
+            "analysis_version": "terra-context-v1",
             "translations": [],
             "scene_type": "calendar",
             "objects": [],
@@ -994,7 +1020,7 @@ class ApiTests(unittest.TestCase):
 
     def test_full_frame_object_box_is_not_selectable(self) -> None:
         value = _normalize_stage_three({
-            "analysis_version": "context-v2",
+            "analysis_version": "terra-context-v1",
             "image_size": {"width": 3072, "height": 4096},
             "translations": [], "scene_type": "plant", "summary_kn": "ಇದು ಸಸ್ಯ.",
             "objects": [
@@ -1096,7 +1122,6 @@ class ApiTests(unittest.TestCase):
     @patch("api.app._openai_reader")
     @patch("api.app._vision_reader")
     @patch("api.app._storage_bucket")
-    @patch("api.app.ASTRA_ENABLED", True)
     def test_stored_processing_reuses_all_existing_stages(
         self, storage_bucket: object, vision: object, openai: object,
     ) -> None:
@@ -1109,18 +1134,18 @@ class ApiTests(unittest.TestCase):
                 "stage": 1, "reader": "cloud_ocr", "words": [],
             },
             f"captures/{capture_id}/stage-2.json": {
-                "stage": 2, "reader": "vision_language", "model": "gpt-5.6-sol",
-                "analysis_version": "instant-v2", "summary_kn": "ಪುಸ್ತಕ",
+                "stage": 2, "reader": "vision_language", "model": "gpt-5.6-luna",
+                "analysis_version": "luna-compact-v1", "summary_kn": "ಪುಸ್ತಕ",
             },
             f"captures/{capture_id}/stage-3.json": {
-                "stage": 3, "reader": "vision_language", "model": "gpt-5.6-sol",
-                "analysis_version": "context-v2",
+                "stage": 3, "reader": "vision_language", "model": "gpt-5.6-terra",
+                "analysis_version": "terra-context-v1",
                 "translations": [{"source": "book", "translation_kn": "ಪುಸ್ತಕ"}],
                 "summary_kn": "ಪುಸ್ತಕ",
             },
             f"captures/{capture_id}/stage-4.json": {
-                "stage": 4, "reader": "vision_language", "model": "gpt-6-astra",
-                "analysis_version": "astra-review-v2", "summary_kn": "ಪುಸ್ತಕ",
+                "stage": 4, "reader": "vision_language", "model": "gpt-5.6-sol",
+                "analysis_version": "sol-review-v1", "summary_kn": "ಪುಸ್ತಕ",
                 "consensus_validated": True,
             },
         }
@@ -1135,7 +1160,7 @@ class ApiTests(unittest.TestCase):
 
         stages, errors = _process_stored_capture(capture_id, "a3")
 
-        self.assertEqual(set(stages), {1, 2, 3, 4})
+        self.assertEqual(set(stages), {1, 2, 3})
         self.assertTrue(stages[3]["quality_validated"])
         self.assertEqual(errors, {})
         vision.assert_not_called()
@@ -1145,26 +1170,29 @@ class ApiTests(unittest.TestCase):
             _process_stored_capture(capture_id, "a4")
 
     @patch("api.app._process_stored_stage")
-    def test_stored_processing_does_not_request_astra_when_disabled(self, process: object) -> None:
+    def test_stored_processing_leaves_stage_four_on_demand(self, process: object) -> None:
         capture_id = "e" * 32
         process.side_effect = lambda _capture_id, _tester_id, stage, _language="kn": {
             "stage": stage, "reader": "cloud_ocr" if stage == 1 else "vision_language",
         }
 
         with patch("api.app._storage_bucket", return_value=MagicMock()), \
-                patch("api.app._authorized_capture"), patch("api.app.ASTRA_ENABLED", False):
+                patch("api.app._authorized_capture"):
             stages, errors = _process_stored_capture(capture_id, "a3")
 
         self.assertEqual(set(stages), {1, 2, 3})
         self.assertEqual(errors, {})
         self.assertNotIn(4, [call.args[2] for call in process.call_args_list])
 
-    @patch("api.app.ASTRA_ENABLED", False)
-    def test_stage_four_endpoint_is_disabled_without_provider_call(self) -> None:
-        response = self.client.post(f"/api/captures/{'f' * 32}/process/4")
+    @patch("api.app._process_stored_stage")
+    def test_stage_four_endpoint_runs_only_when_requested(self, process: object) -> None:
+        capture_id = "f" * 32
+        process.return_value = {"stage": 4, "model": "gpt-5.6-sol"}
+        response = self.client.post(f"/api/captures/{capture_id}/process/4")
 
-        self.assertEqual(response.status_code, 409)
-        self.assertEqual(response.get_json()["error"], "READER_DISABLED")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["result"]["model"], "gpt-5.6-sol")
+        process.assert_called_once_with(capture_id, "", 4)
 
     @patch("api.app.requests.post")
     def test_spoken_question_returns_scaled_evidence_without_storage(self, provider: object) -> None:
