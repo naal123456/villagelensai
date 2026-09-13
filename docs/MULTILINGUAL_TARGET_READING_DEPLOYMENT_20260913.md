@@ -60,6 +60,21 @@ Route traffic back to `vlens-a-00051-xqs`. That revision is version
 speech, without multilingual source pronunciation or bilingual word/sentence
 reading.
 
+## Incremental touch-reading corrections
+
+- `v2026.09.13.3`, commit `420b366`, Cloud Run revision
+  `vlens-a-00053-2lb`: sentence reading reuses the best overlapping Terra/Sol
+  transcription, reads the original row, and then reads its English rendering.
+- `v2026.09.13.4`, commit `550b90e`, Cloud Build
+  `ca247c28-fb1c-4280-9473-d5a81e9ad482`, container digest
+  `sha256:0ebaf459bea7bae9cc4ddc2b7e4754e3fa77aa6f0c888e3e520e5ae2ddba81a3`,
+  Cloud Run revision `vlens-a-00054-gj6`: word reading aligns a selected source
+  token with a multi-item contextual translation retained by an earlier stage.
+  On `A2-17`, this maps the seven Kannada calendar weekday labels to Sunday
+  through Saturday without an additional model request. All 64 tests and
+  browser JavaScript parsing passed; the public English page returned the new
+  version and function marker, and the new-revision warning query was empty.
+
 ## Button 2 contextual correction
 
 Version `v2026.09.13.3` changes only sentence reading. A selected OCR sentence
