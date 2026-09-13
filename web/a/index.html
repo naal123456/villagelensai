@@ -115,7 +115,7 @@
         <span class="bar" id="quality-1"></span><span class="bar" id="quality-2"></span>
         <span class="bar" id="quality-3"></span><button class="bar" id="quality-4" aria-label="Request strongest reading" data-tip="Request strongest reading"></button>
         <span id="quality-timer">—</span>
-        <span id="app-version" aria-label="App version">v2026.09.13.3</span>
+        <span id="app-version" aria-label="App version">v2026.09.13.4</span>
       </div>
       <p id="mic-status" role="status" aria-live="assertive" hidden></p>
     </section>
@@ -182,7 +182,7 @@
     const stageTwoAnalysisVersion='luna-compact-v1';
     const stageThreeAnalysisVersion='terra-context-v2',stageFourAnalysisVersion='sol-review-v2';
     const automaticStages=[1,2,3],enabledStages=[1,2,3,4];
-    const appVersion='2026-09-13.3';
+    const appVersion='2026-09-13.4';
     const captureBurstFrames=4;
     let speechVoices=[];
     const testerId=configureTesterId();
@@ -607,11 +607,29 @@
         .filter(candidate=>candidate.score>=.55).sort((left,right)=>right.score-left.score)[0];
       return match&&match.region.text_kn||'';
     }
+    function contextualWordTranslation(target) {
+      const source=String(target&&target.text||'').toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu,'');
+      if (!source||!result) return '';
+      const item=gallery[galleryIndex]||{}, candidates=[];
+      for (const value of [result,readCachedStage(item,4),readCachedStage(item,3),readCachedStage(item,2)]) {
+        for (const translation of value&&value.translations||[]) candidates.push(translation);
+      }
+      for (const translation of candidates) {
+        const sources=String(translation.source||'').split(/[\s,|/]+/u).map(value=>
+          value.toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu,'')).filter(Boolean);
+        const targets=String(translation.translation_kn||'').split(/\s*,\s*|\s*\|\s*/u).map(value=>value.trim()).filter(Boolean);
+        if (sources.length<2||sources.length!==targets.length) continue;
+        const index=sources.findIndex(value=>value===source||Math.abs(value.length-source.length)<=1&&
+          (value.startsWith(source)||source.startsWith(value)));
+        if (index>=0) return targets[index];
+      }
+      return '';
+    }
     async function readForUser(target,useContext=false) {
       const source=String(target&&target.text||'').trim(); if (!source) return false;
       activate(target,source);
       if (!needsTargetTranslation(source)) return speak(source);
-      let translation=useContext?contextualTranslation(target):'';
+      let translation=useContext?contextualTranslation(target):contextualWordTranslation(target);
       if (!translation) translation=translatedWord({text:source});
       if (!translation) translation=await translateOnDemand(source);
       if (!translation) return speak(source);
