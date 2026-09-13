@@ -88,6 +88,50 @@ translation. This is especially important for calendar weekday rows.
 - Cloud Build: `bbe956e1-1a26-415c-8191-57157a0a0402`
 - Container digest:
   `sha256:10b3f2514a9604fe4dbc185c2ca30febc4d9f179b1fedaa407bf173086c51172`
+
+## Semantic calendar correction
+
+Version `v2026.09.13.7` replaces unreliable OCR date-token grouping with a
+semantic calendar layer. Terra and Sol return the detected month, year,
+weekday-header bounds, and date-grid bounds. The browser derives each weekday
+and date cell deterministically, so adjacent dates such as 1 and 2 cannot be
+spoken as 12. Calendar dates are also exposed as a dedicated selectable object;
+the object reader summarizes the calendar rather than concatenating corrupted
+OCR rows.
+
+Stage 4 now appears ready only when quality and independent consensus both
+validate. Agreeing cached reviews that used a phrase such as "No material
+disagreement" are safely normalized to the empty-disagreement contract, so an
+existing Sol result does not need a repeat paid request. Non-ASCII access-code
+mistakes are rejected normally instead of raising a string-comparison error.
+
+- Google Cloud project: `villagelensai`
+- Source commits: `24447cd`, `59a2a77`, `1dc2b00`
+- GitHub Actions run `34786647929`: passed
+- Final test suite: `66/66` passed
+- Python compilation, embedded JavaScript parsing, service-worker parsing, and
+  `git diff --check`: passed
+- Final Cloud Build: `c907dff0-8353-4676-a29e-ba486d96f8b7`
+- Final container digest:
+  `sha256:840310c2c5ec13782f22e643172926441fe53b49302a87fdf15f5a9151deaecf`
+- Production revision: `vlens-a-00057-dbt`, 100 percent traffic
+- Operational limits retained: zero minimum instances, one maximum instance,
+  one CPU, 2 GiB memory, concurrency eight, timeout 90 seconds
+- Public `/health`: healthy; authenticated `/b/?tester=a3`: version `.7` and
+  calendar reader markers present
+- Live `A2-17` stage 3: September 2026 detected with valid weekday and date-grid
+  bounds; quality validated
+- Live cached `A2-17` stage 4: quality and consensus validated with an empty
+  material-disagreement field; no repeat Sol inference was required after `.7`
+- Live Kannada wrong-code check: HTTP 401 as expected. The only warning-level
+  log entry on the final revision is this intentional 401 request test; no
+  application exception was recorded.
+
+Immediate rollback is `vlens-a-00056-qwg`, which retains semantic calendar
+reading and the access-code fix but does not normalize already cached agreeing
+Sol reviews. Roll back to `vlens-a-00054-gj6` to remove the semantic calendar
+layer entirely. Physical iPhone/Android listening and touch accuracy remain
+field acceptance checks.
 - Cloud Run revision: `vlens-a-00053-2lb`, 100 percent traffic
 - Authenticated `/b/`: `v2026.09.13.3` and contextual sentence helpers present
 - New-revision warning/error log query: empty
