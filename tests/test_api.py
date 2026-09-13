@@ -61,7 +61,7 @@ class ApiTests(unittest.TestCase):
         self.assertIn(b'id="quality-4" aria-label="Request strongest reading"', response.data)
         self.assertIn(b'id="owner-badge"', response.data)
         self.assertIn(b'id="app-version"', response.data)
-        self.assertIn(b'v2026.09.13.6', response.data)
+        self.assertIn(b'v2026.09.13.7', response.data)
         self.assertIn(b"'UNASSIGNED \xc2\xb7 OLDER CAPTURE'", response.data)
         self.assertIn(b"`${owner}${ownerName}`", response.data)
         self.assertIn(b'navigationGeneration', response.data)
@@ -1058,6 +1058,17 @@ class ApiTests(unittest.TestCase):
         ])
         self.assertEqual(value["summary_kn"], "ಚಿತ್ರದಲ್ಲ ಕಾಣುತ್ತದೆ")
         self.assertFalse(value["quality_validated"])
+
+    def test_stored_agreeing_review_normalizes_no_disagreement_phrase(self) -> None:
+        value = _normalize_stage_three({
+            "output_language": "en", "summary_kn": "September 2026 calendar.",
+            "agrees_with_prior": True,
+            "material_disagreement_kn": "No material disagreement. The facts agree.",
+            "consensus_validated": False,
+        })
+
+        self.assertTrue(value["consensus_validated"])
+        self.assertEqual(value["material_disagreement_kn"], "")
 
     def test_kannada_context_allows_normal_unicode_punctuation(self) -> None:
         value = _normalize_stage_three({

@@ -732,6 +732,13 @@ def _validated_kannada_output(
     return translations, summary if summary_valid else "", summary_valid and translations_valid
 
 
+def _no_material_disagreement(value: Any) -> bool:
+    disagreement = str(value or "").strip()
+    return disagreement.casefold().startswith((
+        "no material disagreement", "no disagreement", "none", "not applicable",
+    )) or (disagreement.startswith("ಯಾವುದೇ") and disagreement.endswith("ಇಲ್ಲ"))
+
+
 def _normalize_stage_three(value: dict[str, Any]) -> dict[str, Any]:
     normalized = dict(value)
     output_language = str(normalized.get("output_language", "kn"))
@@ -743,8 +750,13 @@ def _normalize_stage_three(value: dict[str, Any]) -> dict[str, Any]:
         quality_validated=valid and (context_valid if has_context else True),
     )
     if "consensus_validated" in normalized:
+        agrees = bool(normalized.get("agrees_with_prior"))
+        no_disagreement = _no_material_disagreement(normalized.get("material_disagreement_kn"))
+        if agrees and no_disagreement:
+            normalized["material_disagreement_kn"] = ""
         normalized["consensus_validated"] = bool(
-            normalized["consensus_validated"] and normalized["quality_validated"]
+            normalized["quality_validated"] and agrees and
+            (no_disagreement or not str(normalized.get("material_disagreement_kn", "")).strip())
         )
     if has_context:
         normalized.update(context)
@@ -1092,9 +1104,7 @@ Explain what the image is, what it does, its important details, any useful actio
     if prior_analysis is not None:
         disagreement = str(parsed.get("material_disagreement_kn", "")).strip()
         result["agrees_with_prior"] = bool(parsed.get("agrees_with_prior", False))
-        no_disagreement = disagreement.casefold().startswith((
-            "no material disagreement", "no disagreement", "none", "not applicable",
-        )) or (disagreement.startswith("ಯಾವುದೇ") and disagreement.endswith("ಇಲ್ಲ"))
+        no_disagreement = _no_material_disagreement(disagreement)
         if result["agrees_with_prior"] and no_disagreement:
             disagreement = ""
         result["material_disagreement_kn"] = disagreement
