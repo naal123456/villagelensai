@@ -38,12 +38,36 @@ then reused after its first successful run.
 - Kannada and English evidence remain separately stored and cached.
 - The spoken-question endpoint uses Terra Standard rather than Sol.
 
-## Verification to record after deployment
+## Verification
 
-- source commit and Cloud Build ID;
-- container digest and Cloud Run revision;
-- unit, Python, embedded-JavaScript, and service-worker checks;
-- `/health` model IDs and manual stage-4 state;
-- authenticated `/a/` and `/b/` version and four-bar visibility;
-- evidence that stages 2 and 3 return Luna/Terra Standard; and
-- evidence that stage 4 remains absent until explicitly requested.
+- Deployable source commit: `48fd584`
+- Cloud Build: `5c6ee013-417e-4e60-9480-3b499ff9cd16`
+- Container digest:
+  `sha256:4c9f5061c160766da948cb614671a8dce8194a12f506c4f8746d4221b9d011ed`
+- Cloud Run revision: `vlens-a-00051-xqs`, 100 percent traffic
+- Unit tests: `62/62` passed
+- Python compilation, embedded browser JavaScript parsing, service-worker
+  parsing, and `git diff --check`: passed
+- Minimal live access checks: Luna and Terra each returned HTTP 200 through the
+  deployed project key on Standard processing, using 14 tokens each
+- Public authenticated `/health`: status `ok`, no missing OCR models, exact
+  Luna/Terra/Sol model IDs, stage 4 `manual`
+- Authenticated `/a/` and `/b/`: version `v2026.09.13.1`, fourth bar visible,
+  all three new analysis-version markers present
+- New revision warning/error log query: empty after startup and page checks
+
+The deployment verification deliberately did not submit a production image to
+Luna, Terra, or Sol. Field-image behavior remains the reviewer test described
+below.
+
+## Reviewer test
+
+Open `/b/?tester=a3`, select a known retained image, and allow bars 1–3 to
+complete. Confirm that the output is English. The fourth bar should remain
+outlined until tapped; tap it once to request the Sol review and confirm that it
+turns dark green when the response is validated.
+
+## Rollback
+
+Route traffic back to `vlens-a-00050-b5l`. That revision has Astra disabled and
+uses the previous Sol/Sol Fast architecture for stages 2 and 3.
