@@ -59,3 +59,21 @@ Route traffic back to `vlens-a-00051-xqs`. That revision is version
 `v2026.09.13.1` and supports Kannada server speech plus phone-provided English
 speech, without multilingual source pronunciation or bilingual word/sentence
 reading.
+
+## Button 2 contextual correction
+
+Version `v2026.09.13.3` changes only sentence reading. A selected OCR sentence
+is matched by image overlap to the best Terra/Sol contextual transcription.
+The reader speaks the original row and then that existing English rendering,
+instead of sending an isolated or corrupted OCR string for a context-free
+translation. This is especially important for calendar weekday rows.
+
+- Source commit: `420b366`
+- Tests: `64/64` passed; Python and JavaScript parsing passed
+- Cloud Build: `bbe956e1-1a26-415c-8191-57157a0a0402`
+- Container digest:
+  `sha256:10b3f2514a9604fe4dbc185c2ca30febc4d9f179b1fedaa407bf173086c51172`
+- Cloud Run revision: `vlens-a-00053-2lb`, 100 percent traffic
+- Authenticated `/b/`: `v2026.09.13.3` and contextual sentence helpers present
+- New-revision warning/error log query: empty
+- Immediate rollback: `vlens-a-00052-rml`
