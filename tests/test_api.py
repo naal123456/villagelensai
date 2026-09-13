@@ -61,7 +61,7 @@ class ApiTests(unittest.TestCase):
         self.assertIn(b'id="quality-4" aria-label="Request strongest reading"', response.data)
         self.assertIn(b'id="owner-badge"', response.data)
         self.assertIn(b'id="app-version"', response.data)
-        self.assertIn(b'v2026.09.13.1', response.data)
+        self.assertIn(b'v2026.09.13.2', response.data)
         self.assertIn(b"'UNASSIGNED \xc2\xb7 OLDER CAPTURE'", response.data)
         self.assertIn(b"`${owner}${ownerName}`", response.data)
         self.assertIn(b'navigationGeneration', response.data)
@@ -74,11 +74,13 @@ class ApiTests(unittest.TestCase):
         self.assertIn(b'function applyVerifiedReadingRegions', response.data)
         self.assertIn('ಪುಳಿಯೋಗರೆ'.encode(), response.data)
         self.assertIn('ಶಾವಿಗೆ'.encode(), response.data)
-        self.assertIn(b"playKannada(prepared,generation)", response.data)
+        self.assertIn(b"playServerSpeech(segment.text,segment.language,generation)", response.data)
         self.assertIn(b'unlockAudioPlayback', response.data)
         self.assertIn(b'function voiceFor', response.data)
         self.assertIn(b"fetch('/api/speech'", response.data)
-        self.assertIn(b'function playKannada', response.data)
+        self.assertIn(b'function playServerSpeech', response.data)
+        self.assertIn(b'function readForUser', response.data)
+        self.assertIn(b'function textInsideObject', response.data)
         self.assertIn(b'speechAudioCache', response.data)
         self.assertIn(b'keepalive:true', response.data)
         self.assertIn(b'/process/${stageNumber}', response.data)
@@ -142,7 +144,7 @@ class ApiTests(unittest.TestCase):
         self.assertIn(b'villagelens.translation.v1:', response.data)
         self.assertIn(b"if (activeControl===id) { stop(); return false; }", response.data)
         self.assertIn(b"result.detailed_spoken_kn", response.data)
-        self.assertIn(b"stageThreeAnalysisVersion='terra-context-v1'", response.data)
+        self.assertIn(b"stageThreeAnalysisVersion='terra-context-v2'", response.data)
         self.assertIn(b"function groupedWords", response.data)
         self.assertIn(b"const semanticGroup=groupedWords", response.data)
         self.assertIn(b"function renderObjects", response.data)
@@ -274,7 +276,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(icon.content_type, "image/png")
 
     @patch("api.app._storage_bucket", return_value=None)
-    @patch("api.app._synthesize_kannada", return_value=b"mp3-audio")
+    @patch("api.app._synthesize_speech", return_value=b"mp3-audio")
     def test_kannada_speech_is_synthesized_server_side(
         self, synthesize: object, storage_bucket: object,
     ) -> None:
@@ -285,10 +287,10 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.data, b"mp3-audio")
         self.assertEqual(response.headers["X-VillageLens-Speech-Cache"], "miss")
         self.assertEqual(response.headers["Cache-Control"], "private, max-age=604800")
-        synthesize.assert_called_once_with("ಕನ್ನಡ ಪದ")
+        synthesize.assert_called_once_with("ಕನ್ನಡ ಪದ", "kn-IN")
 
     @patch("api.app._storage_bucket", return_value=None)
-    @patch("api.app._synthesize_kannada", return_value=b"mixed-mp3")
+    @patch("api.app._synthesize_speech", return_value=b"mixed-mp3")
     def test_mixed_kannada_numbers_and_units_are_one_server_utterance(
         self, synthesize: object, storage_bucket: object,
     ) -> None:
@@ -299,10 +301,10 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data, b"mixed-mp3")
         synthesize.assert_called_once_with(
-            "ಇದು FS-12. ಒಳಹರಿವು 220 ವೋಲ್ಟ್ 2 ಆಂಪಿಯರ್.",
+            "ಇದು FS-12. ಒಳಹರಿವು 220 ವೋಲ್ಟ್ 2 ಆಂಪಿಯರ್.", "kn-IN",
         )
 
-    @patch("api.app._synthesize_kannada")
+    @patch("api.app._synthesize_speech")
     @patch("api.app._storage_bucket")
     def test_kannada_speech_reuses_private_object_cache(
         self, storage_bucket: object, synthesize: object,
@@ -319,7 +321,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.headers["X-VillageLens-Speech-Cache"], "hit")
         synthesize.assert_not_called()
         cache_name = storage_bucket.return_value.blob.call_args.args[0]
-        self.assertRegex(cache_name, r"^speech/v1/[0-9a-f]{64}\.mp3$")
+        self.assertRegex(cache_name, r"^speech/v2/[0-9a-f]{64}\.mp3$")
         self.assertNotIn("ಕನ್ನಡ", cache_name)
 
     def test_kannada_speech_rejects_invalid_text(self) -> None:
@@ -331,6 +333,25 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(latin.get_json()["error"], "SPEECH_LANGUAGE_UNSUPPORTED")
         self.assertEqual(empty.get_json()["error"], "SPEECH_TEXT_REQUIRED")
         self.assertEqual(long_text.get_json()["error"], "SPEECH_TEXT_TOO_LONG")
+
+    @patch("api.app._storage_bucket", return_value=None)
+    @patch("api.app._synthesize_speech", return_value=b"native-audio")
+    def test_speech_supports_selected_indian_languages(
+        self, synthesize: object, storage_bucket: object,
+    ) -> None:
+        examples = {
+            "ta-IN": "தமிழ்", "te-IN": "తెలుగు", "hi-IN": "हिन्दी", "en-IN": "English",
+        }
+        for language, text in examples.items():
+            with self.subTest(language=language):
+                response = self.client.post(
+                    "/api/speech", json={"text": text, "language": language},
+                )
+                self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            [call.args for call in synthesize.call_args_list],
+            [(text, language) for language, text in examples.items()],
+        )
 
     @patch("api.app.requests.post")
     def test_openai_translation_uses_fast_structured_response(self, provider: object) -> None:
@@ -355,13 +376,27 @@ class ApiTests(unittest.TestCase):
     def test_translation_endpoint_contract(self, translate: object) -> None:
         response = self.client.post("/api/translate", json={"text": " power   switch "})
         no_english = self.client.post("/api/translate", json={"text": "ಕನ್ನಡ"})
-        too_long = self.client.post("/api/translate", json={"text": "a" * 81})
+        too_long = self.client.post("/api/translate", json={"text": "a" * 501})
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.get_json()["translation_kn"], "ವಿದ್ಯುತ್ ಸ್ವಿಚ್")
         translate.assert_called_once_with("power switch")
         self.assertEqual(no_english.get_json()["error"], "TRANSLATION_LANGUAGE_UNSUPPORTED")
         self.assertEqual(too_long.get_json()["error"], "TRANSLATION_TEXT_TOO_LONG")
+
+    @patch("api.app._openai_translate", return_value={
+        "translation_kn": "This is a calendar.", "model": "gpt-5-mini",
+    })
+    def test_english_reader_translates_kannada_sentence(self, translate: object) -> None:
+        response = self.client.post(
+            "/api/translate",
+            headers={"X-VillageLens-Output-Language": "en"},
+            json={"text": "ಇದು ಕ್ಯಾಲೆಂಡರ್"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["translation_kn"], "This is a calendar.")
+        translate.assert_called_once_with("ಇದು ಕ್ಯಾಲೆಂಡರ್", "en")
 
     def test_gallery_starts_with_i2_then_i1(self) -> None:
         response = self.client.get("/api/gallery")
@@ -928,7 +963,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(value["objects"][0]["name_kn"], "ಪುಸ್ತಕ")
         self.assertEqual(value["summary_kn"], value["brief_spoken_kn"])
         self.assertTrue(value["quality_validated"])
-        self.assertEqual(value["analysis_version"], "terra-context-v1")
+        self.assertEqual(value["analysis_version"], "terra-context-v2")
         self.assertEqual(value["model"], "gpt-5.6-terra")
         self.assertEqual(value["objects"][0]["box"], {"x": 32, "y": 12, "width": 160, "height": 84})
         self.assertEqual(value["tester_id"], "a1")
@@ -972,7 +1007,7 @@ class ApiTests(unittest.TestCase):
             value = _openai_reader(
                 image_bytes(), "image/jpeg", 320, 120, stage=4,
                 model="gpt-5.6-sol", service_tier="default",
-                analysis_version="sol-review-v1",
+                analysis_version="sol-review-v2",
                 prior_analysis={"brief_spoken_kn": "ಇದು ಪುಸ್ತಕ."},
             )
 
@@ -1002,7 +1037,7 @@ class ApiTests(unittest.TestCase):
 
     def test_kannada_context_allows_normal_unicode_punctuation(self) -> None:
         value = _normalize_stage_three({
-            "analysis_version": "terra-context-v1",
+            "analysis_version": "terra-context-v2",
             "translations": [],
             "scene_type": "calendar",
             "objects": [],
@@ -1020,7 +1055,7 @@ class ApiTests(unittest.TestCase):
 
     def test_full_frame_object_box_is_not_selectable(self) -> None:
         value = _normalize_stage_three({
-            "analysis_version": "terra-context-v1",
+            "analysis_version": "terra-context-v2",
             "image_size": {"width": 3072, "height": 4096},
             "translations": [], "scene_type": "plant", "summary_kn": "ಇದು ಸಸ್ಯ.",
             "objects": [
@@ -1139,13 +1174,13 @@ class ApiTests(unittest.TestCase):
             },
             f"captures/{capture_id}/stage-3.json": {
                 "stage": 3, "reader": "vision_language", "model": "gpt-5.6-terra",
-                "analysis_version": "terra-context-v1",
+                "analysis_version": "terra-context-v2",
                 "translations": [{"source": "book", "translation_kn": "ಪುಸ್ತಕ"}],
                 "summary_kn": "ಪುಸ್ತಕ",
             },
             f"captures/{capture_id}/stage-4.json": {
                 "stage": 4, "reader": "vision_language", "model": "gpt-5.6-sol",
-                "analysis_version": "sol-review-v1", "summary_kn": "ಪುಸ್ತಕ",
+                "analysis_version": "sol-review-v2", "summary_kn": "ಪುಸ್ತಕ",
                 "consensus_validated": True,
             },
         }

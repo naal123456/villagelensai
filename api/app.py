@@ -37,6 +37,7 @@ MAX_IMAGE_EDGE = int(os.environ.get("VILLAGELENS_MAX_IMAGE_EDGE", 4096))
 LOCAL_OCR_MAX_EDGE = int(os.environ.get("VILLAGELENS_LOCAL_OCR_MAX_EDGE", 1600))
 LOCAL_OCR_TIMEOUT_SECONDS = int(os.environ.get("VILLAGELENS_LOCAL_OCR_TIMEOUT_SECONDS", 20))
 MAX_SPEECH_CHARACTERS = int(os.environ.get("VILLAGELENS_MAX_SPEECH_CHARACTERS", 500))
+MAX_TRANSLATION_CHARACTERS = int(os.environ.get("VILLAGELENS_MAX_TRANSLATION_CHARACTERS", 500))
 ALLOWED_MEDIA_TYPES = {"image/jpeg", "image/png", "image/webp"}
 CAPTURE_BUCKET = os.environ.get("VILLAGELENS_CAPTURE_BUCKET", "")
 OPENAI_STAGE_TWO_MODEL = os.environ.get("VILLAGELENS_OPENAI_STAGE_TWO_MODEL", "gpt-5.6-luna")
@@ -53,9 +54,22 @@ OPENAI_STAGE_FOUR_SERVICE_TIER = os.environ.get(
 )
 OPENAI_TRANSLATION_MODEL = os.environ.get("VILLAGELENS_TRANSLATION_MODEL", "gpt-5-mini")
 OPENAI_STAGE_TWO_ANALYSIS_VERSION = "luna-compact-v1"
-OPENAI_STAGE_THREE_ANALYSIS_VERSION = "terra-context-v1"
-OPENAI_STAGE_FOUR_ANALYSIS_VERSION = "sol-review-v1"
-KANNADA_TTS_VOICE = os.environ.get("VILLAGELENS_KANNADA_TTS_VOICE", "kn-IN-Standard-A")
+OPENAI_STAGE_THREE_ANALYSIS_VERSION = "terra-context-v2"
+OPENAI_STAGE_FOUR_ANALYSIS_VERSION = "sol-review-v2"
+SPEECH_VOICES = {
+    "kn-IN": os.environ.get("VILLAGELENS_KANNADA_TTS_VOICE", "kn-IN-Wavenet-A"),
+    "ta-IN": os.environ.get("VILLAGELENS_TAMIL_TTS_VOICE", "ta-IN-Wavenet-A"),
+    "te-IN": os.environ.get("VILLAGELENS_TELUGU_TTS_VOICE", "te-IN-Standard-A"),
+    "hi-IN": os.environ.get("VILLAGELENS_HINDI_TTS_VOICE", "hi-IN-Wavenet-A"),
+    "en-IN": os.environ.get("VILLAGELENS_ENGLISH_TTS_VOICE", "en-IN-Wavenet-A"),
+}
+SPEECH_LANGUAGE_PATTERNS = {
+    "kn-IN": re.compile(r"[\u0c80-\u0cff]"),
+    "ta-IN": re.compile(r"[\u0b80-\u0bff]"),
+    "te-IN": re.compile(r"[\u0c00-\u0c7f]"),
+    "hi-IN": re.compile(r"[\u0900-\u097f]"),
+    "en-IN": re.compile(r"[A-Za-z]"),
+}
 ACCESS_COOKIE_NAME = "villagelens_access_v2"
 TESTER_COOKIE_NAME = "villagelens_tester_v1"
 LEGACY_ACCESS_COOKIE_NAMES = ("villagelens_access",)
@@ -944,6 +958,12 @@ def _openai_reader(
                          "and its purpose. Explain up to three immediately useful details. Preserve important "
                          "visible numbers and units. Do not transcribe the page, find bounding boxes, or provide "
                          "a long lesson. State uncertainty instead of guessing. ")
+    elif output_language == "kn" and prior_analysis is None:
+        prompt_prefix = (
+            "Speak like a patient, knowledgeable Kannada-speaking friend. Explain every clearly visible title "
+            "or heading before body details. Connect related facts into a natural explanation; never mechanically "
+            "enumerate OCR boxes, calendar cells, or disconnected fragments. "
+        )
     if prior_analysis is not None:
         prior_keys = ("scene_type", "what_is_it_kn", "what_it_does_kn", "important_points_kn",
                       "action_needed_kn", "warning_kn", "uncertainty_kn", "brief_spoken_kn",
@@ -980,7 +1000,7 @@ def _openai_reader(
 
 Identify up to six useful visible objects and give each a tight touchable bounding box [left,top,width,height] normalized from 0 to 1000. Never use the whole image, page, background, ground, or soil as an object box. For handwriting or a handwritten list, identify its likely purpose and organization, then translate every readable line into English in transcription_kn with a line box and uncertainty flag. Give a plausible reading only when the visible letters and context support it; otherwise abstain. Distinguish recognition failure from blur, distance, perspective, cropping, and low contrast, and provide specific capture guidance.
 
-Explain what the image is, what it does, its important details, any useful action, safety concerns, and uncertainty. For a textbook or educational page, teach the page: identify the central topic, connect its main ideas, explain difficult terms in plain English, say why it matters, and provide one concrete example when supported. Do not mechanically repeat OCR. If cropping prevents a complete lesson, state which edge is missing and never invent hidden material. Divide the explanation into three to six spoken_sections tied to the relevant image regions. brief_spoken_kn should be the most useful one- or two-sentence answer; detailed_spoken_kn should be five to eight short teaching sentences for an educational page. For calendars, summarize the month, year, highlighted date, and notable events instead of reciting the grid. For electrical equipment or medicine, report only visible or strongly supported identity, purpose, and ratings; never advise wiring, energizing, repair, or medication. Set confidence high only when important identity, text, numbers, and purpose are clear. Require independent review for handwriting uncertainty, safety-critical content, ambiguous units, or important doubt. Never invent facts, intent, diagnosis, species, or disease."""
+Explain what the image is, what it does, its important details, any useful action, safety concerns, and uncertainty. Explain every clearly visible title or heading before body details. Speak like a patient, knowledgeable friend and connect related facts into one natural explanation. For a textbook or educational page, teach the page: identify the central topic, connect its main ideas, explain difficult terms in plain English, say why it matters, and provide one concrete example when supported. Do not mechanically repeat OCR, boxes, calendar cells, or disconnected fragments. If cropping prevents a complete lesson, state which edge is missing and never invent hidden material. Divide the explanation into three to six natural spoken_sections tied to the relevant image regions, including the heading when it is visible. brief_spoken_kn should be the most useful one- or two-sentence answer; detailed_spoken_kn should be five to eight short teaching sentences for an educational page. For calendars, first name the visible heading, month and year, then summarize highlighted dates and notable events instead of reciting the grid. For electrical equipment or medicine, report only visible or strongly supported identity, purpose, and ratings; never advise wiring, energizing, repair, or medication. Set confidence high only when important identity, text, numbers, and purpose are clear. Require independent review for handwriting uncertainty, safety-critical content, ambiguous units, or important doubt. Never invent facts, intent, diagnosis, species, or disease."""
     response = requests.post(
         "https://api.openai.com/v1/responses", json=payload,
         headers={"Authorization": f"Bearer {api_key}"},
@@ -1248,11 +1268,11 @@ def _openai_translate(text: str, output_language: str = "kn") -> dict[str, str]:
         "properties": {"translation_kn": {"type": "string"}},
     }
     instruction = (
-        "Translate the word or short visible label below from its detected language into clear, natural "
+        "Translate the visible word, sentence, or short passage below from its detected language into clear, natural "
         "English. If it is already English, explain it briefly in plain English. Preserve numbers and joined "
         "units such as 110V, 50Hz, and 2.0 HP."
         if output_language == "en" else
-        "Translate the English word or short visible label below into simple, natural Kannada for a "
+        "Translate the visible word, sentence, or short passage below from any detected language into simple, natural Kannada for a "
         "low-literacy adult. Preserve numbers and joined units such as 110V, 50Hz, and 2.0 HP, and explain "
         "the unit briefly in Kannada."
     )
@@ -1538,23 +1558,23 @@ def _capture_quality_header() -> dict[str, Any]:
     return quality
 
 
-def _speech_cache_name(text: str) -> str:
-    identity = f"v1\0{KANNADA_TTS_VOICE}\0{text}".encode("utf-8")
-    return f"speech/v1/{hashlib.sha256(identity).hexdigest()}.mp3"
+def _speech_cache_name(text: str, language: str = "kn-IN") -> str:
+    identity = f"v2\0{language}\0{SPEECH_VOICES[language]}\0{text}".encode("utf-8")
+    return f"speech/v2/{hashlib.sha256(identity).hexdigest()}.mp3"
 
 
-def _synthesize_kannada(text: str) -> bytes:
+def _synthesize_speech(text: str, language: str = "kn-IN") -> bytes:
     from google.cloud import texttospeech
 
     response = texttospeech.TextToSpeechClient().synthesize_speech(
         request={
             "input": texttospeech.SynthesisInput(text=text),
             "voice": texttospeech.VoiceSelectionParams(
-                language_code="kn-IN", name=KANNADA_TTS_VOICE,
+                language_code=language, name=SPEECH_VOICES[language],
             ),
             "audio_config": texttospeech.AudioConfig(
                 audio_encoding=texttospeech.AudioEncoding.MP3,
-                speaking_rate=0.82,
+                speaking_rate=0.9,
             ),
         },
         timeout=20,
@@ -1568,14 +1588,17 @@ def translate() -> Response | tuple[Response, int]:
     text = re.sub(r"\s+", " ", str(payload.get("text", ""))).strip() if isinstance(payload, dict) else ""
     if not text:
         return jsonify(error="TRANSLATION_TEXT_REQUIRED"), 400
-    if len(text) > 80:
+    if len(text) > MAX_TRANSLATION_CHARACTERS:
         return jsonify(error="TRANSLATION_TEXT_TOO_LONG"), 400
     output_language = _output_language()
-    if (
-        output_language == "kn" and not re.search(r"[A-Za-z]", text)
+    has_letters = any(character.isalpha() for character in text)
+    already_target = (
+        output_language == "kn" and bool(re.search(r"[\u0c80-\u0cff]", text))
     ) or (
-        output_language == "en" and not any(character.isalpha() for character in text)
-    ):
+        output_language == "en" and bool(re.search(r"[A-Za-z]", text))
+        and not re.search(r"[\u0900-\u097f\u0b80-\u0cff]", text)
+    )
+    if not has_letters or already_target:
         return jsonify(error="TRANSLATION_LANGUAGE_UNSUPPORTED"), 400
     try:
         return jsonify(
@@ -1591,14 +1614,15 @@ def translate() -> Response | tuple[Response, int]:
 def speech() -> Response | tuple[Response, int]:
     payload = request.get_json(silent=True)
     text = re.sub(r"\s+", " ", str(payload.get("text", ""))).strip() if isinstance(payload, dict) else ""
+    language = str(payload.get("language", "kn-IN")) if isinstance(payload, dict) else "kn-IN"
     if not text:
         return jsonify(error="SPEECH_TEXT_REQUIRED"), 400
     if len(text) > MAX_SPEECH_CHARACTERS:
         return jsonify(error="SPEECH_TEXT_TOO_LONG"), 400
-    if not re.search(r"[\u0c80-\u0cff]", text):
+    if language not in SPEECH_VOICES or not SPEECH_LANGUAGE_PATTERNS[language].search(text):
         return jsonify(error="SPEECH_LANGUAGE_UNSUPPORTED"), 400
 
-    cache_name = _speech_cache_name(text)
+    cache_name = _speech_cache_name(text, language)
     bucket = None
     try:
         bucket = _storage_bucket()
@@ -1611,15 +1635,15 @@ def speech() -> Response | tuple[Response, int]:
                 response.headers["X-VillageLens-Speech-Cache"] = "hit"
                 return response
     except Exception:
-        app.logger.warning("Kannada speech cache read failed")
+        app.logger.warning("Speech cache read failed")
 
     try:
-        audio = _synthesize_kannada(text)
+        audio = _synthesize_speech(text, language)
         if not audio:
-            raise RuntimeError("KANNADA_SPEECH_EMPTY")
+            raise RuntimeError("SPEECH_EMPTY")
     except Exception:
-        app.logger.exception("Kannada speech synthesis failed")
-        return jsonify(error="KANNADA_SPEECH_UNAVAILABLE"), 503
+        app.logger.exception("Speech synthesis failed for %s", language)
+        return jsonify(error="SPEECH_UNAVAILABLE"), 503
 
     if bucket is not None:
         try:
@@ -1627,7 +1651,7 @@ def speech() -> Response | tuple[Response, int]:
             blob.cache_control = "private, max-age=31536000"
             blob.upload_from_string(audio, content_type="audio/mpeg")
         except Exception:
-            app.logger.warning("Kannada speech cache write failed")
+            app.logger.warning("Speech cache write failed")
     response = make_response(audio)
     response.headers["Content-Type"] = "audio/mpeg"
     response.headers["X-VillageLens-Speech-Cache"] = "miss"
