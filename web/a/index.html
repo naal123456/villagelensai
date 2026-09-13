@@ -57,6 +57,7 @@
     .object-region { fill: rgba(98,215,255,.12); stroke: #62d7ff; stroke-width: 4; vector-effect: non-scaling-stroke; cursor: pointer; }
     .object-region.active { fill: rgba(255,243,106,.28); stroke: #fff36a; stroke-width: 7; }
     .transcription-region { fill: rgba(184,140,255,.12); stroke: #b88cff; stroke-width: 4; vector-effect: non-scaling-stroke; cursor: pointer; }
+    .calendar-region { fill: transparent; stroke: rgba(98,215,255,.3); stroke-width: 1; vector-effect: non-scaling-stroke; cursor: pointer; }
     .playing .underline:not(.active) { opacity: 0; }
     #status, #current { min-height: 1.4em; line-height: 1.25; margin: 4px 0; }
     #current { font-size: clamp(1.3rem, 5vw, 2.35rem); }
@@ -115,7 +116,7 @@
         <span class="bar" id="quality-1"></span><span class="bar" id="quality-2"></span>
         <span class="bar" id="quality-3"></span><button class="bar" id="quality-4" aria-label="Request strongest reading" data-tip="Request strongest reading"></button>
         <span id="quality-timer">—</span>
-        <span id="app-version" aria-label="App version">v2026.09.13.4</span>
+        <span id="app-version" aria-label="App version">v2026.09.13.5</span>
       </div>
       <p id="mic-status" role="status" aria-live="assertive" hidden></p>
     </section>
@@ -178,11 +179,11 @@
       'select-object','infer-global','ask','install'];
     const meaningFields=['summary_kn','brief_spoken_kn','detailed_spoken_kn','scene_type','objects',
       'what_is_it_kn','what_it_does_kn','important_points_kn','action_needed_kn','warning_kn','uncertainty_kn',
-      'transcription_kn','spoken_sections','verified_regions','confidence','needs_independent_review'];
+      'transcription_kn','spoken_sections','verified_regions','calendar','confidence','needs_independent_review'];
     const stageTwoAnalysisVersion='luna-compact-v1';
-    const stageThreeAnalysisVersion='terra-context-v2',stageFourAnalysisVersion='sol-review-v2';
+    const stageThreeAnalysisVersion='terra-context-v3',stageFourAnalysisVersion='sol-review-v3';
     const automaticStages=[1,2,3],enabledStages=[1,2,3,4];
-    const appVersion='2026-09-13.4';
+    const appVersion='2026-09-13.5';
     const captureBurstFrames=4;
     let speechVoices=[];
     const testerId=configureTesterId();
@@ -355,7 +356,7 @@
         if (gallery[galleryIndex]===item&&result) copyMeaning(result,item);
       }
       if (gallery[galleryIndex]===item) {
-        const validated=stageNumber!==4||value.quality_validated===true;
+        const validated=stageNumber!==4||value.quality_validated===true&&value.consensus_validated===true;
         $('quality-'+stageNumber).classList.toggle('ready',validated);
         $('quality-'+stageNumber).classList.toggle('failed',!validated);
         if (stageNumber===1) $('quality-1').classList.remove('local');
@@ -628,6 +629,7 @@
     async function readForUser(target,useContext=false) {
       const source=String(target&&target.text||'').trim(); if (!source) return false;
       activate(target,source);
+      if (target.semanticText) { current.textContent=target.semanticText; return speak(target.semanticText); }
       if (!needsTargetTranslation(source)) return speak(source);
       let translation=useContext?contextualTranslation(target):contextualWordTranslation(target);
       if (!translation) translation=translatedWord({text:source});
@@ -669,8 +671,62 @@
     function objectText(object) {
       return [object.name_kn,object.purpose_kn].filter(Boolean).join('. ');
     }
+    const englishMonths=['January','February','March','April','May','June','July','August','September','October','November','December'];
+    const kannadaMonths=['ಜನವರಿ','ಫೆಬ್ರವರಿ','ಮಾರ್ಚ್','ಏಪ್ರಿಲ್','ಮೇ','ಜೂನ್','ಜುಲೈ','ಆಗಸ್ಟ್','ಸೆಪ್ಟೆಂಬರ್','ಅಕ್ಟೋಬರ್','ನವೆಂಬರ್','ಡಿಸೆಂಬರ್'];
+    const englishWeekdays=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+    const kannadaWeekdays=['ಭಾನುವಾರ','ಸೋಮವಾರ','ಮಂಗಳವಾರ','ಬುಧವಾರ','ಗುರುವಾರ','ಶುಕ್ರವಾರ','ಶನಿವಾರ'];
+    function validCalendar(value) {
+      const calendar=value&&value.calendar;
+      return calendar&&calendar.detected&&Number.isInteger(calendar.month)&&calendar.month>=1&&calendar.month<=12&&
+        Number.isInteger(calendar.year)&&calendar.year>=1900&&calendar.year<=2200&&
+        calendar.weekday_header_box&&calendar.date_grid_box;
+    }
+    function calendarEvidence() {
+      const item=gallery[galleryIndex]||{};
+      const strongest=readCachedStage(item,4);
+      const acceptedStrongest=strongest&&strongest.quality_validated===true&&strongest.consensus_validated===true?
+        strongest:null;
+      const value=[acceptedStrongest,readCachedStage(item,3),result].find(validCalendar);
+      return value&&value.calendar||null;
+    }
+    function kannadaDigits(value) {
+      return String(value).replace(/[0-9]/g,digit=>'೦೧೨೩೪೫೬೭೮೯'[Number(digit)]);
+    }
+    function calendarDaySpeech(calendar,day,weekday) {
+      return englishMode?`${englishWeekdays[weekday]}, ${englishMonths[calendar.month-1]} ${day}, ${calendar.year}.`:
+        `${kannadaMonths[calendar.month-1]} ${kannadaDigits(day)}. ${kannadaWeekdays[weekday]}.`;
+    }
+    function calendarRegions() {
+      const calendar=calendarEvidence(); if (!calendar) return [];
+      const firstWeekday=new Date(Date.UTC(calendar.year,calendar.month-1,1)).getUTCDay();
+      const days=new Date(Date.UTC(calendar.year,calendar.month,0)).getUTCDate();
+      const rows=Math.ceil((firstWeekday+days)/7),box=calendar.date_grid_box;
+      if (!box||box.width<=0||box.height<=0) return [];
+      const cellWidth=box.width/7,cellHeight=box.height/rows,regions=[];
+      const header=calendar.weekday_header_box;
+      if (header&&header.width>0&&header.height>0) {
+        const headerWidth=header.width/7;
+        for (let weekday=0;weekday<7;weekday++) regions.push({id:`calendar-weekday-${weekday}`,
+          text:englishWeekdays[weekday],semanticText:englishMode?englishWeekdays[weekday]:kannadaWeekdays[weekday],
+          box:{x:header.x+weekday*headerWidth,y:header.y,width:headerWidth,height:header.height}});
+      }
+      for (let day=1;day<=days;day++) {
+        const position=firstWeekday+day-1,column=position%7,row=Math.floor(position/7);
+        regions.push({id:`calendar-day-${day}`,text:String(day),semanticText:calendarDaySpeech(calendar,day,column),
+          box:{x:box.x+column*cellWidth,y:box.y+row*cellHeight,width:cellWidth,height:cellHeight}});
+      }
+      return regions;
+    }
+    function calendarSummary(calendar) {
+      if (!calendar) return '';
+      const days=new Date(Date.UTC(calendar.year,calendar.month,0)).getUTCDate();
+      return englishMode?`${englishMonths[calendar.month-1]} ${calendar.year} calendar. It contains dates 1 through ${days}, arranged Sunday through Saturday.`:
+        `${kannadaMonths[calendar.month-1]} ${kannadaDigits(calendar.year)} ಕ್ಯಾಲೆಂಡರ್. ${kannadaDigits(1)} ರಿಂದ ${kannadaDigits(days)} ರವರೆಗೆ ದಿನಾಂಕಗಳು ಭಾನುವಾರದಿಂದ ಶನಿವಾರದ ಕ್ರಮದಲ್ಲಿವೆ.`;
+    }
     function textInsideObject(object) {
       if (!result||!object||!object.box) return '';
+      const calendar=calendarEvidence();
+      if (calendar&&overlapScore(object.box,calendar.date_grid_box)>=.5) return calendarSummary(calendar);
       const inside=item=>item.box&&item.box.x+item.box.width/2>=object.box.x&&
         item.box.x+item.box.width/2<=object.box.x+object.box.width&&
         item.box.y+item.box.height/2>=object.box.y&&item.box.y+item.box.height/2<=object.box.y+object.box.height;
@@ -706,7 +762,11 @@
     function selectableObjects() {
       if (!result||!result.image_size) return [];
       const width=result.image_size.width,height=result.image_size.height;
-      return (result.objects||[]).filter(object=>object.box&&object.box.width>0&&object.box.height>0&&
+      const calendar=calendarEvidence();
+      const semantic=calendar?[{id:'calendar-grid',name_kn:englishMode?'Calendar dates':'ಕ್ಯಾಲೆಂಡರ್ ದಿನಾಂಕಗಳು',
+        purpose_kn:englishMode?'Tap this area to hear what the calendar contains.':'ಕ್ಯಾಲೆಂಡರ್‌ನ ತಿಂಗಳು, ವರ್ಷ ಮತ್ತು ದಿನಾಂಕಗಳನ್ನು ಓದುತ್ತದೆ.',
+        box:calendar.date_grid_box}]:[];
+      return [...semantic,...(result.objects||[])].filter(object=>object.box&&object.box.width>0&&object.box.height>0&&
         !(object.box.width>=width*.92&&object.box.height>=height*.92))
         .sort((left,right)=>right.box.width*right.box.height-left.box.width*left.box.height);
     }
@@ -767,7 +827,18 @@
       }
       if (transcriptionLines().length) status.textContent='ಕೈಬರಹದ ಸಾಲನ್ನು ಸ್ಪರ್ಶಿಸಿ.';
     }
-    function renderContextRegions() { renderObjects(); renderTranscriptions(); renderVerifiedRegions(); }
+    function renderCalendarRegions() {
+      overlay.querySelectorAll('.calendar-region').forEach(node=>node.remove());
+      if (mode!=='word') return;
+      for (const region of calendarRegions()) {
+        const hit=document.createElementNS('http://www.w3.org/2000/svg','rect');
+        for (const key of ['x','y','width','height']) hit.setAttribute(key,region.box[key]);
+        hit.setAttribute('class','calendar-region'); hit.dataset.id=region.id;
+        hit.addEventListener('click',event=>{ event.stopPropagation(); if (!suppressTap) { stop(true); track('word'); readForUser(region); } });
+        overlay.appendChild(hit);
+      }
+    }
+    function renderContextRegions() { renderObjects(); renderTranscriptions(); renderVerifiedRegions(); renderCalendarRegions(); }
     function render(value,markStageOne=true) {
       result=value; overlay.textContent=''; current.textContent='';
       overlay.setAttribute('viewBox',`0 0 ${value.image_size.width} ${value.image_size.height}`);

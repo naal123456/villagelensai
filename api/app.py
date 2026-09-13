@@ -54,8 +54,8 @@ OPENAI_STAGE_FOUR_SERVICE_TIER = os.environ.get(
 )
 OPENAI_TRANSLATION_MODEL = os.environ.get("VILLAGELENS_TRANSLATION_MODEL", "gpt-5-mini")
 OPENAI_STAGE_TWO_ANALYSIS_VERSION = "luna-compact-v1"
-OPENAI_STAGE_THREE_ANALYSIS_VERSION = "terra-context-v2"
-OPENAI_STAGE_FOUR_ANALYSIS_VERSION = "sol-review-v2"
+OPENAI_STAGE_THREE_ANALYSIS_VERSION = "terra-context-v3"
+OPENAI_STAGE_FOUR_ANALYSIS_VERSION = "sol-review-v3"
 SPEECH_VOICES = {
     "kn-IN": os.environ.get("VILLAGELENS_KANNADA_TTS_VOICE", "kn-IN-Wavenet-A"),
     "ta-IN": os.environ.get("VILLAGELENS_TAMIL_TTS_VOICE", "ta-IN-Wavenet-A"),
@@ -813,6 +813,13 @@ def _scale_context_boxes(context: dict[str, Any], width: int, height: int) -> No
                 item["box"] = box
             else:
                 item.pop("box", None)
+    calendar = context.get("calendar", {})
+    if isinstance(calendar, dict):
+        for key in ("weekday_header_box", "date_grid_box"):
+            if box := scaled(calendar.get(key)):
+                calendar[key] = box
+            else:
+                calendar.pop(key, None)
 
 
 def _validated_context(
@@ -867,6 +874,30 @@ def _validated_context(
         for item in sections
         if isinstance(item, dict) and _valid_output_text(item.get("text_kn"), output_language)
     ] if isinstance(sections, list) else []
+    supplied_calendar = parsed.get("calendar", {})
+    try:
+        month = int(supplied_calendar.get("month", 0))
+        year = int(supplied_calendar.get("year", 0))
+    except (AttributeError, TypeError, ValueError):
+        month = year = 0
+    weekday_header_box = _context_box(
+        supplied_calendar.get("weekday_header_box") if isinstance(supplied_calendar, dict) else None
+    )
+    date_grid_box = _context_box(
+        supplied_calendar.get("date_grid_box") if isinstance(supplied_calendar, dict) else None
+    )
+    detected = bool(
+        isinstance(supplied_calendar, dict) and supplied_calendar.get("detected")
+        and 1 <= month <= 12 and 1900 <= year <= 2200
+        and weekday_header_box is not None and date_grid_box is not None
+    )
+    context["calendar"] = {
+        "detected": detected, "month": month if detected else 0, "year": year if detected else 0,
+    }
+    if detected:
+        context["calendar"].update(
+            weekday_header_box=weekday_header_box, date_grid_box=date_grid_box,
+        )
     if context["confidence"] not in {"high", "medium", "low"}:
         context["confidence"] = "low"
     valid = all(_valid_output_text(context[key], output_language) for key in required_text)
@@ -897,12 +928,19 @@ def _openai_reader(
     section_schema = {"type": "object", "additionalProperties": False,
                       "required": ["text_kn", "box"],
                       "properties": {"text_kn": {"type": "string"}, "box": box_schema}}
+    calendar_schema = {"type": "object", "additionalProperties": False,
+                       "required": ["detected", "month", "year", "weekday_header_box", "date_grid_box"],
+                       "properties": {"detected": {"type": "boolean"},
+                                      "month": {"type": "integer", "minimum": 0, "maximum": 12},
+                                      "year": {"type": "integer", "minimum": 0, "maximum": 2200},
+                                      "weekday_header_box": box_schema,
+                                      "date_grid_box": box_schema}}
     schema = {"type": "object", "additionalProperties": False,
               "required": ["translations", "scene_type", "objects",
                            "what_is_it_kn", "what_it_does_kn", "important_points_kn",
                            "action_needed_kn", "warning_kn", "uncertainty_kn",
                            "brief_spoken_kn", "detailed_spoken_kn", "transcription_kn",
-                           "spoken_sections", "confidence", "needs_independent_review"],
+                           "spoken_sections", "calendar", "confidence", "needs_independent_review"],
               "properties": {
                   "translations": {"type": "array", "items": {"type": "object",
                       "additionalProperties": False, "required": ["source", "translation_kn"],
@@ -921,6 +959,7 @@ def _openai_reader(
     schema["properties"].update({
         "transcription_kn": {"type": "array", "items": transcription_schema},
         "spoken_sections": {"type": "array", "items": section_schema},
+        "calendar": calendar_schema,
         "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
         "needs_independent_review": {"type": "boolean"},
     })
@@ -962,7 +1001,10 @@ def _openai_reader(
         prompt_prefix = (
             "Speak like a patient, knowledgeable Kannada-speaking friend. Explain every clearly visible title "
             "or heading before body details. Connect related facts into a natural explanation; never mechanically "
-            "enumerate OCR boxes, calendar cells, or disconnected fragments. "
+            "enumerate OCR boxes, calendar cells, or disconnected fragments. For a calendar, set calendar.detected "
+            "true, month and year numerically, weekday_header_box tightly around only the seven weekday labels, and "
+            "date_grid_box tightly around only the numbered date cells. For other images set detected false, month "
+            "and year zero, and both calendar boxes to [0,0,0,0]. "
         )
     if prior_analysis is not None:
         prior_keys = ("scene_type", "what_is_it_kn", "what_it_does_kn", "important_points_kn",
@@ -999,6 +1041,8 @@ def _openai_reader(
         payload["input"][0]["content"][0]["text"] = prompt_prefix + """Help an English-speaking reader understand this image, regardless of the language or script visible in it. Translate readable non-English content into clear natural English. Preserve important names, source expressions, numbers, dates, measurements, and units. The structured JSON property names ending in _kn are retained only for API compatibility; every value in those fields must be English.
 
 Identify up to six useful visible objects and give each a tight touchable bounding box [left,top,width,height] normalized from 0 to 1000. Never use the whole image, page, background, ground, or soil as an object box. For handwriting or a handwritten list, identify its likely purpose and organization, then translate every readable line into English in transcription_kn with a line box and uncertainty flag. Give a plausible reading only when the visible letters and context support it; otherwise abstain. Distinguish recognition failure from blur, distance, perspective, cropping, and low contrast, and provide specific capture guidance.
+
+For a calendar, set calendar.detected true, month and year numerically, weekday_header_box tightly around only the seven weekday labels, and date_grid_box tightly around only the numbered date cells. For every other image set calendar.detected false, month and year zero, and both calendar boxes to [0,0,0,0].
 
 Explain what the image is, what it does, its important details, any useful action, safety concerns, and uncertainty. Explain every clearly visible title or heading before body details. Speak like a patient, knowledgeable friend and connect related facts into one natural explanation. For a textbook or educational page, teach the page: identify the central topic, connect its main ideas, explain difficult terms in plain English, say why it matters, and provide one concrete example when supported. Do not mechanically repeat OCR, boxes, calendar cells, or disconnected fragments. If cropping prevents a complete lesson, state which edge is missing and never invent hidden material. Divide the explanation into three to six natural spoken_sections tied to the relevant image regions, including the heading when it is visible. brief_spoken_kn should be the most useful one- or two-sentence answer; detailed_spoken_kn should be five to eight short teaching sentences for an educational page. For calendars, first name the visible heading, month and year, then summarize highlighted dates and notable events instead of reciting the grid. For electrical equipment or medicine, report only visible or strongly supported identity, purpose, and ratings; never advise wiring, energizing, repair, or medication. Set confidence high only when important identity, text, numbers, and purpose are clear. Require independent review for handwriting uncertainty, safety-critical content, ambiguous units, or important doubt. Never invent facts, intent, diagnosis, species, or disease."""
     response = requests.post(

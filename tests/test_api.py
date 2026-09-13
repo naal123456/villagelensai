@@ -61,7 +61,7 @@ class ApiTests(unittest.TestCase):
         self.assertIn(b'id="quality-4" aria-label="Request strongest reading"', response.data)
         self.assertIn(b'id="owner-badge"', response.data)
         self.assertIn(b'id="app-version"', response.data)
-        self.assertIn(b'v2026.09.13.4', response.data)
+        self.assertIn(b'v2026.09.13.5', response.data)
         self.assertIn(b"'UNASSIGNED \xc2\xb7 OLDER CAPTURE'", response.data)
         self.assertIn(b"`${owner}${ownerName}`", response.data)
         self.assertIn(b'navigationGeneration', response.data)
@@ -147,7 +147,12 @@ class ApiTests(unittest.TestCase):
         self.assertIn(b'villagelens.translation.v1:', response.data)
         self.assertIn(b"if (activeControl===id) { stop(); return false; }", response.data)
         self.assertIn(b"result.detailed_spoken_kn", response.data)
-        self.assertIn(b"stageThreeAnalysisVersion='terra-context-v2'", response.data)
+        self.assertIn(b"stageThreeAnalysisVersion='terra-context-v3'", response.data)
+        self.assertIn(b'function calendarRegions', response.data)
+        self.assertIn(b'function calendarSummary', response.data)
+        self.assertIn(b'function renderCalendarRegions', response.data)
+        self.assertIn(b"id:'calendar-grid'", response.data)
+        self.assertIn(b'strongest.consensus_validated===true', response.data)
         self.assertIn(b"function groupedWords", response.data)
         self.assertIn(b"const semanticGroup=groupedWords", response.data)
         self.assertIn(b"function renderObjects", response.data)
@@ -946,6 +951,9 @@ class ApiTests(unittest.TestCase):
                 "detailed_spoken_kn": "ಇದು ಒಂದು ಪುಸ್ತಕ. ಮುಖಪುಟದಲ್ಲಿ ಹೆಸರು ಇದೆ.",
                 "transcription_kn": [],
                 "spoken_sections": [{"text_kn": "ಇದು ಒಂದು ಪುಸ್ತಕ.", "box": [100, 100, 500, 700]}],
+                "calendar": {"detected": True, "month": 9, "year": 2026,
+                             "weekday_header_box": [100, 200, 700, 100],
+                             "date_grid_box": [100, 300, 700, 600]},
                 "confidence": "high", "needs_independent_review": False,
             }),
         }]}]}
@@ -966,9 +974,14 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(value["objects"][0]["name_kn"], "ಪುಸ್ತಕ")
         self.assertEqual(value["summary_kn"], value["brief_spoken_kn"])
         self.assertTrue(value["quality_validated"])
-        self.assertEqual(value["analysis_version"], "terra-context-v2")
+        self.assertEqual(value["analysis_version"], "terra-context-v3")
         self.assertEqual(value["model"], "gpt-5.6-terra")
         self.assertEqual(value["objects"][0]["box"], {"x": 32, "y": 12, "width": 160, "height": 84})
+        self.assertEqual(value["calendar"], {
+            "detected": True, "month": 9, "year": 2026,
+            "weekday_header_box": {"x": 32, "y": 24, "width": 224, "height": 12},
+            "date_grid_box": {"x": 32, "y": 36, "width": 224, "height": 72},
+        })
         self.assertEqual(value["tester_id"], "a1")
         request_payload = provider.call_args.kwargs["json"]
         prompt = request_payload["input"][0]["content"][0]["text"]
@@ -983,6 +996,7 @@ class ApiTests(unittest.TestCase):
         self.assertIn("brief_spoken_kn", request_payload["text"]["format"]["schema"]["required"])
         self.assertIn("transcription_kn", request_payload["text"]["format"]["schema"]["required"])
         self.assertIn("spoken_sections", request_payload["text"]["format"]["schema"]["required"])
+        self.assertIn("calendar", request_payload["text"]["format"]["schema"]["required"])
         self.assertNotIn("words", request_payload["text"]["format"]["schema"]["properties"])
         self.assertEqual(request_payload["reasoning"]["effort"], "none")
         self.assertEqual(request_payload["service_tier"], "default")
@@ -1010,7 +1024,7 @@ class ApiTests(unittest.TestCase):
             value = _openai_reader(
                 image_bytes(), "image/jpeg", 320, 120, stage=4,
                 model="gpt-5.6-sol", service_tier="default",
-                analysis_version="sol-review-v2",
+                analysis_version="sol-review-v3",
                 prior_analysis={"brief_spoken_kn": "ಇದು ಪುಸ್ತಕ."},
             )
 
@@ -1040,7 +1054,7 @@ class ApiTests(unittest.TestCase):
 
     def test_kannada_context_allows_normal_unicode_punctuation(self) -> None:
         value = _normalize_stage_three({
-            "analysis_version": "terra-context-v2",
+            "analysis_version": "terra-context-v3",
             "translations": [],
             "scene_type": "calendar",
             "objects": [],
@@ -1058,7 +1072,7 @@ class ApiTests(unittest.TestCase):
 
     def test_full_frame_object_box_is_not_selectable(self) -> None:
         value = _normalize_stage_three({
-            "analysis_version": "terra-context-v2",
+            "analysis_version": "terra-context-v3",
             "image_size": {"width": 3072, "height": 4096},
             "translations": [], "scene_type": "plant", "summary_kn": "ಇದು ಸಸ್ಯ.",
             "objects": [
@@ -1177,13 +1191,13 @@ class ApiTests(unittest.TestCase):
             },
             f"captures/{capture_id}/stage-3.json": {
                 "stage": 3, "reader": "vision_language", "model": "gpt-5.6-terra",
-                "analysis_version": "terra-context-v2",
+                "analysis_version": "terra-context-v3",
                 "translations": [{"source": "book", "translation_kn": "ಪುಸ್ತಕ"}],
                 "summary_kn": "ಪುಸ್ತಕ",
             },
             f"captures/{capture_id}/stage-4.json": {
                 "stage": 4, "reader": "vision_language", "model": "gpt-5.6-sol",
-                "analysis_version": "sol-review-v2", "summary_kn": "ಪುಸ್ತಕ",
+                "analysis_version": "sol-review-v3", "summary_kn": "ಪುಸ್ತಕ",
                 "consensus_validated": True,
             },
         }
