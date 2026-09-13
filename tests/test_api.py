@@ -61,7 +61,7 @@ class ApiTests(unittest.TestCase):
         self.assertIn(b'id="quality-4" aria-label="Request strongest reading"', response.data)
         self.assertIn(b'id="owner-badge"', response.data)
         self.assertIn(b'id="app-version"', response.data)
-        self.assertIn(b'v2026.09.13.5', response.data)
+        self.assertIn(b'v2026.09.13.6', response.data)
         self.assertIn(b"'UNASSIGNED \xc2\xb7 OLDER CAPTURE'", response.data)
         self.assertIn(b"`${owner}${ownerName}`", response.data)
         self.assertIn(b'navigationGeneration', response.data)
@@ -242,6 +242,11 @@ class ApiTests(unittest.TestCase):
         response = self.client.get("/b/")
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response.headers["Location"], "/access?tester=a3")
+
+    def test_non_ascii_access_code_is_rejected_without_server_error(self) -> None:
+        self.enable_access_gate()
+        response = self.client.post("/access", data={"tester": "a3", "code": "ತಪ್ಪು"})
+        self.assertEqual(response.status_code, 401)
 
     def test_demo_assets_are_served(self) -> None:
         image = self.client.get("/a/demo/i2.jpeg")
@@ -1016,7 +1021,7 @@ class ApiTests(unittest.TestCase):
                 "detailed_spoken_kn": "ಇದು ಓದಲು ಬಳಸುವ ಪುಸ್ತಕ.", "transcription_kn": [],
                 "spoken_sections": [], "confidence": "high",
                 "needs_independent_review": False, "agrees_with_prior": True,
-                "material_disagreement_kn": "",
+                "material_disagreement_kn": "No material disagreement. The calendar facts agree.",
             }),
         }]}]}
 
@@ -1034,8 +1039,10 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(payload["reasoning"]["effort"], "low")
         self.assertEqual(provider.call_args.kwargs["timeout"], 85)
         self.assertIn("Earlier analysis", payload["input"][0]["content"][0]["text"])
+        self.assertIn("must be the empty string", payload["input"][0]["content"][0]["text"])
         self.assertIn("agrees_with_prior", payload["text"]["format"]["schema"]["required"])
         self.assertTrue(value["consensus_validated"])
+        self.assertEqual(value["material_disagreement_kn"], "")
 
     def test_mixed_script_kannada_output_is_not_marked_ready(self) -> None:
         value = _normalize_stage_three({

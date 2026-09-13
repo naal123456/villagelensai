@@ -336,7 +336,9 @@ def access() -> Response:
     if request.method == "POST":
         submitted = request.form.get("code", "").strip()
         expected = _access_code()
-        if tester_id and submitted and hmac.compare_digest(submitted, expected):
+        if tester_id and submitted and hmac.compare_digest(
+            submitted.encode("utf-8"), expected.encode("utf-8")
+        ):
             destination = f"/a/?tester={tester_id}"
             return _with_access_cookie(make_response(redirect(destination, code=303)), tester_id)
         message = (
@@ -1009,7 +1011,7 @@ def _openai_reader(
     if prior_analysis is not None:
         prior_keys = ("scene_type", "what_is_it_kn", "what_it_does_kn", "important_points_kn",
                       "action_needed_kn", "warning_kn", "uncertainty_kn", "brief_spoken_kn",
-                      "detailed_spoken_kn", "transcription_kn", "confidence")
+                      "detailed_spoken_kn", "transcription_kn", "calendar", "confidence")
         prior = json.dumps(
             {key: prior_analysis[key] for key in prior_keys if key in prior_analysis},
             ensure_ascii=False, separators=(",", ":"),
@@ -1019,6 +1021,8 @@ def _openai_reader(
                          f"earlier analysis below, correct it when needed, and return the best final {answer_language} "
                          f"explanation. Set agrees_with_prior false and describe the material disagreement in {answer_language} "
                          "when identity, important text or numbers, purpose, safety, or teaching meaning differs. "
+                         "When agrees_with_prior is true, material_disagreement_kn must be the empty string; never "
+                         "write 'no disagreement' or an equivalent phrase. "
                          f"Earlier analysis: {prior}\n")
     language_override = ""
     if output_language == "en":
@@ -1088,6 +1092,11 @@ Explain what the image is, what it does, its important details, any useful actio
     if prior_analysis is not None:
         disagreement = str(parsed.get("material_disagreement_kn", "")).strip()
         result["agrees_with_prior"] = bool(parsed.get("agrees_with_prior", False))
+        no_disagreement = disagreement.casefold().startswith((
+            "no material disagreement", "no disagreement", "none", "not applicable",
+        )) or (disagreement.startswith("ಯಾವುದೇ") and disagreement.endswith("ಇಲ್ಲ"))
+        if result["agrees_with_prior"] and no_disagreement:
+            disagreement = ""
         result["material_disagreement_kn"] = disagreement
         result["consensus_validated"] = bool(
             result["quality_validated"] and result["agrees_with_prior"] and not disagreement
