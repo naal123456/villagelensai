@@ -61,7 +61,7 @@ class ApiTests(unittest.TestCase):
         self.assertIn(b'id="quality-4" aria-label="Request strongest reading"', response.data)
         self.assertIn(b'id="owner-badge"', response.data)
         self.assertIn(b'id="app-version"', response.data)
-        self.assertIn(b'v2026.09.13.7', response.data)
+        self.assertIn(b'v2026.09.13.8', response.data)
         self.assertIn(b"'UNASSIGNED \xc2\xb7 OLDER CAPTURE'", response.data)
         self.assertIn(b"`${owner}${ownerName}`", response.data)
         self.assertIn(b'navigationGeneration', response.data)
@@ -147,7 +147,12 @@ class ApiTests(unittest.TestCase):
         self.assertIn(b'villagelens.translation.v1:', response.data)
         self.assertIn(b"if (activeControl===id) { stop(); return false; }", response.data)
         self.assertIn(b"result.detailed_spoken_kn", response.data)
-        self.assertIn(b"stageThreeAnalysisVersion='terra-context-v3'", response.data)
+        self.assertIn(b"stageThreeAnalysisVersion='terra-ocr-grounded-v4'", response.data)
+        self.assertIn(b"stageFourAnalysisVersion='sol-ocr-review-v4'", response.data)
+        self.assertIn(b'function objectExplanation', response.data)
+        self.assertIn(b"id:'primary-text'", response.data)
+        self.assertIn(b'const source=result&&result.lines||[],translated=transcriptionLines()', response.data)
+        self.assertIn(b"${index} of ${queue.length}", response.data)
         self.assertIn(b'function calendarRegions', response.data)
         self.assertIn(b'function calendarSummary', response.data)
         self.assertIn(b'function renderCalendarRegions', response.data)
@@ -959,6 +964,7 @@ class ApiTests(unittest.TestCase):
                 "calendar": {"detected": True, "month": 9, "year": 2026,
                              "weekday_header_box": [100, 200, 700, 100],
                              "date_grid_box": [100, 300, 700, 600]},
+                "primary_text": {"detected": False, "box": [0, 0, 0, 0]},
                 "confidence": "high", "needs_independent_review": False,
             }),
         }]}]}
@@ -979,7 +985,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(value["objects"][0]["name_kn"], "ಪುಸ್ತಕ")
         self.assertEqual(value["summary_kn"], value["brief_spoken_kn"])
         self.assertTrue(value["quality_validated"])
-        self.assertEqual(value["analysis_version"], "terra-context-v3")
+        self.assertEqual(value["analysis_version"], "terra-ocr-grounded-v4")
         self.assertEqual(value["model"], "gpt-5.6-terra")
         self.assertEqual(value["objects"][0]["box"], {"x": 32, "y": 12, "width": 160, "height": 84})
         self.assertEqual(value["calendar"], {
@@ -1002,12 +1008,87 @@ class ApiTests(unittest.TestCase):
         self.assertIn("transcription_kn", request_payload["text"]["format"]["schema"]["required"])
         self.assertIn("spoken_sections", request_payload["text"]["format"]["schema"]["required"])
         self.assertIn("calendar", request_payload["text"]["format"]["schema"]["required"])
+        self.assertIn("primary_text", request_payload["text"]["format"]["schema"]["required"])
+        self.assertIn("line_ids", request_payload["text"]["format"]["schema"]["properties"]["transcription_kn"]["items"]["required"])
         self.assertNotIn("words", request_payload["text"]["format"]["schema"]["properties"])
         self.assertEqual(request_payload["reasoning"]["effort"], "none")
         self.assertEqual(request_payload["service_tier"], "default")
         self.assertEqual(request_payload["text"]["verbosity"], "low")
         self.assertEqual(value["service_tier"], "priority")
         store.assert_called_once_with(capture_id, 3, value)
+
+    @patch("api.app.requests.post")
+    def test_english_text_page_requires_ocr_grounded_translation_coverage(
+        self, provider: object,
+    ) -> None:
+        ocr_lines = [
+            {"id": f"line-{index}", "text": f"ಕನ್ನಡ ಸಾಲು {index}",
+             "box": {"x": 30, "y": 8 + index * 14, "width": 230, "height": 10}}
+            for index in range(1, 7)
+        ]
+
+        def parsed(line_ids: list[str]) -> dict[str, object]:
+            return {
+                "translations": [], "scene_type": "textbook page",
+                "objects": [{"name": "main paragraph", "name_kn": "Main paragraph",
+                             "purpose_kn": "It explains the lesson on this page.",
+                             "evidence": "Visible Kannada text", "uncertain": False,
+                             "box": [50, 50, 900, 900]}],
+                "what_is_it_kn": "This is a Kannada textbook page.",
+                "what_it_does_kn": "It explains a lesson in several paragraphs.",
+                "important_points_kn": ["The whole main text column should be translated."],
+                "action_needed_kn": "", "warning_kn": "", "uncertainty_kn": "",
+                "brief_spoken_kn": "This is a Kannada lesson translated into English.",
+                "detailed_spoken_kn": "The page has a heading and connected explanatory text.",
+                "transcription_kn": [
+                    {"text_kn": f"Translated sentence {index}.",
+                     "box": [100, 100 + index * 100, 700, 80], "uncertain": False,
+                     "line_ids": [line_id]}
+                    for index, line_id in enumerate(line_ids)
+                ],
+                "spoken_sections": [
+                    {"text_kn": "This section explains the main lesson.",
+                     "box": [50, 50, 900, 900]},
+                ],
+                "calendar": {"detected": False, "month": 0, "year": 0,
+                             "weekday_header_box": [0, 0, 0, 0],
+                             "date_grid_box": [0, 0, 0, 0]},
+                "primary_text": {"detected": True, "box": [50, 50, 900, 900]},
+                "confidence": "high", "needs_independent_review": False,
+            }
+
+        complete = MagicMock(status_code=200)
+        complete.json.return_value = {"service_tier": "priority", "output": [{"content": [{
+            "type": "output_text", "text": json.dumps(parsed([line["id"] for line in ocr_lines])),
+        }]}]}
+        truncated = MagicMock(status_code=200)
+        truncated.json.return_value = {"service_tier": "priority", "output": [{"content": [{
+            "type": "output_text", "text": json.dumps(parsed(["line-1"])),
+        }]}]}
+        provider.side_effect = [complete, truncated]
+
+        with patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"}):
+            full = _openai_reader(
+                image_bytes(), "image/jpeg", 320, 120, stage=3,
+                output_language="en", ocr_evidence={"lines": ocr_lines},
+            )
+            partial = _openai_reader(
+                image_bytes(), "image/jpeg", 320, 120, stage=3,
+                output_language="en", ocr_evidence={"lines": ocr_lines},
+            )
+
+        prompt = provider.call_args_list[0].kwargs["json"]["input"][0]["content"][0]["text"]
+        self.assertIn("UNTRUSTED OCR EVIDENCE", prompt)
+        self.assertIn("line-6", prompt)
+        self.assertIn("Preserve OCR-supported place names", prompt)
+        self.assertEqual(full["translation_coverage"], {
+            "expected_lines": 6, "translated_lines": 6, "ratio": 1.0,
+        })
+        self.assertTrue(full["quality_validated"])
+        self.assertEqual(partial["translation_coverage"], {
+            "expected_lines": 6, "translated_lines": 1, "ratio": 0.167,
+        })
+        self.assertFalse(partial["quality_validated"])
 
     @patch("api.app.requests.post")
     def test_sol_review_compares_terra_and_requires_explicit_consensus(self, provider: object) -> None:
@@ -1029,7 +1110,7 @@ class ApiTests(unittest.TestCase):
             value = _openai_reader(
                 image_bytes(), "image/jpeg", 320, 120, stage=4,
                 model="gpt-5.6-sol", service_tier="default",
-                analysis_version="sol-review-v3",
+                analysis_version="sol-ocr-review-v4",
                 prior_analysis={"brief_spoken_kn": "ಇದು ಪುಸ್ತಕ."},
             )
 
@@ -1072,7 +1153,7 @@ class ApiTests(unittest.TestCase):
 
     def test_kannada_context_allows_normal_unicode_punctuation(self) -> None:
         value = _normalize_stage_three({
-            "analysis_version": "terra-context-v3",
+            "analysis_version": "terra-ocr-grounded-v4",
             "translations": [],
             "scene_type": "calendar",
             "objects": [],
@@ -1090,7 +1171,7 @@ class ApiTests(unittest.TestCase):
 
     def test_full_frame_object_box_is_not_selectable(self) -> None:
         value = _normalize_stage_three({
-            "analysis_version": "terra-context-v3",
+            "analysis_version": "terra-ocr-grounded-v4",
             "image_size": {"width": 3072, "height": 4096},
             "translations": [], "scene_type": "plant", "summary_kn": "ಇದು ಸಸ್ಯ.",
             "objects": [
@@ -1209,13 +1290,13 @@ class ApiTests(unittest.TestCase):
             },
             f"captures/{capture_id}/stage-3.json": {
                 "stage": 3, "reader": "vision_language", "model": "gpt-5.6-terra",
-                "analysis_version": "terra-context-v3",
+                "analysis_version": "terra-ocr-grounded-v4",
                 "translations": [{"source": "book", "translation_kn": "ಪುಸ್ತಕ"}],
                 "summary_kn": "ಪುಸ್ತಕ",
             },
             f"captures/{capture_id}/stage-4.json": {
                 "stage": 4, "reader": "vision_language", "model": "gpt-5.6-sol",
-                "analysis_version": "sol-review-v3", "summary_kn": "ಪುಸ್ತಕ",
+                "analysis_version": "sol-ocr-review-v4", "summary_kn": "ಪುಸ್ತಕ",
                 "consensus_validated": True,
             },
         }

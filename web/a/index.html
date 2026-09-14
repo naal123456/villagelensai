@@ -116,7 +116,7 @@
         <span class="bar" id="quality-1"></span><span class="bar" id="quality-2"></span>
         <span class="bar" id="quality-3"></span><button class="bar" id="quality-4" aria-label="Request strongest reading" data-tip="Request strongest reading"></button>
         <span id="quality-timer">—</span>
-        <span id="app-version" aria-label="App version">v2026.09.13.7</span>
+        <span id="app-version" aria-label="App version">v2026.09.13.8</span>
       </div>
       <p id="mic-status" role="status" aria-live="assertive" hidden></p>
     </section>
@@ -179,11 +179,12 @@
       'select-object','infer-global','ask','install'];
     const meaningFields=['summary_kn','brief_spoken_kn','detailed_spoken_kn','scene_type','objects',
       'what_is_it_kn','what_it_does_kn','important_points_kn','action_needed_kn','warning_kn','uncertainty_kn',
-      'transcription_kn','spoken_sections','verified_regions','calendar','confidence','needs_independent_review'];
+      'transcription_kn','spoken_sections','verified_regions','calendar','primary_text','translation_coverage',
+      'confidence','needs_independent_review'];
     const stageTwoAnalysisVersion='luna-compact-v1';
-    const stageThreeAnalysisVersion='terra-context-v3',stageFourAnalysisVersion='sol-review-v3';
+    const stageThreeAnalysisVersion='terra-ocr-grounded-v4',stageFourAnalysisVersion='sol-ocr-review-v4';
     const automaticStages=[1,2,3],enabledStages=[1,2,3,4];
-    const appVersion='2026-09-13.7';
+    const appVersion='2026-09-13.8';
     const captureBurstFrames=4;
     let speechVoices=[];
     const testerId=configureTesterId();
@@ -671,6 +672,13 @@
     function objectText(object) {
       return [object.name_kn,object.purpose_kn].filter(Boolean).join('. ');
     }
+    function objectExplanation(object) {
+      if (!result||!object||!object.box) return objectText(object);
+      const match=(result.spoken_sections||[]).filter(section=>section.box&&section.text_kn)
+        .map(section=>({section,score:overlapScore(object.box,section.box)}))
+        .filter(candidate=>candidate.score>=.45).sort((left,right)=>right.score-left.score)[0];
+      return match&&match.section.text_kn||objectText(object);
+    }
     const englishMonths=['January','February','March','April','May','June','July','August','September','October','November','December'];
     const kannadaMonths=['ಜನವರಿ','ಫೆಬ್ರವರಿ','ಮಾರ್ಚ್','ಏಪ್ರಿಲ್','ಮೇ','ಜೂನ್','ಜುಲೈ','ಆಗಸ್ಟ್','ಸೆಪ್ಟೆಂಬರ್','ಅಕ್ಟೋಬರ್','ನವೆಂಬರ್','ಡಿಸೆಂಬರ್'];
     const englishWeekdays=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
@@ -739,7 +747,7 @@
       const item=gallery[galleryIndex];
       if (item) item.questionFocus={box:{...object.box},label:object.name_kn||object.name||''};
       document.querySelectorAll('.object-region').forEach(node=>node.classList.toggle('active',node.dataset.id===object.id));
-      addFocus(object.box); const visible=textInsideObject(object), explanation=objectText(object);
+      addFocus(object.box); const visible=textInsideObject(object), explanation=objectExplanation(object);
       current.textContent=[visible,explanation].filter(Boolean).join('\n');
       status.textContent=englishMode?'Reading this area, then explaining it.':'ಈ ಭಾಗವನ್ನು ಓದಿ, ನಂತರ ಅರ್ಥ ಹೇಳುತ್ತಿದೆ.';
       track('object',Boolean(visible||explanation));
@@ -766,6 +774,11 @@
       const semantic=calendar?[{id:'calendar-grid',name_kn:englishMode?'Calendar dates':'ಕ್ಯಾಲೆಂಡರ್ ದಿನಾಂಕಗಳು',
         purpose_kn:englishMode?'Tap this area to hear what the calendar contains.':'ಕ್ಯಾಲೆಂಡರ್‌ನ ತಿಂಗಳು, ವರ್ಷ ಮತ್ತು ದಿನಾಂಕಗಳನ್ನು ಓದುತ್ತದೆ.',
         box:calendar.date_grid_box}]:[];
+      const primary=result.primary_text;
+      if (primary&&primary.detected&&primary.box) semantic.push({id:'primary-text',
+        name_kn:englishMode?'Main text':'ಮುಖ್ಯ ಪಠ್ಯ',
+        purpose_kn:englishMode?'Reads, translates, and explains the main text.':'ಮುಖ್ಯ ಪಠ್ಯವನ್ನು ಓದಿ ಅರ್ಥ ವಿವರಿಸುತ್ತದೆ.',
+        box:primary.box});
       return [...semantic,...(result.objects||[])].filter(object=>object.box&&object.box.width>0&&object.box.height>0&&
         !(object.box.width>=width*.92&&object.box.height>=height*.92))
         .sort((left,right)=>right.box.width*right.box.height-left.box.width*left.box.height);
@@ -793,13 +806,28 @@
     function transcriptionLines() {
       return (result&&result.transcription_kn||[]).filter(line=>line.box&&line.text_kn).map((line,index)=>({
         id:`transcription-${index}`,text:sourceTextForBox(line.box)||line.text_kn,translation:line.text_kn,
-        box:line.box,word_ids:[],uncertain:line.uncertain,
+        box:line.box,word_ids:[],line_ids:line.line_ids||[],uncertain:line.uncertain,
       }));
     }
     function verifiedRegions() { return result&&result.verified_regions||[]; }
     function effectiveLines() {
       const verified=verifiedRegions(); if (verified.length) return verified.map(region=>({...region,text:region.spoken_kn}));
-      const handwritten=transcriptionLines(); return handwritten.length?handwritten:(result&&result.lines||[]);
+      const source=result&&result.lines||[],translated=transcriptionLines();
+      if (!translated.length) return source;
+      const emitted=new Set(),output=[];
+      for (const line of source) {
+        const match=translated.find(region=>region.line_ids.includes(line.id)||overlapScore(line.box,region.box)>=.55);
+        if (!match) { output.push(line); continue; }
+        if (emitted.has(match.id)) continue;
+        emitted.add(match.id);
+        const members=source.filter(candidate=>match.line_ids.includes(candidate.id)||
+          (!match.line_ids.length&&overlapScore(candidate.box,match.box)>=.55));
+        output.push({...match,ids:members.flatMap(candidate=>candidate.word_ids||[]),
+          text:members.length?members.map(candidate=>candidate.text).join(' '):match.text,
+          box:unionBoxes(members.map(candidate=>candidate.box))||match.box});
+      }
+      for (const line of translated) if (!emitted.has(line.id)) output.push(line);
+      return output.sort((left,right)=>(left.box&&left.box.y||0)-(right.box&&right.box.y||0));
     }
     function renderVerifiedRegions() {
       overlay.querySelectorAll('.verified-hit').forEach(node=>node.remove());
@@ -818,14 +846,14 @@
     function renderTranscriptions() {
       overlay.querySelectorAll('.transcription-region').forEach(node=>node.remove());
       if (mode!=='sentence') return;
-      for (const line of transcriptionLines()) {
+      for (const line of effectiveLines()) {
         const hit=document.createElementNS('http://www.w3.org/2000/svg','rect');
         for (const key of ['x','y','width','height']) hit.setAttribute(key,line.box[key]);
         hit.setAttribute('rx','6'); hit.setAttribute('class','transcription-region');
         hit.addEventListener('click',event=>{ event.stopPropagation(); activate(line,line.text); track('line'); readForUser(line,true); });
         overlay.appendChild(hit);
       }
-      if (transcriptionLines().length) status.textContent='ಕೈಬರಹದ ಸಾಲನ್ನು ಸ್ಪರ್ಶಿಸಿ.';
+      if (effectiveLines().length) status.textContent=englishMode?'Tap a line to hear the original and English.':'ಸಾಲನ್ನು ಸ್ಪರ್ಶಿಸಿ.';
     }
     function renderCalendarRegions() {
       overlay.querySelectorAll('.calendar-region').forEach(node=>node.remove());
@@ -978,14 +1006,22 @@
       if (!startAction(buttonId)) return;
       const generation=playbackGeneration; stage.classList.add('playing'); const began=Date.now();
       const queue=eventName==='word'?groupedWords(items):items;
-      let ok=true;
+      let ok=true,failures=0,index=0;
       for (const item of queue) {
         if (generation!==playbackGeneration) { ok=false; break; }
+        index++;
+        status.textContent=englishMode?`${eventName==='line'?'Sentence':'Word'} ${index} of ${queue.length}`:
+          `${eventName==='line'?'ವಾಕ್ಯ':'ಪದ'} ${index} / ${queue.length}`;
         activate(item,item.text);
-        if (!await readForUser(item,eventName==='line') || generation!==playbackGeneration) { ok=false; break; }
+        if (!await readForUser(item,eventName==='line')) failures++;
+        if (generation!==playbackGeneration) { ok=false; break; }
       }
       finishAction(buttonId); track(eventName,ok,Date.now()-began);
-      if (generation===playbackGeneration) { stage.classList.remove('playing'); document.querySelectorAll('.underline').forEach(n=>n.classList.remove('active')); }
+      if (generation===playbackGeneration) {
+        stage.classList.remove('playing'); document.querySelectorAll('.underline').forEach(n=>n.classList.remove('active'));
+        status.textContent=failures?(englishMode?`Finished with ${failures} audio segment${failures===1?'':'s'} unavailable.`:
+          `${failures} ಧ್ವನಿ ಭಾಗಗಳು ಲಭ್ಯವಾಗಲಿಲ್ಲ.`):(englishMode?'Reading finished.':'ಓದುವಿಕೆ ಮುಗಿದಿದೆ.');
+      }
     }
     function newCaptureId() {
       return (crypto.randomUUID?crypto.randomUUID():`${Date.now()}-${Math.random()}`).replace(/-/g,'').replace(/[^0-9a-f]/gi,'').padEnd(32,'0').slice(0,32).toLowerCase();
