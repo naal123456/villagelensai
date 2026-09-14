@@ -216,3 +216,32 @@ inside it exists, the controls safely fall back to the full OCR queue.
 Background/foreground recovery and audible completion still require physical
 Safari and Chrome acceptance tests because a server-side check cannot reproduce
 the phones' operating-system audio suspension behavior.
+
+## Foreground version handshake
+
+The first field response after `.14.1` exposed a separate delivery problem:
+Cloud Run received no phone, usage, or speech request after the deployment. The
+phone was returning to an already-open page whose JavaScript remained in
+memory. `Cache-Control: no-store` guarantees a fresh navigation, but cannot
+replace code in a page that never navigates.
+
+Version `v2026.09.14.2` publishes `app_version` from `/health`. Whenever a tab
+becomes visible, and whenever Safari restores it from its back/forward cache,
+the reader compares its in-memory version with the server and reloads itself on
+a mismatch. Usage events now include a sanitized client version and a
+foreground event, allowing future diagnostics to prove which code a phone was
+actually running without recording OCR or spoken content.
+
+- Source commit: `806a2ed`
+- GitHub Actions run `34905940016`: passed
+- Tests: `67/67` passed; Python and browser JavaScript parsing passed
+- Cloud Build: `df70c4e7-fa2e-49b0-a089-b6697feea306`
+- Container digest:
+  `sha256:41ed2fd89e569e82a840a9625defd20efffcf07767132fe95a0dbafe4281710b`
+- Production revision: `vlens-a-00060-8w6`, 100 percent traffic
+- Live `/health`: healthy and reports `app_version: 2026-09-14.2`
+- Authenticated `/b/?tester=a3`: version `.14.2`, server-version comparison,
+  foreground reload, and client-version telemetry markers present
+- Warning/error log query for the new revision: empty
+- No OCR or LLM request was made for this delivery correction
+- Immediate rollback: `vlens-a-00059-wr6`
