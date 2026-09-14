@@ -116,7 +116,7 @@
         <span class="bar" id="quality-1"></span><span class="bar" id="quality-2"></span>
         <span class="bar" id="quality-3"></span><button class="bar" id="quality-4" aria-label="Request strongest reading" data-tip="Request strongest reading"></button>
         <span id="quality-timer">—</span>
-        <span id="app-version" aria-label="App version">v2026.09.13.8</span>
+        <span id="app-version" aria-label="App version">v2026.09.14.1</span>
       </div>
       <p id="mic-status" role="status" aria-live="assertive" hidden></p>
     </section>
@@ -169,7 +169,8 @@
     let gallery=[], galleryIndex=0, result=null, mode='word', timerId=0, started=0, timerOwner=null;
     let navigationGeneration=0;
     let playbackGeneration=0, speechGeneration=0, pointerStart=null, suppressTap=false, activeControl='mode-word';
-    let audioContext=null, activeAudioSource=null, activeRecorder=null, recordingTimer=0, micTimerId=0;
+    let audioContext=null, activeAudioSource=null, activeAudioResolve=null, activeSpeechResolve=null;
+    let activeRecorder=null, recordingTimer=0, micTimerId=0;
     let cameraStream=null, cameraAnalysisTimer=0, previousCameraFrame=null;
     let cameraCapturing=false, lastCameraPrompt='', lastCameraPromptAt=0, latestCameraQuality=null;
     let nextCaptureSequence=1;
@@ -184,7 +185,7 @@
     const stageTwoAnalysisVersion='luna-compact-v1';
     const stageThreeAnalysisVersion='terra-ocr-grounded-v4',stageFourAnalysisVersion='sol-ocr-review-v4';
     const automaticStages=[1,2,3],enabledStages=[1,2,3,4];
-    const appVersion='2026-09-13.8';
+    const appVersion='2026-09-14.1';
     const captureBurstFrames=4;
     let speechVoices=[];
     const testerId=configureTesterId();
@@ -288,11 +289,9 @@
       $(id).classList.remove('active'); working(id,false); activeControl='';
     }
     function stop(keepControl=false) {
-      playbackGeneration++; speechGeneration++;
+      playbackGeneration++; stopSpeechOnly();
       clearTimeout(recordingTimer); recordingTimer=0;
       if (activeRecorder&&activeRecorder.state!=='inactive') { try { activeRecorder.stop(); } catch (_) {} }
-      if ('speechSynthesis' in window) speechSynthesis.cancel();
-      if (activeAudioSource) { try { activeAudioSource.stop(); } catch (_) {} activeAudioSource=null; }
       stage.classList.remove('playing');
       document.querySelectorAll('.underline,.object-region').forEach(node => node.classList.remove('active'));
       overlay.querySelectorAll('.focus-region').forEach(node=>node.remove());
@@ -425,12 +424,28 @@
       }
       if (remaining) chunks.push(remaining); return chunks;
     }
+    function discardAudioContext() {
+      const stale=audioContext,source=activeAudioSource;
+      if (activeAudioResolve) activeAudioResolve(false);
+      if (source) { try { source.stop(); } catch (_) {} }
+      audioContext=null; activeAudioSource=null; activeAudioResolve=null;
+      speechAudioCache.clear();
+      if (stale&&stale.state!=='closed') { try { stale.close(); } catch (_) {} }
+    }
     async function ensureAudioContext() {
       const AudioContextClass=window.AudioContext||window.webkitAudioContext;
       if (!AudioContextClass) return null;
+      if (audioContext&&audioContext.state==='closed') discardAudioContext();
       if (!audioContext) audioContext=new AudioContextClass();
-      if (audioContext.state==='suspended') await audioContext.resume();
-      return audioContext;
+      if (audioContext.state!=='running') {
+        try { await audioContext.resume(); } catch (_) { discardAudioContext(); }
+        if (audioContext&&audioContext.state!=='running') discardAudioContext();
+      }
+      if (!audioContext) {
+        try { audioContext=new AudioContextClass(); await audioContext.resume(); }
+        catch (_) { discardAudioContext(); return null; }
+      }
+      return audioContext.state==='running'?audioContext:null;
     }
     async function unlockAudioPlayback() {
       try {
@@ -458,7 +473,12 @@
         return await new Promise(resolve=>{
           const source=context.createBufferSource(); activeAudioSource=source;
           source.buffer=buffer; source.connect(context.destination);
-          source.onended=()=>{ if (activeAudioSource===source) activeAudioSource=null; resolve(generation===speechGeneration); };
+          let finished=false;
+          const finish=ok=>{ if (finished) return; finished=true;
+            if (activeAudioSource===source) activeAudioSource=null;
+            if (activeAudioResolve===finish) activeAudioResolve=null; resolve(ok); };
+          activeAudioResolve=finish;
+          source.onended=()=>finish(generation===speechGeneration);
           source.start();
         });
       } catch (_) { if (generation===speechGeneration) showKannadaVoiceError(); return false; }
@@ -478,8 +498,12 @@
           const utterance=new SpeechSynthesisUtterance(segment.text);
           utterance.lang=segment.language; utterance.rate=.7;
           if (selectedVoice) utterance.voice=selectedVoice;
-          utterance.onend=()=>resolve({ok:generation===speechGeneration,error:''});
-          utterance.onerror=event=>resolve({ok:false,error:event.error||'speech-error'});
+          let finished=false;
+          const finish=value=>{ if (finished) return; finished=true;
+            if (activeSpeechResolve===finish) activeSpeechResolve=null; resolve(value); };
+          activeSpeechResolve=finish;
+          utterance.onend=()=>finish({ok:generation===speechGeneration,error:''});
+          utterance.onerror=event=>finish({ok:false,error:event.error||'speech-error'});
           speechSynthesis.speak(utterance);
         });
         if (!completed.ok||generation!==speechGeneration) {
@@ -494,9 +518,12 @@
       track(ok?'audio_ok':'audio_failed',ok,Date.now()-began); return ok;
     }
     function stopSpeechOnly() {
-      speechGeneration++;
+      speechGeneration++; const source=activeAudioSource;
+      if (activeAudioResolve) activeAudioResolve(false);
+      if (activeSpeechResolve) activeSpeechResolve({ok:false,error:'cancelled'});
       if ('speechSynthesis' in window) speechSynthesis.cancel();
-      if (activeAudioSource) { try { activeAudioSource.stop(); } catch (_) {} activeAudioSource=null; }
+      if (source) { try { source.stop(); } catch (_) {} }
+      activeAudioSource=null;
     }
     function lineForWord(word) { return (result.lines||[]).find(line=>line.id===word.line_id); }
     function addFocus(box,className='focus-region',id='') {
@@ -828,6 +855,27 @@
       }
       for (const line of translated) if (!emitted.has(line.id)) output.push(line);
       return output.sort((left,right)=>(left.box&&left.box.y||0)-(right.box&&right.box.y||0));
+    }
+    function primaryReadingRegion() {
+      const primary=result&&result.primary_text;
+      return primary&&primary.detected&&primary.box&&primary.box.width>0&&primary.box.height>0?primary.box:null;
+    }
+    function centeredInRegion(item,region) {
+      if (!item||!item.box||!region) return false;
+      const x=item.box.x+item.box.width/2,y=item.box.y+item.box.height/2;
+      return x>=region.x&&x<=region.x+region.width&&y>=region.y&&y<=region.y+region.height;
+    }
+    function readingWords() {
+      const words=result&&result.words||[],primary=primaryReadingRegion();
+      if (!primary) return words;
+      const selected=words.filter(word=>centeredInRegion(word,primary));
+      return selected.length?selected:words;
+    }
+    function readingLines() {
+      const lines=effectiveLines(),primary=primaryReadingRegion();
+      if (!primary) return lines;
+      const selected=lines.filter(line=>centeredInRegion(line,primary));
+      return selected.length?selected:lines;
     }
     function renderVerifiedRegions() {
       overlay.querySelectorAll('.verified-hit').forEach(node=>node.remove());
@@ -1419,14 +1467,19 @@
     $('mode-word').onclick=()=>setMode('word','mode-word'); $('mode-sentence').onclick=()=>setMode('sentence','mode-sentence');
     $('mode-translate').onclick=()=>setMode('translate','mode-translate'); $('camera').onclick=openGuidedCamera;
     $('quality-4').onclick=requestStrongestReading;
-    $('play-words').onclick=()=>result&&play(result.words||[],'play-words','word');
-    $('play-sentences').onclick=()=>result&&play(effectiveLines(),'play-sentences','line');
+    $('play-words').onclick=()=>result&&play(readingWords(),'play-words','word');
+    $('play-sentences').onclick=()=>result&&play(readingLines(),'play-sentences','line');
     $('select-object').onclick=chooseObjectMode; $('infer-global').onclick=explainGlobal; $('ask').onclick=askImageQuestion; $('stop').onclick=()=>stop();
     $('previous').onclick=()=>showGallery(galleryIndex-1); $('next').onclick=()=>showGallery(galleryIndex+1);
     $('camera-cancel').onclick=()=>{ closeGuidedCamera(); clearControls(); track('camera_cancel'); };
     $('camera-capture').onclick=captureGuidedPhoto;
     input.onchange=()=>useCapture(input.files&&input.files[0]);
     document.addEventListener('pointerdown',unlockAudioPlayback,{passive:true});
+    document.addEventListener('visibilitychange',()=>{
+      if (document.hidden) { stop(); return; }
+      if (audioContext&&audioContext.state==='closed') discardAudioContext();
+      status.textContent=englishMode?'Ready. Tap a reading button to continue.':'ಸಿದ್ಧವಾಗಿದೆ. ಮುಂದುವರಿಸಲು ಓದುವ ಬಟನ್ ಒತ್ತಿ.';
+    });
     stage.addEventListener('pointerdown',event=>{ pointerStart={x:event.clientX,y:event.clientY}; suppressTap=false; });
     stage.addEventListener('pointerup',event=>{
       if (!pointerStart) return; const dx=event.clientX-pointerStart.x,dy=event.clientY-pointerStart.y; pointerStart=null;
