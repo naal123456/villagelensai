@@ -183,3 +183,36 @@ cover the effective merged queue.
 Immediate rollback is `vlens-a-00057-dbt`. Physical iPhone/Android listening,
 continuous-playback completion, and paragraph touch accuracy remain field
 acceptance checks.
+
+## Background-audio recovery and primary-page playback
+
+Version `v2026.09.14.1` addresses the field report that audio disappeared after
+VillageLens remained in a background browser tab. Hiding the page now cancels
+and resolves any active Web Audio or browser-speech promise instead of leaving
+the reading loop suspended indefinitely. On the next touch, an interrupted or
+closed audio context is resumed or rebuilt before playback. The interface asks
+the user to tap a reading button to continue after returning to the page.
+
+The two lower continuous-reading controls now use the stage-3 `primary_text`
+region when it is available. On `A3-22`, this retains 138 words across all 22
+lines of the clear left-page historical text and excludes 10 partial lines from
+the cropped neighboring right page. If no valid primary region or no content
+inside it exists, the controls safely fall back to the full OCR queue.
+
+- Source commit: `661cacb`
+- GitHub Actions run `34905220355`: passed
+- Tests: `67/67` passed; Python and browser JavaScript parsing passed
+- Cloud Build: `81aef4a6-0259-4367-8c8e-2173086f7e51`
+- Container digest:
+  `sha256:ee658e98c4c79ff5b8bbe1026202086c1f5c099b7376998a785f56e017e12a4f`
+- Production revision: `vlens-a-00059-wr6`, 100 percent traffic
+- Public `/health`: healthy; authenticated `/b/?tester=a3`: version `.14.1`
+  with audio-recovery and primary-reading functions present
+- Live `A3-22`: existing `terra-ocr-grounded-v4` result remains quality-valid
+  with 21 of 22 primary lines translated; no OCR or LLM regeneration was made
+- Warning/error log query for the new revision: empty
+- Immediate rollback: `vlens-a-00058-8bc`
+
+Background/foreground recovery and audible completion still require physical
+Safari and Chrome acceptance tests because a server-side check cannot reproduce
+the phones' operating-system audio suspension behavior.
