@@ -136,3 +136,50 @@ field acceptance checks.
 - Authenticated `/b/`: `v2026.09.13.3` and contextual sentence helpers present
 - New-revision warning/error log query: empty
 - Immediate rollback: `vlens-a-00052-rml`
+
+## OCR-grounded dense-page reading
+
+Version `v2026.09.13.8` fixes the incomplete English reading reported on
+`A3-22` and the missing main-text selection reported on `A3-24`. Stage 3 now
+receives the retained Google/Tesseract line text, stable line IDs, and
+coordinates as untrusted reading evidence. For a text-rich page, Terra must
+identify the primary text region, translate every readable OCR line inside it,
+and return the corresponding line IDs. A result covering less than 80 percent
+of that region is not marked quality-valid. The completeness gate applies only
+to text-rich pages with at least six readable OCR lines, so a photographed
+object with a few label or voltage lines is not incorrectly rejected.
+
+The client merges contextual translations into the complete OCR line queue
+instead of replacing the queue with whatever subset the model returned. This
+keeps untranslated source rows visible and playable. Continuous word and
+sentence reading shows progress, continues past an isolated unavailable audio
+segment, and reports completion. The main text region is selectable, paragraph
+objects use the best overlapping spoken explanation, and sentence overlays
+cover the effective merged queue.
+
+- Google Cloud project: `villagelensai`
+- Source commit: `ea438b3`
+- GitHub Actions run `34803196058`: passed
+- Local unit tests: `67/67` passed
+- Python compilation, embedded browser JavaScript parsing, service-worker
+  parsing, and `git diff --check`: passed
+- Cloud Build: `678acd29-eb92-4d92-b6d8-aaf35c262805`
+- Container digest:
+  `sha256:8abea4b7fdf5e9afcca72dde9697631b557e4684d510120a9efcc97e4c0df94c`
+- Production revision: `vlens-a-00058-8bc`, 100 percent traffic
+- Operational limits retained: zero minimum instances, one maximum instance,
+  one CPU, 2 GiB memory, concurrency eight, timeout 90 seconds
+- Public `/health`: healthy; authenticated `/b/?tester=a3`: version `.8`,
+  `terra-ocr-grounded-v4`, and `sol-ocr-review-v4`
+- Live `A3-22` stage 3 English result: 21 of 22 primary OCR lines translated
+  (95.5 percent), quality validated, both historical paragraphs represented,
+  and Chitradurga retained rather than replaced by Ballari
+- Live `A3-24` stage 3 English result: 14 of 14 primary OCR lines translated,
+  quality validated, correct “To Chitradurga” guidebook identity, and a
+  selectable main descriptive text block
+- No stage-4/Sol request was made during these checks
+- Warning/error log query for the new revision: empty after live verification
+
+Immediate rollback is `vlens-a-00057-dbt`. Physical iPhone/Android listening,
+continuous-playback completion, and paragraph touch accuracy remain field
+acceptance checks.
