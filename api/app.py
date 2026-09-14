@@ -56,6 +56,7 @@ OPENAI_TRANSLATION_MODEL = os.environ.get("VILLAGELENS_TRANSLATION_MODEL", "gpt-
 OPENAI_STAGE_TWO_ANALYSIS_VERSION = "luna-compact-v1"
 OPENAI_STAGE_THREE_ANALYSIS_VERSION = "terra-ocr-grounded-v4"
 OPENAI_STAGE_FOUR_ANALYSIS_VERSION = "sol-ocr-review-v4"
+APP_VERSION = "2026-09-14.2"
 SPEECH_VOICES = {
     "kn-IN": os.environ.get("VILLAGELENS_KANNADA_TTS_VOICE", "kn-IN-Wavenet-A"),
     "ta-IN": os.environ.get("VILLAGELENS_TAMIL_TTS_VOICE", "ta-IN-Wavenet-A"),
@@ -101,6 +102,7 @@ USAGE_EVENTS = {
     "question_tap", "question_permission", "question_recording", "question_upload",
     "camera_open", "camera_fallback", "camera_cancel", "camera_auto", "camera_manual",
     "audio_ok", "audio_failed", "stage_1", "stage_2", "stage_3", "stage_4",
+    "app_foreground",
 }
 DEMO_ASSETS = {
     "i1.jpeg", "i1-scene.json", "i2.jpeg", "i2-scene.json", "i2-gold.json",
@@ -440,6 +442,7 @@ def health() -> tuple[Response, int]:
     status = 200 if not missing and not access_misconfigured else 503
     return jsonify(
         status="ok" if status == 200 else "not_ready",
+        app_version=APP_VERSION,
         missing_models=missing,
         access_gate="enabled" if _access_configured() else "disabled",
         reader_models={
@@ -2169,9 +2172,9 @@ def usage_events() -> tuple[Response, int]:
         })
     if not accepted:
         return jsonify(error="EVENTS_INVALID"), 400
-    usage = {
-        "tester_id": _tester_id() or "unassigned", "events": accepted,
-    }
+    app_version = re.sub(r"[^0-9A-Za-z._-]", "", str(payload.get("app_version", "")))[:40]
+    usage = {"tester_id": _tester_id() or "unassigned", "app_version": app_version,
+             "events": accepted}
     app.logger.info("villagelens_usage %s", json.dumps(usage, separators=(",", ":")))
     if any(item["name"].startswith("question") for item in accepted):
         app.logger.warning("villagelens_mic %s", json.dumps(usage, separators=(",", ":")))

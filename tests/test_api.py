@@ -61,7 +61,7 @@ class ApiTests(unittest.TestCase):
         self.assertIn(b'id="quality-4" aria-label="Request strongest reading"', response.data)
         self.assertIn(b'id="owner-badge"', response.data)
         self.assertIn(b'id="app-version"', response.data)
-        self.assertIn(b'v2026.09.14.1', response.data)
+        self.assertIn(b'v2026.09.14.2', response.data)
         self.assertIn(b"'UNASSIGNED \xc2\xb7 OLDER CAPTURE'", response.data)
         self.assertIn(b"`${owner}${ownerName}`", response.data)
         self.assertIn(b'navigationGeneration', response.data)
@@ -157,6 +157,12 @@ class ApiTests(unittest.TestCase):
         self.assertIn(b"audioContext.state==='closed'", response.data)
         self.assertIn(b"if (activeAudioResolve) activeAudioResolve(false)", response.data)
         self.assertIn(b"document.addEventListener('visibilitychange'", response.data)
+        self.assertIn(b'function ensureCurrentApp', response.data)
+        self.assertIn(b"fetch('/health',{cache:'no-store'})", response.data)
+        self.assertIn(b'value.app_version!==appVersion', response.data)
+        self.assertIn(b"window.addEventListener('pageshow'", response.data)
+        self.assertIn(b'app_version:appVersion', response.data)
+        self.assertIn(b"track('app_foreground')", response.data)
         self.assertIn(b'function primaryReadingRegion', response.data)
         self.assertIn(b'function readingWords', response.data)
         self.assertIn(b'function readingLines', response.data)
@@ -223,6 +229,7 @@ class ApiTests(unittest.TestCase):
             "stage_4": "gpt-5.6-sol",
         })
         self.assertEqual(response.get_json()["stage_4"], "manual")
+        self.assertEqual(response.get_json()["app_version"], "2026-09-14.2")
 
     def test_old_sol_and_astra_evidence_is_not_current(self) -> None:
         self.assertFalse(_current_reader_stage({
@@ -1465,7 +1472,7 @@ class ApiTests(unittest.TestCase):
 
     def test_usage_events_accept_only_privacy_safe_aggregates(self) -> None:
         with self.assertLogs("api.app", level="INFO") as logs:
-            response = self.client.post("/api/events", json={"events": [
+            response = self.client.post("/api/events", json={"app_version": "2026.09.14.2<script>", "events": [
                 {"name": "infer", "capture_id": "e" * 32, "ok": True,
                  "elapsed_ms": "bad", "question": "private spoken words"},
                 {"name": "not-allowed", "text": "private OCR"},
@@ -1475,6 +1482,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.get_json()["accepted"], 1)
         joined = " ".join(logs.output)
         self.assertIn('"name":"infer"', joined)
+        self.assertIn('"app_version":"2026.09.14.2script"', joined)
         self.assertNotIn("private spoken words", joined)
         self.assertNotIn("private OCR", joined)
 

@@ -116,7 +116,7 @@
         <span class="bar" id="quality-1"></span><span class="bar" id="quality-2"></span>
         <span class="bar" id="quality-3"></span><button class="bar" id="quality-4" aria-label="Request strongest reading" data-tip="Request strongest reading"></button>
         <span id="quality-timer">—</span>
-        <span id="app-version" aria-label="App version">v2026.09.14.1</span>
+        <span id="app-version" aria-label="App version">v2026.09.14.2</span>
       </div>
       <p id="mic-status" role="status" aria-live="assertive" hidden></p>
     </section>
@@ -185,8 +185,9 @@
     const stageTwoAnalysisVersion='luna-compact-v1';
     const stageThreeAnalysisVersion='terra-ocr-grounded-v4',stageFourAnalysisVersion='sol-ocr-review-v4';
     const automaticStages=[1,2,3],enabledStages=[1,2,3,4];
-    const appVersion='2026-09-14.1';
+    const appVersion='2026-09-14.2';
     const captureBurstFrames=4;
+    let versionCheckPromise=null;
     let speechVoices=[];
     const testerId=configureTesterId();
 
@@ -233,13 +234,31 @@
       return testerId ? {...configured,'X-VillageLens-Tester-ID':testerId} : configured;
     }
 
+    async function ensureCurrentApp() {
+      if (versionCheckPromise) return versionCheckPromise;
+      versionCheckPromise=(async()=>{
+        try {
+          const response=await fetch('/health',{cache:'no-store'});
+          if (!response.ok) return true;
+          const value=await response.json();
+          if (value.app_version&&value.app_version!==appVersion) {
+            location.reload(); return false;
+          }
+        } catch (_) {}
+        return true;
+      })();
+      try { return await versionCheckPromise; }
+      finally { versionCheckPromise=null; }
+    }
+
     function captureId() {
       const item=gallery[galleryIndex];
       return item&&/^[0-9a-f]{32}$/.test(item.id)?item.id:'';
     }
     function track(name,ok=true,elapsedMs=0) {
       fetch('/api/events',{method:'POST',headers:testerHeaders({'Content-Type':'application/json'}),
-        body:JSON.stringify({events:[{name,capture_id:captureId(),ok,elapsed_ms:elapsedMs}]})}).catch(()=>{});
+        body:JSON.stringify({app_version:appVersion,
+          events:[{name,capture_id:captureId(),ok,elapsed_ms:elapsedMs}]})}).catch(()=>{});
     }
     function working(id,on) { const node=$(id); node.classList.toggle('working',on); node.setAttribute('aria-busy',String(on)); }
     function showMic(state,message) {
@@ -1475,11 +1494,14 @@
     $('camera-capture').onclick=captureGuidedPhoto;
     input.onchange=()=>useCapture(input.files&&input.files[0]);
     document.addEventListener('pointerdown',unlockAudioPlayback,{passive:true});
-    document.addEventListener('visibilitychange',()=>{
+    document.addEventListener('visibilitychange',async()=>{
       if (document.hidden) { stop(); return; }
+      if (!await ensureCurrentApp()) return;
       if (audioContext&&audioContext.state==='closed') discardAudioContext();
       status.textContent=englishMode?'Ready. Tap a reading button to continue.':'ಸಿದ್ಧವಾಗಿದೆ. ಮುಂದುವರಿಸಲು ಓದುವ ಬಟನ್ ಒತ್ತಿ.';
+      track('app_foreground');
     });
+    window.addEventListener('pageshow',event=>{ if (event.persisted) ensureCurrentApp(); });
     stage.addEventListener('pointerdown',event=>{ pointerStart={x:event.clientX,y:event.clientY}; suppressTap=false; });
     stage.addEventListener('pointerup',event=>{
       if (!pointerStart) return; const dx=event.clientX-pointerStart.x,dy=event.clientY-pointerStart.y; pointerStart=null;
