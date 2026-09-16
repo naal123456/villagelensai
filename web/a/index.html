@@ -116,7 +116,7 @@
         <span class="bar" id="quality-1"></span><span class="bar" id="quality-2"></span>
         <span class="bar" id="quality-3"></span><button class="bar" id="quality-4" aria-label="Request strongest reading" data-tip="Request strongest reading"></button>
         <span id="quality-timer">—</span>
-        <span id="app-version" aria-label="App version">v2026.09.15.3</span>
+        <span id="app-version" aria-label="App version">v2026.09.15.4</span>
       </div>
       <p id="mic-status" role="status" aria-live="assertive" hidden></p>
     </section>
@@ -186,7 +186,7 @@
     const stageTwoAnalysisVersion='luna-compact-v1';
     const stageThreeAnalysisVersion='terra-ocr-grounded-v4',stageFourAnalysisVersion='sol-ocr-review-v4';
     const automaticStages=[1,2,3],enabledStages=[1,2,3,4];
-    const appVersion='2026-09-15.1';
+    const appVersion=$('app-version').textContent.replace(/^v/,'');
     const captureBurstFrames=4;
     let versionCheckPromise=null;
     let speechVoices=[];
