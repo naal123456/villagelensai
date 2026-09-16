@@ -61,7 +61,7 @@ class ApiTests(unittest.TestCase):
         self.assertIn(b'id="quality-4" aria-label="Request strongest reading"', response.data)
         self.assertIn(b'id="owner-badge"', response.data)
         self.assertIn(b'id="app-version"', response.data)
-        self.assertIn(b'v2026.09.15.6', response.data)
+        self.assertIn(b'v2026-09-16.1', response.data)
         self.assertIn(b"const appVersion=$('app-version').textContent.replace(/^v/,'')", response.data)
         self.assertNotIn(b"const appVersion='2026-09-15.1'", response.data)
         self.assertIn(b"'UNASSIGNED \xc2\xb7 OLDER CAPTURE'", response.data)
@@ -117,8 +117,9 @@ class ApiTests(unittest.TestCase):
         self.assertIn(b"serviceWorker.register('/a/sw.js'", response.data)
         self.assertIn(b"updateViaCache:'none'", response.data)
         self.assertIn(b'await registration.update()', response.data)
-        self.assertIn(b"addEventListener('controllerchange'", response.data)
-        self.assertIn(b"location.reload()", response.data)
+        self.assertNotIn(b"addEventListener('controllerchange'", response.data)
+        self.assertIn(b"function interactionBusy", response.data)
+        self.assertIn(b"pendingAppVersion=value.app_version", response.data)
         self.assertIn(b'id="install"', response.data)
         self.assertIn(b'class="toolbar action-toolbar"', response.data)
         action_toolbar = response.data.split(b'class="toolbar action-toolbar"', 1)[1].split(b'</nav>', 1)[0]
@@ -139,8 +140,10 @@ class ApiTests(unittest.TestCase):
         self.assertIn(b'Only the area inside the box is saved', response.data)
         self.assertIn(b'captureBurstFrames=4', response.data)
         self.assertIn(b'function cameraFrameScore', response.data)
-        self.assertIn(b"requestCenterFocus('single-shot')", response.data)
-        self.assertIn(b'settings.pointsOfInterest=[{x:.5,y:.5}]', response.data)
+        self.assertIn(b"requestCameraFocus('single-shot'", response.data)
+        self.assertIn(b'settings.pointsOfInterest=[{x,y}]', response.data)
+        self.assertIn(b'function selectCameraTarget', response.data)
+        self.assertIn(b"cameraPreview.addEventListener('pointerup',selectCameraTarget)", response.data)
         self.assertIn(b'burst_frames:captureBurstFrames', response.data)
 
         self.assertNotIn(b'cameraCandidates', response.data)
@@ -278,7 +281,10 @@ class ApiTests(unittest.TestCase):
             "stage_4": "gpt-5.6-sol",
         })
         self.assertEqual(response.get_json()["stage_4"], "manual")
-        self.assertEqual(response.get_json()["app_version"], "2026-09-15.6")
+        self.assertEqual(response.get_json()["app_version"], "2026-09-16.1")
+        page = self.client.get("/a/?tester=a3")
+        self.addCleanup(page.close)
+        self.assertIn(b'v2026-09-16.1', page.data)
 
     def test_old_sol_and_astra_evidence_is_not_current(self) -> None:
         self.assertFalse(_current_reader_stage({
@@ -298,14 +304,22 @@ class ApiTests(unittest.TestCase):
             "analysis_version": "luna-compact-v1",
         }, 2))
 
-    def test_english_reader_page_is_isolated_at_b(self) -> None:
+    def test_legacy_english_reader_redirects_to_unified_page(self) -> None:
         response = self.client.get("/b/?tester=a3")
         self.addCleanup(response.close)
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, 302)
         self.assertEqual(response.headers["Cache-Control"], "no-store, max-age=0")
-        self.assertIn(b"const englishMode=location.pathname==='/b/'", response.data)
-        self.assertIn(b"'X-VillageLens-Output-Language':outputLanguage", response.data)
-        self.assertIn(b"Translate selected word to English", response.data)
+        self.assertEqual(response.headers["Location"], "/a/?tester=a3&lang=en")
+
+    def test_unified_reader_has_language_toggle_and_silent_welcome(self) -> None:
+        response = self.client.get("/a/?tester=a3&lang=en")
+        self.addCleanup(response.close)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b'id="language-toggle"', response.data)
+        self.assertIn(b'id="welcome-touch"', response.data)
+        self.assertIn(b'function speakWelcome', response.data)
+        self.assertIn(b"$('welcome-touch').onclick=speakWelcome", response.data)
+        self.assertNotIn(b'await showGallery(0)', response.data)
 
     def test_protected_english_reader_routes_reviewer_to_access(self) -> None:
         self.enable_access_gate()
@@ -348,6 +362,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(value["start_url"], "/a/")
         self.assertEqual(value["display"], "standalone")
         self.assertEqual(value["share_target"]["action"], "/a/share-target")
+        self.assertIn(b"const APP_VERSION = '2026-09-16.1'", worker.data)
         self.assertEqual(value["share_target"]["params"]["files"][0]["name"], "image")
         self.assertEqual(worker.status_code, 200)
         self.assertEqual(manifest.headers["Cache-Control"], "no-cache, max-age=0")

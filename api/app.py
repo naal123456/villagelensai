@@ -56,7 +56,7 @@ OPENAI_TRANSLATION_MODEL = os.environ.get("VILLAGELENS_TRANSLATION_MODEL", "gpt-
 OPENAI_STAGE_TWO_ANALYSIS_VERSION = "luna-compact-v1"
 OPENAI_STAGE_THREE_ANALYSIS_VERSION = "terra-ocr-grounded-v4"
 OPENAI_STAGE_FOUR_ANALYSIS_VERSION = "sol-ocr-review-v4"
-APP_VERSION = "2026-09-15.6"
+APP_VERSION = "2026-09-16.1"
 SPEECH_VOICES = {
     "kn-IN": os.environ.get("VILLAGELENS_KANNADA_TTS_VOICE", "kn-IN-Wavenet-A"),
     "ta-IN": os.environ.get("VILLAGELENS_TAMIL_TTS_VOICE", "ta-IN-Wavenet-A"),
@@ -430,10 +430,11 @@ def tester_page() -> Response:
 
 @app.get("/b/")
 def english_tester_page() -> Response:
-    tester_id = request.args.get("tester", "").strip().lower()
-    if _access_configured() and not TESTER_ID_PATTERN.fullmatch(tester_id):
-        return redirect("/access?tester=a3", code=302)
-    return send_from_directory(WEB_ROOT / "a", "index.html")
+    tester_id = request.args.get("tester", "").strip().lower() or "a3"
+    if not TESTER_ID_PATTERN.fullmatch(tester_id):
+        tester_id = "a3"
+    shared = "&shared=1" if request.args.get("shared") == "1" else ""
+    return redirect(f"/a/?tester={tester_id}&lang=en{shared}", code=302)
 
 
 @app.get("/a/<path:filename>")
