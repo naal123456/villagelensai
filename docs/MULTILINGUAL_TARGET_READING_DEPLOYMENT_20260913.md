@@ -313,3 +313,18 @@ Physical acceptance: open A3-8 in `/b/` and touch Puliyogare, Kadle kai,
 Shavige, and Ollige; each name should use Kannada pronunciation and then give
 the English meaning. Next, leave Safari for several minutes, return, and touch
 one word once. It should speak on that first tap without a reload.
+
+Version `v2026.09.15.3` closes an immediate-tap race found during final review:
+the audio context is now discarded synchronously on foreground, before the
+asynchronous version health check. A regression assertion fixes that ordering.
+
+- Source commit: `fc01ec0`
+- GitHub Actions run `35046847024`: passed
+- Tests: `67/67` passed
+- Cloud Build: `f9b367ba-ad65-46d9-94af-998a7a267f20`
+- Container digest:
+  `sha256:e34cd4c7d6a63db95d2483081f0717abc2dc881a61773fc7943a30180c7e84c6`
+- Production revision: `vlens-a-00063-7kd`, 100 percent traffic
+- Live `/health`: healthy and reports `app_version: 2026-09-15.3`
+- Warning/error query on the new revision: empty
+- Immediate rollback: `vlens-a-00062-99l`
