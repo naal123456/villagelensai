@@ -61,7 +61,7 @@ class ApiTests(unittest.TestCase):
         self.assertIn(b'id="quality-4" aria-label="Request strongest reading"', response.data)
         self.assertIn(b'id="owner-badge"', response.data)
         self.assertIn(b'id="app-version"', response.data)
-        self.assertIn(b'v2026.09.14.2', response.data)
+        self.assertIn(b'v2026.09.15.1', response.data)
         self.assertIn(b"'UNASSIGNED \xc2\xb7 OLDER CAPTURE'", response.data)
         self.assertIn(b"`${owner}${ownerName}`", response.data)
         self.assertIn(b'navigationGeneration', response.data)
@@ -163,6 +163,28 @@ class ApiTests(unittest.TestCase):
         self.assertIn(b"window.addEventListener('pageshow'", response.data)
         self.assertIn(b'app_version:appVersion', response.data)
         self.assertIn(b"track('app_foreground')", response.data)
+        self.assertIn(b'activeSpeechFetchController', response.data)
+        self.assertIn(b'activeTranslationController', response.data)
+        self.assertIn(b'const request=++readingGeneration; stopSpeechOnly()', response.data)
+        self.assertIn(b'if (request!==readingGeneration) return false', response.data)
+        self.assertIn(b'if (generation!==speechGeneration) return false', response.data)
+        self.assertIn(b'signal:controller.signal', response.data)
+        speech_flow = response.data.split(b'async function speakRaw', 1)[1].split(
+            b'async function speak(', 1,
+        )[0]
+        server_attempt = speech_flow.index(b'await playServerSpeech')
+        stale_guard = speech_flow.index(b'if (generation!==speechGeneration) return false', server_attempt)
+        phone_fallback = speech_flow.index(b'new SpeechSynthesisUtterance', server_attempt)
+        self.assertLess(server_attempt, stale_guard)
+        self.assertLess(stale_guard, phone_fallback)
+        read_flow = response.data.split(b'async function readForUser', 1)[1].split(
+            b'async function selectWord', 1,
+        )[0]
+        translation_wait = read_flow.index(b'await translateOnDemand')
+        selection_guard = read_flow.index(b'if (request!==readingGeneration) return false', translation_wait)
+        first_speech = read_flow.index(b'await speak(source)', translation_wait)
+        self.assertLess(translation_wait, selection_guard)
+        self.assertLess(selection_guard, first_speech)
         self.assertIn(b'function primaryReadingRegion', response.data)
         self.assertIn(b'function readingWords', response.data)
         self.assertIn(b'function readingLines', response.data)
@@ -229,7 +251,7 @@ class ApiTests(unittest.TestCase):
             "stage_4": "gpt-5.6-sol",
         })
         self.assertEqual(response.get_json()["stage_4"], "manual")
-        self.assertEqual(response.get_json()["app_version"], "2026-09-14.2")
+        self.assertEqual(response.get_json()["app_version"], "2026-09-15.1")
 
     def test_old_sol_and_astra_evidence_is_not_current(self) -> None:
         self.assertFalse(_current_reader_stage({
@@ -1472,7 +1494,7 @@ class ApiTests(unittest.TestCase):
 
     def test_usage_events_accept_only_privacy_safe_aggregates(self) -> None:
         with self.assertLogs("api.app", level="INFO") as logs:
-            response = self.client.post("/api/events", json={"app_version": "2026.09.14.2<script>", "events": [
+            response = self.client.post("/api/events", json={"app_version": "2026.09.15.1<script>", "events": [
                 {"name": "infer", "capture_id": "e" * 32, "ok": True,
                  "elapsed_ms": "bad", "question": "private spoken words"},
                 {"name": "not-allowed", "text": "private OCR"},
@@ -1482,7 +1504,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.get_json()["accepted"], 1)
         joined = " ".join(logs.output)
         self.assertIn('"name":"infer"', joined)
-        self.assertIn('"app_version":"2026.09.14.2script"', joined)
+        self.assertIn('"app_version":"2026.09.15.1script"', joined)
         self.assertNotIn("private spoken words", joined)
         self.assertNotIn("private OCR", joined)
 

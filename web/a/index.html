@@ -116,7 +116,7 @@
         <span class="bar" id="quality-1"></span><span class="bar" id="quality-2"></span>
         <span class="bar" id="quality-3"></span><button class="bar" id="quality-4" aria-label="Request strongest reading" data-tip="Request strongest reading"></button>
         <span id="quality-timer">—</span>
-        <span id="app-version" aria-label="App version">v2026.09.14.2</span>
+        <span id="app-version" aria-label="App version">v2026.09.15.1</span>
       </div>
       <p id="mic-status" role="status" aria-live="assertive" hidden></p>
     </section>
@@ -168,8 +168,9 @@
     const cameraGuidance=$('camera-guidance'), cameraMetrics=$('camera-metrics'), cameraCanvas=$('camera-analysis');
     let gallery=[], galleryIndex=0, result=null, mode='word', timerId=0, started=0, timerOwner=null;
     let navigationGeneration=0;
-    let playbackGeneration=0, speechGeneration=0, pointerStart=null, suppressTap=false, activeControl='mode-word';
+    let playbackGeneration=0, readingGeneration=0, speechGeneration=0, pointerStart=null, suppressTap=false, activeControl='mode-word';
     let audioContext=null, activeAudioSource=null, activeAudioResolve=null, activeSpeechResolve=null;
+    let activeSpeechFetchController=null,activeTranslationController=null;
     let activeRecorder=null, recordingTimer=0, micTimerId=0;
     let cameraStream=null, cameraAnalysisTimer=0, previousCameraFrame=null;
     let cameraCapturing=false, lastCameraPrompt='', lastCameraPromptAt=0, latestCameraQuality=null;
@@ -185,7 +186,7 @@
     const stageTwoAnalysisVersion='luna-compact-v1';
     const stageThreeAnalysisVersion='terra-ocr-grounded-v4',stageFourAnalysisVersion='sol-ocr-review-v4';
     const automaticStages=[1,2,3],enabledStages=[1,2,3,4];
-    const appVersion='2026-09-14.2';
+    const appVersion='2026-09-15.1';
     const captureBurstFrames=4;
     let versionCheckPromise=null;
     let speechVoices=[];
@@ -308,7 +309,8 @@
       $(id).classList.remove('active'); working(id,false); activeControl='';
     }
     function stop(keepControl=false) {
-      playbackGeneration++; stopSpeechOnly();
+      playbackGeneration++; readingGeneration++; stopSpeechOnly();
+      if (activeTranslationController) { activeTranslationController.abort(); activeTranslationController=null; }
       clearTimeout(recordingTimer); recordingTimer=0;
       if (activeRecorder&&activeRecorder.state!=='inactive') { try { activeRecorder.stop(); } catch (_) {} }
       stage.classList.remove('playing');
@@ -482,7 +484,11 @@
         if (!context||generation!==speechGeneration) return false;
         const cacheKey=`${language}:${text}`; let buffer=speechAudioCache.get(cacheKey);
         if (!buffer) {
-          const response=await fetch('/api/speech',{method:'POST',headers:testerHeaders({'Content-Type':'application/json'}),body:JSON.stringify({text,language})});
+          const controller=new AbortController(); activeSpeechFetchController=controller;
+          const response=await fetch('/api/speech',{method:'POST',signal:controller.signal,
+            headers:testerHeaders({'Content-Type':'application/json'}),body:JSON.stringify({text,language})});
+          if (activeSpeechFetchController===controller) activeSpeechFetchController=null;
+          if (generation!==speechGeneration) return false;
           if (response.status===401) { location.href='/access'; return false; }
           if (!response.ok) throw new Error('SPEECH_FAILED');
           buffer=await context.decodeAudioData(await response.arrayBuffer());
@@ -508,8 +514,10 @@
       const generation=speechGeneration;
       for (const prepared of speechChunks(text)) {
         for (const segment of speechSegments(prepared)) {
+        if (generation!==speechGeneration) return false;
         if (['kn-IN','ta-IN','te-IN','hi-IN','en-IN'].includes(segment.language)) {
           if (await playServerSpeech(segment.text,segment.language,generation)) continue;
+          if (generation!==speechGeneration) return false;
         }
         if (!('speechSynthesis' in window)) return false;
         const selectedVoice=voiceFor(segment.language);
@@ -538,6 +546,7 @@
     }
     function stopSpeechOnly() {
       speechGeneration++; const source=activeAudioSource;
+      if (activeSpeechFetchController) { activeSpeechFetchController.abort(); activeSpeechFetchController=null; }
       if (activeAudioResolve) activeAudioResolve(false);
       if (activeSpeechResolve) activeSpeechResolve({ok:false,error:'cancelled'});
       if ('speechSynthesis' in window) speechSynthesis.cancel();
@@ -632,8 +641,11 @@
         if (saved) { translationCache.set(key,saved); return saved; }
       } catch (_) {}
       try {
-        const response=await fetch('/api/translate',{method:'POST',headers:testerHeaders({'Content-Type':'application/json'}),
+        if (activeTranslationController) activeTranslationController.abort();
+        const controller=new AbortController(); activeTranslationController=controller;
+        const response=await fetch('/api/translate',{method:'POST',signal:controller.signal,headers:testerHeaders({'Content-Type':'application/json'}),
           body:JSON.stringify({text:String(text).slice(0,500)})});
+        if (activeTranslationController===controller) activeTranslationController=null;
         const value=await response.json(); if (!response.ok) throw new Error(value.error||'TRANSLATION_FAILED');
         translationCache.set(key,value.translation_kn);
         try { localStorage.setItem(`villagelens.translation.v1:${outputLanguage}:${key}`,value.translation_kn); } catch (_) {}
@@ -675,30 +687,35 @@
     }
     async function readForUser(target,useContext=false) {
       const source=String(target&&target.text||'').trim(); if (!source) return false;
+      const request=++readingGeneration; stopSpeechOnly();
+      if (activeTranslationController) { activeTranslationController.abort(); activeTranslationController=null; }
       activate(target,source);
       if (target.semanticText) { current.textContent=target.semanticText; return speak(target.semanticText); }
       if (!needsTargetTranslation(source)) return speak(source);
       let translation=useContext?contextualTranslation(target):contextualWordTranslation(target);
       if (!translation) translation=translatedWord({text:source});
       if (!translation) translation=await translateOnDemand(source);
+      if (request!==readingGeneration) return false;
       if (!translation) return speak(source);
       const bridge=englishMode?'In English, this means:':'ಕನ್ನಡದಲ್ಲಿ ಇದರ ಅರ್ಥ:';
       current.textContent=`${source}\n${translation}`;
-      if (!await speak(source)) return false;
+      if (!await speak(source)||request!==readingGeneration) return false;
       return speak(`${bridge} ${translation}`);
     }
     async function selectWord(word) {
       if (mode==='object') return;
       if (mode==='none') return;
       if (mode==='translate') {
+        stop(true); const request=++readingGeneration;
         const alreadyTarget=englishMode?/[A-Za-z]/.test(word.text||''):/[ಀ-೿]/.test(word.text||'');
         if (alreadyTarget) {
-          stop(true); status.textContent=englishMode?'English word':'ಕನ್ನಡ ಪದ · Kannada word'; track('translate'); await readForUser(word); return;
+          status.textContent=englishMode?'English word':'ಕನ್ನಡ ಪದ · Kannada word'; track('translate'); await readForUser(word); return;
         }
-        stop(true); working('mode-translate',true); activate(word,word.text);
+        working('mode-translate',true); activate(word,word.text);
         status.textContent=englishMode?'Translating to English…':'ಕನ್ನಡ ಅರ್ಥ ಸಿದ್ಧಪಡಿಸುತ್ತಿದೆ… · Translating…';
         let translation=translatedWord(word);
         if (!translation) translation=await translateOnDemand(word.text);
+        if (request!==readingGeneration) return;
         working('mode-translate',false);
         if (mode!=='translate') return;
         activate(word,translation||word.text);
@@ -797,7 +814,7 @@
       current.textContent=[visible,explanation].filter(Boolean).join('\n');
       status.textContent=englishMode?'Reading this area, then explaining it.':'ಈ ಭಾಗವನ್ನು ಓದಿ, ನಂತರ ಅರ್ಥ ಹೇಳುತ್ತಿದೆ.';
       track('object',Boolean(visible||explanation));
-      if (visible) await readForUser({text:visible,box:object.box});
+      if (visible&&!await readForUser({text:visible,box:object.box})) return;
       if (explanation&&explanation!==visible) { addFocus(object.box); current.textContent=[visible,explanation].filter(Boolean).join('\n'); await speak(explanation); }
     }
     async function chooseObjectMode() {
