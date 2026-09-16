@@ -56,7 +56,7 @@ OPENAI_TRANSLATION_MODEL = os.environ.get("VILLAGELENS_TRANSLATION_MODEL", "gpt-
 OPENAI_STAGE_TWO_ANALYSIS_VERSION = "luna-compact-v1"
 OPENAI_STAGE_THREE_ANALYSIS_VERSION = "terra-ocr-grounded-v4"
 OPENAI_STAGE_FOUR_ANALYSIS_VERSION = "sol-ocr-review-v4"
-APP_VERSION = "2026-09-15.1"
+APP_VERSION = "2026-09-15.2"
 SPEECH_VOICES = {
     "kn-IN": os.environ.get("VILLAGELENS_KANNADA_TTS_VOICE", "kn-IN-Wavenet-A"),
     "ta-IN": os.environ.get("VILLAGELENS_TAMIL_TTS_VOICE", "ta-IN-Wavenet-A"),
@@ -102,7 +102,7 @@ USAGE_EVENTS = {
     "question_tap", "question_permission", "question_recording", "question_upload",
     "camera_open", "camera_fallback", "camera_cancel", "camera_auto", "camera_manual",
     "audio_ok", "audio_failed", "stage_1", "stage_2", "stage_3", "stage_4",
-    "app_foreground",
+    "app_foreground", "audio_reset",
 }
 DEMO_ASSETS = {
     "i1.jpeg", "i1-scene.json", "i2.jpeg", "i2-scene.json", "i2-gold.json",
@@ -116,6 +116,7 @@ VERIFIED_CAPTURE_REGIONS = {
         {
             "id": "rupa-menu-thursday-1", "label": "Puliyogare",
             "spoken_kn": "ಒಂದು. ಪುಳಿಯೋಗರೆ.",
+            "spoken_en": "One. Puliyogare. Tamarind rice.",
             "meaning_kn": "ಹುಣಸೆಹಣ್ಣಿನ ಮಸಾಲೆ ಅನ್ನ.",
             "box": {"x": 87, "y": 593, "width": 455, "height": 116},
             "verified_by": "owner_feedback_20260909",
@@ -123,12 +124,14 @@ VERIFIED_CAPTURE_REGIONS = {
         {
             "id": "rupa-menu-thursday-2", "label": "Kadle kai",
             "spoken_kn": "ಎರಡು. ಕಡಲೆಕಾಯಿ.", "meaning_kn": "ನೆಲಗಡಲೆ.",
+            "spoken_en": "Two. Kadle kai. Groundnuts.",
             "box": {"x": 122, "y": 698, "width": 436, "height": 125},
             "verified_by": "owner_feedback_20260909",
         },
         {
             "id": "rupa-menu-thursday-3", "label": "Shavige",
             "spoken_kn": "ಮೂರು. ಶಾವಿಗೆ.",
+            "spoken_en": "Three. Shavige. Vermicelli.",
             "meaning_kn": "ವರ್ಮಿಸೆಲ್ಲಿಯಿಂದ ಮಾಡುವ ತಿಂಡಿ.",
             "box": {"x": 143, "y": 835, "width": 486, "height": 80},
             "verified_by": "owner_feedback_20260909",
@@ -136,6 +139,7 @@ VERIFIED_CAPTURE_REGIONS = {
         {
             "id": "rupa-menu-thursday-7", "label": "Ollige",
             "spoken_kn": "ಏಳು. ಒಳಿಗೆ.", "meaning_kn": "ಒಳಿಗೆ ಎಂಬ ತಿಂಡಿ.",
+            "spoken_en": "Seven. Ollige. A traditional sweet dish.",
             "box": {"x": 109, "y": 1211, "width": 474, "height": 104},
             "verified_by": "owner_feedback_20260909",
         },

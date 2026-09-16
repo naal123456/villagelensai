@@ -61,7 +61,7 @@ class ApiTests(unittest.TestCase):
         self.assertIn(b'id="quality-4" aria-label="Request strongest reading"', response.data)
         self.assertIn(b'id="owner-badge"', response.data)
         self.assertIn(b'id="app-version"', response.data)
-        self.assertIn(b'v2026.09.15.1', response.data)
+        self.assertIn(b'v2026.09.15.2', response.data)
         self.assertIn(b"'UNASSIGNED \xc2\xb7 OLDER CAPTURE'", response.data)
         self.assertIn(b"`${owner}${ownerName}`", response.data)
         self.assertIn(b'navigationGeneration', response.data)
@@ -72,6 +72,8 @@ class ApiTests(unittest.TestCase):
         self.assertIn(b'function speechSegments', response.data)
         self.assertIn(b'function speechChunks', response.data)
         self.assertIn(b'function applyVerifiedReadingRegions', response.data)
+        self.assertIn(b'function verifiedSpeech', response.data)
+        self.assertIn(b'region.spoken_en||region.label||region.spoken_kn', response.data)
         self.assertIn('ಪುಳಿಯೋಗರೆ'.encode(), response.data)
         self.assertIn('ಶಾವಿಗೆ'.encode(), response.data)
         self.assertIn(b"playServerSpeech(segment.text,segment.language,generation)", response.data)
@@ -154,7 +156,7 @@ class ApiTests(unittest.TestCase):
         self.assertIn(b'const source=result&&result.lines||[],translated=transcriptionLines()', response.data)
         self.assertIn(b"${index} of ${queue.length}", response.data)
         self.assertIn(b'function discardAudioContext', response.data)
-        self.assertIn(b"audioContext.state==='closed'", response.data)
+        self.assertIn(b'if (audioContext) discardAudioContext()', response.data)
         self.assertIn(b"if (activeAudioResolve) activeAudioResolve(false)", response.data)
         self.assertIn(b"document.addEventListener('visibilitychange'", response.data)
         self.assertIn(b'function ensureCurrentApp', response.data)
@@ -162,7 +164,7 @@ class ApiTests(unittest.TestCase):
         self.assertIn(b'value.app_version!==appVersion', response.data)
         self.assertIn(b"window.addEventListener('pageshow'", response.data)
         self.assertIn(b'app_version:appVersion', response.data)
-        self.assertIn(b"track('app_foreground')", response.data)
+        self.assertIn(b"track('app_foreground'); track('audio_reset')", response.data)
         self.assertIn(b'activeSpeechFetchController', response.data)
         self.assertIn(b'activeTranslationController', response.data)
         self.assertIn(b'const request=++readingGeneration; stopSpeechOnly()', response.data)
@@ -251,7 +253,7 @@ class ApiTests(unittest.TestCase):
             "stage_4": "gpt-5.6-sol",
         })
         self.assertEqual(response.get_json()["stage_4"], "manual")
-        self.assertEqual(response.get_json()["app_version"], "2026-09-15.1")
+        self.assertEqual(response.get_json()["app_version"], "2026-09-15.2")
 
     def test_old_sol_and_astra_evidence_is_not_current(self) -> None:
         self.assertFalse(_current_reader_stage({
@@ -552,6 +554,10 @@ class ApiTests(unittest.TestCase):
             "Puliyogare", "Kadle kai", "Shavige", "Ollige",
         ])
         self.assertEqual(item["result"]["verified_regions"][1]["spoken_kn"], "ಎರಡು. ಕಡಲೆಕಾಯಿ.")
+        self.assertEqual(
+            item["result"]["verified_regions"][1]["spoken_en"],
+            "Two. Kadle kai. Groundnuts.",
+        )
 
     def test_health_reports_pinned_models(self) -> None:
         response = self.client.get("/health")
@@ -1494,7 +1500,7 @@ class ApiTests(unittest.TestCase):
 
     def test_usage_events_accept_only_privacy_safe_aggregates(self) -> None:
         with self.assertLogs("api.app", level="INFO") as logs:
-            response = self.client.post("/api/events", json={"app_version": "2026.09.15.1<script>", "events": [
+            response = self.client.post("/api/events", json={"app_version": "2026.09.15.2<script>", "events": [
                 {"name": "infer", "capture_id": "e" * 32, "ok": True,
                  "elapsed_ms": "bad", "question": "private spoken words"},
                 {"name": "not-allowed", "text": "private OCR"},
@@ -1504,7 +1510,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.get_json()["accepted"], 1)
         joined = " ".join(logs.output)
         self.assertIn('"name":"infer"', joined)
-        self.assertIn('"app_version":"2026.09.15.1script"', joined)
+        self.assertIn('"app_version":"2026.09.15.2script"', joined)
         self.assertNotIn("private spoken words", joined)
         self.assertNotIn("private OCR", joined)
 

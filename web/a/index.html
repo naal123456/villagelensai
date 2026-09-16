@@ -116,7 +116,7 @@
         <span class="bar" id="quality-1"></span><span class="bar" id="quality-2"></span>
         <span class="bar" id="quality-3"></span><button class="bar" id="quality-4" aria-label="Request strongest reading" data-tip="Request strongest reading"></button>
         <span id="quality-timer">—</span>
-        <span id="app-version" aria-label="App version">v2026.09.15.1</span>
+        <span id="app-version" aria-label="App version">v2026.09.15.2</span>
       </div>
       <p id="mic-status" role="status" aria-live="assertive" hidden></p>
     </section>
@@ -394,7 +394,11 @@
       }
     }
     function normalizedSpeech(text) {
-      const source=String(text||'');
+      const source=String(text||'')
+        .replace(/\bPuliyog(?:a)?re\b/gi,'ಪುಳಿಯೋಗರೆ').replace(/\bShavig(?:e|ge)\b/gi,'ಶಾವಿಗೆ')
+        .replace(/\bKos(?:u|a)mbari\b/gi,'ಕೋಸಂಬರಿ').replace(/\bMosa(?:r|v)anna\b/gi,'ಮೊಸರನ್ನ')
+        .replace(/\bHappla\b/gi,'ಹಪ್ಪಳ').replace(/\b(?:Ollige|Holige)\b/gi,'ಒಳಿಗೆ')
+        .replace(/\bKadle\s+(?:kai|khai)\b/gi,'ಕಡಲೆಕಾಯಿ');
       if (englishMode) return source.replace(/\bSmt\.?\s*/gi,'Shrimati ').replace(/\bSri\.?\s*/gi,'Shri ')
         .replace(/\bProf\.?\s*/gi,'Professor ').replace(/\bDr\.?\s*/gi,'Doctor ')
         .replace(/(\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)\s*V\b/gi,'$1 volts or $2 volts')
@@ -873,8 +877,11 @@
       }));
     }
     function verifiedRegions() { return result&&result.verified_regions||[]; }
+    function verifiedSpeech(region) {
+      return englishMode?(region.spoken_en||region.label||region.spoken_kn):region.spoken_kn;
+    }
     function effectiveLines() {
-      const verified=verifiedRegions(); if (verified.length) return verified.map(region=>({...region,text:region.spoken_kn}));
+      const verified=verifiedRegions(); if (verified.length) return verified.map(region=>({...region,text:verifiedSpeech(region)}));
       const source=result&&result.lines||[],translated=transcriptionLines();
       if (!translated.length) return source;
       const emitted=new Set(),output=[];
@@ -921,8 +928,8 @@
         for (const key of ['x','y','width','height']) hit.setAttribute(key,region.box[key]);
         hit.setAttribute('class','hit verified-hit');
         hit.addEventListener('click',event=>{
-          event.stopPropagation(); if (suppressTap) return; stop(true); activate(region,region.spoken_kn);
-          track(mode==='sentence'?'line':'word'); readForUser({...region,text:region.spoken_kn});
+          event.stopPropagation(); if (suppressTap) return; stop(true); activate(region,verifiedSpeech(region));
+          track(mode==='sentence'?'line':'word'); readForUser({...region,text:verifiedSpeech(region)});
         });
         overlay.appendChild(hit);
       }
@@ -1053,7 +1060,7 @@
         if (!region) { output.push(item); continue; }
         if (emitted.has(region.id)) continue; emitted.add(region.id);
         const ids=items.filter(candidate=>inside(candidate,region)).map(candidate=>candidate.id);
-        output.push({...region,text:region.spoken_kn,ids});
+        output.push({...region,text:verifiedSpeech(region),ids});
       }
       return output;
     }
@@ -1514,9 +1521,9 @@
     document.addEventListener('visibilitychange',async()=>{
       if (document.hidden) { stop(); return; }
       if (!await ensureCurrentApp()) return;
-      if (audioContext&&audioContext.state==='closed') discardAudioContext();
+      if (audioContext) discardAudioContext();
       status.textContent=englishMode?'Ready. Tap a reading button to continue.':'ಸಿದ್ಧವಾಗಿದೆ. ಮುಂದುವರಿಸಲು ಓದುವ ಬಟನ್ ಒತ್ತಿ.';
-      track('app_foreground');
+      track('app_foreground'); track('audio_reset');
     });
     window.addEventListener('pageshow',event=>{ if (event.persisted) ensureCurrentApp(); });
     stage.addEventListener('pointerdown',event=>{ pointerStart={x:event.clientX,y:event.clientY}; suppressTap=false; });
