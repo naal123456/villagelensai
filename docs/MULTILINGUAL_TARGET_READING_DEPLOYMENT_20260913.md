@@ -351,3 +351,33 @@ visible label, foreground comparison, and usage telemetry cannot disagree.
 - Authenticated A3 `/b/`: visible label and derived browser version both `.15.4`
 - Warning/error query on the new revision: empty
 - Immediate rollback: `vlens-a-00063-7kd`
+
+## Complete continuous sentence reading
+
+Version `v2026.09.15.5` fixes two shared causes of incomplete lower-button
+sentence reading found on A3-8 and A3-7.
+
+On A3-8, owner-verified corrections for menu items 1, 2, 3, and 7 replaced the
+complete stage-3 sentence queue. Verified lines are now merged into the queue,
+preserving names, weekday headings, and uncorrected lines. Items 4–6 now also
+have verified numbered bilingual readings. Explicit stage translations are
+honored even when a Kannada name is romanized in Latin letters.
+
+On A3-7, the model's `primary_text` box used coordinates inconsistent with the
+OCR and selected only “THE” and “INDIANS” from seven valid lines. Continuous
+reading now uses a primary selection only when it retains at least three lines
+and half of the available queue. A3-7 therefore reads all seven lines, while a
+well-supported page isolation such as A3-22 remains active.
+
+- Source commit: `b118437`
+- GitHub Actions run `35050842702`: passed
+- Tests: `67/67` passed; Python and browser JavaScript parsing passed
+- Cloud Build: `3ba7e789-422b-403d-b89d-993d89cff9bc`
+- Container digest:
+  `sha256:62a4d43746c344d16a67f29852e51e412c2407b345891f9fb97cdb261c5b94ea`
+- Production revision: `vlens-a-00065-cgw`, 100 percent traffic
+- Live `/health`: healthy and reports `app_version: 2026-09-15.5`
+- Warning/error query on the new revision: empty
+- Existing A3-7/A3-8 stage evidence was inspected; no OCR or LLM regeneration
+  was made
+- Immediate rollback: `vlens-a-00064-8jd`
