@@ -56,7 +56,7 @@ OPENAI_TRANSLATION_MODEL = os.environ.get("VILLAGELENS_TRANSLATION_MODEL", "gpt-
 OPENAI_STAGE_TWO_ANALYSIS_VERSION = "luna-compact-v1"
 OPENAI_STAGE_THREE_ANALYSIS_VERSION = "terra-ocr-grounded-v4"
 OPENAI_STAGE_FOUR_ANALYSIS_VERSION = "sol-ocr-review-v4"
-APP_VERSION = "2026-09-15.4"
+APP_VERSION = "2026-09-15.5"
 SPEECH_VOICES = {
     "kn-IN": os.environ.get("VILLAGELENS_KANNADA_TTS_VOICE", "kn-IN-Wavenet-A"),
     "ta-IN": os.environ.get("VILLAGELENS_TAMIL_TTS_VOICE", "ta-IN-Wavenet-A"),
@@ -135,6 +135,30 @@ VERIFIED_CAPTURE_REGIONS = {
             "meaning_kn": "ವರ್ಮಿಸೆಲ್ಲಿಯಿಂದ ಮಾಡುವ ತಿಂಡಿ.",
             "box": {"x": 143, "y": 835, "width": 486, "height": 80},
             "verified_by": "owner_feedback_20260909",
+        },
+        {
+            "id": "rupa-menu-thursday-4", "label": "Kosambari",
+            "spoken_kn": "ನಾಲ್ಕು. ಕೋಸಂಬರಿ.",
+            "spoken_en": "Four. Kosambari. Lentil and vegetable salad.",
+            "meaning_kn": "ಬೇಳೆ ಮತ್ತು ತರಕಾರಿಯಿಂದ ಮಾಡುವ ಕೋಸಂಬರಿ.",
+            "box": {"x": 100, "y": 895, "width": 500, "height": 110},
+            "verified_by": "stage3_context_20260915",
+        },
+        {
+            "id": "rupa-menu-thursday-5", "label": "Mosaranna",
+            "spoken_kn": "ಐದು. ಮೊಸರನ್ನ.",
+            "spoken_en": "Five. Mosaranna. Yogurt rice.",
+            "meaning_kn": "ಮೊಸರು ಅನ್ನ.",
+            "box": {"x": 100, "y": 1025, "width": 510, "height": 90},
+            "verified_by": "stage3_context_20260915",
+        },
+        {
+            "id": "rupa-menu-thursday-6", "label": "Happala",
+            "spoken_kn": "ಆರು. ಹಪ್ಪಳ.",
+            "spoken_en": "Six. Happala. Papad.",
+            "meaning_kn": "ಹಪ್ಪಳ.",
+            "box": {"x": 100, "y": 1110, "width": 400, "height": 95},
+            "verified_by": "stage3_context_20260915",
         },
         {
             "id": "rupa-menu-thursday-7", "label": "Ollige",

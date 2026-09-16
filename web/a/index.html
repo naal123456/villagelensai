@@ -116,7 +116,7 @@
         <span class="bar" id="quality-1"></span><span class="bar" id="quality-2"></span>
         <span class="bar" id="quality-3"></span><button class="bar" id="quality-4" aria-label="Request strongest reading" data-tip="Request strongest reading"></button>
         <span id="quality-timer">—</span>
-        <span id="app-version" aria-label="App version">v2026.09.15.4</span>
+        <span id="app-version" aria-label="App version">v2026.09.15.5</span>
       </div>
       <p id="mic-status" role="status" aria-live="assertive" hidden></p>
     </section>
@@ -695,8 +695,10 @@
       if (activeTranslationController) { activeTranslationController.abort(); activeTranslationController=null; }
       activate(target,source);
       if (target.semanticText) { current.textContent=target.semanticText; return speak(target.semanticText); }
-      if (!needsTargetTranslation(source)) return speak(source);
       let translation=useContext?contextualTranslation(target):contextualWordTranslation(target);
+      if (translation&&translation.toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu,'')===
+          source.toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu,'')) translation='';
+      if (!translation&&!needsTargetTranslation(source)) return speak(source);
       if (!translation) translation=translatedWord({text:source});
       if (!translation) translation=await translateOnDemand(source);
       if (request!==readingGeneration) return false;
@@ -880,10 +882,24 @@
     function verifiedSpeech(region) {
       return englishMode?(region.spoken_en||region.label||region.spoken_kn):region.spoken_kn;
     }
+    function mergeVerifiedLines(lines) {
+      const verified=verifiedRegions(); if (!verified.length) return lines;
+      const emitted=new Set(),output=[];
+      const matchFor=line=>verified.find(region=>line.box&&region.box&&overlapScore(line.box,region.box)>=.5);
+      for (const line of lines) {
+        const region=matchFor(line);
+        if (!region) { output.push(line); continue; }
+        if (emitted.has(region.id)) continue;
+        emitted.add(region.id);
+        const members=lines.filter(candidate=>matchFor(candidate)===region);
+        output.push({...region,text:verifiedSpeech(region),ids:members.flatMap(candidate=>candidate.ids||candidate.word_ids||[])});
+      }
+      for (const region of verified) if (!emitted.has(region.id)) output.push({...region,text:verifiedSpeech(region)});
+      return output.sort((left,right)=>(left.box&&left.box.y||0)-(right.box&&right.box.y||0));
+    }
     function effectiveLines() {
-      const verified=verifiedRegions(); if (verified.length) return verified.map(region=>({...region,text:verifiedSpeech(region)}));
       const source=result&&result.lines||[],translated=transcriptionLines();
-      if (!translated.length) return source;
+      if (!translated.length) return mergeVerifiedLines(source);
       const emitted=new Set(),output=[];
       for (const line of source) {
         const match=translated.find(region=>region.line_ids.includes(line.id)||overlapScore(line.box,region.box)>=.55);
@@ -897,7 +913,7 @@
           box:unionBoxes(members.map(candidate=>candidate.box))||match.box});
       }
       for (const line of translated) if (!emitted.has(line.id)) output.push(line);
-      return output.sort((left,right)=>(left.box&&left.box.y||0)-(right.box&&right.box.y||0));
+      return mergeVerifiedLines(output.sort((left,right)=>(left.box&&left.box.y||0)-(right.box&&right.box.y||0)));
     }
     function primaryReadingRegion() {
       const primary=result&&result.primary_text;
@@ -918,7 +934,8 @@
       const lines=effectiveLines(),primary=primaryReadingRegion();
       if (!primary) return lines;
       const selected=lines.filter(line=>centeredInRegion(line,primary));
-      return selected.length?selected:lines;
+      const minimum=Math.min(lines.length,Math.max(3,Math.ceil(lines.length*.5)));
+      return selected.length>=minimum?selected:lines;
     }
     function renderVerifiedRegions() {
       overlay.querySelectorAll('.verified-hit').forEach(node=>node.remove());

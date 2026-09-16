@@ -61,7 +61,7 @@ class ApiTests(unittest.TestCase):
         self.assertIn(b'id="quality-4" aria-label="Request strongest reading"', response.data)
         self.assertIn(b'id="owner-badge"', response.data)
         self.assertIn(b'id="app-version"', response.data)
-        self.assertIn(b'v2026.09.15.4', response.data)
+        self.assertIn(b'v2026.09.15.5', response.data)
         self.assertIn(b"const appVersion=$('app-version').textContent.replace(/^v/,'')", response.data)
         self.assertNotIn(b"const appVersion='2026-09-15.1'", response.data)
         self.assertIn(b"'UNASSIGNED \xc2\xb7 OLDER CAPTURE'", response.data)
@@ -75,6 +75,8 @@ class ApiTests(unittest.TestCase):
         self.assertIn(b'function speechChunks', response.data)
         self.assertIn(b'function applyVerifiedReadingRegions', response.data)
         self.assertIn(b'function verifiedSpeech', response.data)
+        self.assertIn(b'function mergeVerifiedLines', response.data)
+        self.assertIn(b'return mergeVerifiedLines(output.sort', response.data)
         self.assertIn(b'region.spoken_en||region.label||region.spoken_kn', response.data)
         self.assertIn('ಪುಳಿಯೋಗರೆ'.encode(), response.data)
         self.assertIn('ಶಾವಿಗೆ'.encode(), response.data)
@@ -87,6 +89,8 @@ class ApiTests(unittest.TestCase):
         self.assertIn(b'function contextualTranslation', response.data)
         self.assertIn(b'function contextualWordTranslation', response.data)
         self.assertIn(b'function sourceTextForBox', response.data)
+        self.assertIn(b'Math.max(3,Math.ceil(lines.length*.5))', response.data)
+        self.assertIn(b'return selected.length>=minimum?selected:lines', response.data)
         self.assertIn(b'function textInsideObject', response.data)
         self.assertIn(b'speechAudioCache', response.data)
         self.assertIn(b'keepalive:true', response.data)
@@ -191,6 +195,9 @@ class ApiTests(unittest.TestCase):
         read_flow = response.data.split(b'async function readForUser', 1)[1].split(
             b'async function selectWord', 1,
         )[0]
+        explicit_translation = read_flow.index(b'let translation=useContext?contextualTranslation(target)')
+        script_shortcut = read_flow.index(b'!needsTargetTranslation(source)')
+        self.assertLess(explicit_translation, script_shortcut)
         translation_wait = read_flow.index(b'await translateOnDemand')
         selection_guard = read_flow.index(b'if (request!==readingGeneration) return false', translation_wait)
         first_speech = read_flow.index(b'await speak(source)', translation_wait)
@@ -262,7 +269,7 @@ class ApiTests(unittest.TestCase):
             "stage_4": "gpt-5.6-sol",
         })
         self.assertEqual(response.get_json()["stage_4"], "manual")
-        self.assertEqual(response.get_json()["app_version"], "2026-09-15.4")
+        self.assertEqual(response.get_json()["app_version"], "2026-09-15.5")
 
     def test_old_sol_and_astra_evidence_is_not_current(self) -> None:
         self.assertFalse(_current_reader_stage({
@@ -560,12 +567,17 @@ class ApiTests(unittest.TestCase):
         ).get_json()["items"][2]
 
         self.assertEqual([region["label"] for region in item["verified_regions"]], [
-            "Puliyogare", "Kadle kai", "Shavige", "Ollige",
+            "Puliyogare", "Kadle kai", "Shavige", "Kosambari",
+            "Mosaranna", "Happala", "Ollige",
         ])
         self.assertEqual(item["result"]["verified_regions"][1]["spoken_kn"], "ಎರಡು. ಕಡಲೆಕಾಯಿ.")
         self.assertEqual(
             item["result"]["verified_regions"][1]["spoken_en"],
             "Two. Kadle kai. Groundnuts.",
+        )
+        self.assertEqual(
+            item["result"]["verified_regions"][3]["spoken_en"],
+            "Four. Kosambari. Lentil and vegetable salad.",
         )
 
     def test_health_reports_pinned_models(self) -> None:
@@ -1509,7 +1521,7 @@ class ApiTests(unittest.TestCase):
 
     def test_usage_events_accept_only_privacy_safe_aggregates(self) -> None:
         with self.assertLogs("api.app", level="INFO") as logs:
-            response = self.client.post("/api/events", json={"app_version": "2026.09.15.4<script>", "events": [
+            response = self.client.post("/api/events", json={"app_version": "2026.09.15.5<script>", "events": [
                 {"name": "infer", "capture_id": "e" * 32, "ok": True,
                  "elapsed_ms": "bad", "question": "private spoken words"},
                 {"name": "not-allowed", "text": "private OCR"},
@@ -1519,7 +1531,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.get_json()["accepted"], 1)
         joined = " ".join(logs.output)
         self.assertIn('"name":"infer"', joined)
-        self.assertIn('"app_version":"2026.09.15.4script"', joined)
+        self.assertIn('"app_version":"2026.09.15.5script"', joined)
         self.assertNotIn("private spoken words", joined)
         self.assertNotIn("private OCR", joined)
 
