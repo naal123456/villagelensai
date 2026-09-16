@@ -280,3 +280,36 @@ speech, and an interrupted object reading cannot continue into its explanation.
 Rapid consecutive taps still require physical Safari acceptance testing; the
 server can verify request timing and cancellation code but cannot hear the
 device's final audio output.
+
+## A3-8 bilingual pronunciation and foreground audio reset
+
+Version `v2026.09.15.2` addresses two independently observed failures. In the
+English reader, romanized Kannada food names were classified as English and
+sent to an English voice. The A3-8 owner-verified handwriting regions now carry
+both Kannada and English readings, and common romanized Kannada food names are
+converted to Kannada script before speech is split by language. The result is
+Kannada pronunciation for the name followed by its English meaning.
+
+Live request evidence for the missing-audio report showed a foreground health
+check and usage upload but no subsequent `/api/speech` request. This places the
+failure before server TTS. Safari can retain a suspended or interrupted Web
+Audio context that is neither usable nor reported as `closed`; the foreground
+handler now discards every existing context so the next user gesture creates a
+fresh one. A privacy-safe `audio_reset` event was added for field diagnosis.
+
+- Source commit: `da0997d`
+- GitHub Actions run `35046599073`: passed
+- Tests: `67/67` passed; Python and browser JavaScript parsing passed
+- Cloud Build: `d3340c53-870a-4f55-8d94-d87fdf630340`
+- Container digest:
+  `sha256:f9211c29b771c04cb9f805f8dc3b2c3cdee7eed6735cd9b2a50dddba3f2199b2`
+- Production revision: `vlens-a-00062-99l`, 100 percent traffic
+- Live `/health`: healthy and reports `app_version: 2026-09-15.2`
+- Warning/error query on the new revision: empty
+- No OCR or LLM request was made for this speech correction
+- Immediate rollback: `vlens-a-00061-x9m`
+
+Physical acceptance: open A3-8 in `/b/` and touch Puliyogare, Kadle kai,
+Shavige, and Ollige; each name should use Kannada pronunciation and then give
+the English meaning. Next, leave Safari for several minutes, return, and touch
+one word once. It should speak on that first tap without a reload.
