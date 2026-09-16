@@ -245,3 +245,38 @@ actually running without recording OCR or spoken content.
 - Warning/error log query for the new revision: empty
 - No OCR or LLM request was made for this delivery correction
 - Immediate rollback: `vlens-a-00059-wr6`
+
+## Rapid-selection audio synchronization
+
+Version `v2026.09.15.1` fixes the cross-control race reported while advancing
+through A3 captures. Live iPhone speech requests were all successful, usually
+in 0.5–0.9 seconds, but included 2–4.4 second outliers. During that wait a new
+selection updated the highlight, while the older request could finish later and
+fall through to Safari's local voice. Translation requests had an equivalent
+stale-response window. This produced the observed one-selection-behind audio
+for touch words, touch sentences, and lower reading actions.
+
+The shared reading layer now aborts the previous speech and translation HTTP
+requests immediately. Each user selection has an independent generation token,
+checked after every asynchronous translation, server-speech, decoding, and
+playback boundary. A cancelled server request cannot fall through to browser
+speech, and an interrupted object reading cannot continue into its explanation.
+
+- Source commit: `93b6841`
+- GitHub Actions run `35044165562`: passed
+- Tests: `67/67` passed; regression ordering checks prove that stale-generation
+  rejection occurs before browser-voice fallback and before translated speech
+- Cloud Build: `c823b4dc-520d-4464-8e44-18445a071560`
+- Container digest:
+  `sha256:77a57d6ee0170dd1c6ef8d6d5be6d5b97d465fe26d4600ea67241ae40faaa2dd`
+- Production revision: `vlens-a-00061-x9m`, 100 percent traffic
+- Live `/health`: healthy and reports `app_version: 2026-09-15.1`
+- Authenticated `/b/?tester=a3`: request cancellation and both generation guards
+  present
+- Warning/error query on the new revision: empty
+- No OCR or LLM request was made for this playback correction
+- Immediate rollback: `vlens-a-00060-8w6`
+
+Rapid consecutive taps still require physical Safari acceptance testing; the
+server can verify request timing and cancellation code but cannot hear the
+device's final audio output.
