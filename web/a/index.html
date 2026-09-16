@@ -24,7 +24,7 @@
     button.working { border-color: #62d7ff; background: #174b5f; animation: working 1s infinite alternate; }
     @keyframes working { to { box-shadow: 0 0 15px #62d7ff; } }
     button:focus-visible { outline: 4px solid #65d6ff; outline-offset: 2px; }
-    .quality { display: grid; grid-template-columns: repeat(4, 1fr) auto auto auto; gap: 6px; align-items: center; }
+    .quality { display: grid; grid-template-columns: repeat(4, 1fr) auto auto; gap: 6px; align-items: center; }
     .bar { height: 14px; min-height: 14px; padding: 0; border: 1px solid #64717d; border-radius: 5px; background: #46515b; }
     #quality-4 { cursor: pointer; }
     #quality-4:not(.ready):not(.failed) { border-color: #55d38a; box-shadow: inset 0 0 0 1px #167a45; }
@@ -35,7 +35,6 @@
     .bar.failed { border-color: #9b7048; background: #5c4c3e; }
     #quality-timer { min-width: 2.6em; color: #c7d1da; font-variant-numeric: tabular-nums; font-size: .85rem; }
     #app-version { color: #8fa0ad; font-size: .66rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
-    #language-toggle { min-height: 30px; padding: 2px 8px; font-size: .78rem; border-color: #62d7ff; white-space: nowrap; }
     #mic-status { margin: 5px 0 0; padding: 7px 9px; border: 2px solid #62d7ff; border-radius: 8px;
       background: #123b4a; color: white; font-size: .9rem; font-weight: 750; }
     #mic-status[data-state="recording"] { border-color: #ff6b6b; background: #5b2020; }
@@ -55,6 +54,12 @@
     #welcome-touch { width: 100%; min-height: 112px; padding: 16px; border: 4px solid #fff36a; background: #24323c;
       box-shadow: 0 0 18px rgba(255,243,106,.35); font-size: clamp(1.05rem,4.5vw,1.35rem); font-weight: 800; }
     #welcome-touch small { display: block; margin-top: 7px; color: #b9e8ff; font-size: .78em; font-weight: 600; }
+    #welcome-camera { width: min(100%,420px); min-height: 62px; margin: 8px auto 12px; border: 4px solid #55e58b;
+      background: #176c42; font-size: 1.2rem; font-weight: 850; }
+    #welcome-camera::before { content: '↗  '; color: #fff36a; font-size: 1.65rem; }
+    #welcome-help { display: grid; grid-template-columns: repeat(2,1fr); gap: 7px; margin-top: 12px; }
+    #welcome-help button { min-height: 60px; padding: 7px; font-size: .92rem; line-height: 1.2; }
+    #welcome-help strong { display: block; font-size: 1.25rem; }
     .stage.loading #source-image { opacity: .28; }
     #source-image { display: block; max-width: 100%; max-height: 74vh; object-fit: contain; user-select: none; -webkit-user-drag: none; }
     #overlay { position: absolute; inset: 0; width: 100%; height: 100%; }
@@ -85,7 +90,7 @@
     #camera-guide { position: fixed; inset: 0; z-index: 30; display: grid; grid-template-rows: 1fr auto;
       background: #050708; color: white; }
     #camera-guide[hidden] { display: none; }
-    .camera-view { position: relative; min-height: 0; overflow: hidden; }
+    .camera-view { position: relative; min-height: 0; overflow: hidden; touch-action: none; }
     #camera-preview { width: 100%; height: 100%; object-fit: cover; background: #000; }
     #camera-frame { position: absolute; inset: 10% 7%; border: 5px solid #ffb052; border-radius: 16px;
       box-shadow: 0 0 0 999px rgba(0,0,0,.2); pointer-events: none; transition: border-color .15s; }
@@ -98,6 +103,10 @@
     #camera-guidance { min-height: 2.6em; margin: 0 0 8px; font-size: 1.05rem; font-weight: 750; }
     #camera-metrics { margin: 0 0 8px; color: #b8c4ce; font-size: .78rem; font-variant-numeric: tabular-nums; }
     #camera-crop-note { margin: 0 0 8px; color: #d5e8f2; font-size: .78rem; }
+    #camera-zoom-controls { display: grid; grid-template-columns: 52px 1fr 52px; gap: 8px; align-items: center; margin: 8px 0; }
+    #camera-zoom-controls[hidden] { display: none; }
+    #camera-zoom-controls button { min-height: 46px; font-size: 1.4rem; }
+    #camera-zoom { width: 100%; min-height: 44px; accent-color: #55e58b; }
     .camera-actions { display: grid; grid-template-columns: 1fr 2fr; gap: 9px; }
     #camera-capture { min-height: 58px; background: #176c42; border-color: #55e58b; font-size: 1.15rem; }
     #camera-cancel { min-height: 58px; }
@@ -111,7 +120,7 @@
       <nav class="toolbar touch-toolbar" aria-label="Touch reading">
         <button id="mode-word" class="active" aria-label="Touch a word" data-tip="Touch a word">ಅ</button>
         <button id="mode-sentence" aria-label="Touch a sentence" data-tip="Touch a sentence"><small>ಅ ಆ ಇ</small></button>
-        <button id="mode-translate" aria-label="Translate English word to Kannada" data-tip="English to Kannada"><small>EN→ಕ</small></button>
+        <button id="mode-translate" aria-label="Language: Kannada. Touch for English" data-tip="Language: Kannada"><small>ಕ</small></button>
         <button id="camera" aria-label="Take a picture" data-tip="Take a picture">📷</button>
       </nav>
       <nav class="toolbar action-toolbar" aria-label="Reading actions">
@@ -126,14 +135,13 @@
         <span class="bar" id="quality-1"></span><span class="bar" id="quality-2"></span>
         <span class="bar" id="quality-3"></span><button class="bar" id="quality-4" aria-label="Request strongest reading" data-tip="Request strongest reading"></button>
         <span id="quality-timer">—</span>
-        <button id="language-toggle" aria-label="Change reading language">EN</button>
-        <span id="app-version" aria-label="App version">v2026-09-16.1</span>
+        <span id="app-version" aria-label="App version">v2026-09-16.2</span>
       </div>
       <p id="mic-status" role="status" aria-live="assertive" hidden></p>
     </section>
     <div class="gallery" aria-label="Saved pages">
       <button id="previous" aria-label="Previous page" data-tip="Previous page">‹</button>
-      <div id="position" aria-live="polite">ಹೊಸ ಚಿತ್ರ · New picture</div>
+      <div id="position" aria-live="polite">ಹೊಸ ಚಿತ್ರ</div>
       <button id="next" aria-label="Next page" data-tip="Next page">›</button>
     </div>
     <div id="owner-badge" aria-live="polite" hidden></div>
@@ -143,8 +151,17 @@
       <p class="welcome-arrow" aria-hidden="true">↓</p>
       <button id="welcome-touch" aria-label="Touch to hear how to use VillageLens">
         ಇಲ್ಲಿ ಸ್ಪರ್ಶಿಸಿ — ಹೇಗೆ ಬಳಸುವುದು ಎಂದು ಕೇಳಿ
-        <small>Touch here to hear how to use VillageLens</small>
+        <small>ಸ್ಪರ್ಶಿಸಿ ಕೇಳಿ</small>
       </button>
+      <button id="welcome-camera" aria-label="Start with the camera">📷 ಇಲ್ಲಿಂದ ಪ್ರಾರಂಭಿಸಿ</button>
+      <div id="welcome-help" aria-label="Button guide">
+        <button data-help="word"><strong>ಅ</strong><span>ಒಂದು ಪದ</span></button>
+        <button data-help="sentence"><strong>ಅ ಆ ಇ</strong><span>ಒಂದು ಸಾಲು</span></button>
+        <button data-help="language"><strong>ಕ / EN</strong><span>ಭಾಷೆ</span></button>
+        <button data-help="meaning"><strong>◎ / 💡</strong><span>ಭಾಗ ಅಥವಾ ಸಂಪೂರ್ಣ ಅರ್ಥ</span></button>
+        <button data-help="question"><strong>🎤</strong><span>ಪ್ರಶ್ನೆ ಕೇಳಿ</span></button>
+        <button data-help="install"><strong>📲</strong><span>ಫೋನ್‌ನಲ್ಲಿ ಉಳಿಸಿ</span></button>
+      </div>
     </section>
     <div class="stage" id="stage">
       <img id="source-image" alt="Page to read">
@@ -156,7 +173,7 @@
       <div id="conversation-turns"></div>
     </section>
     <button id="stop" aria-label="Stop reading" data-tip="Stop reading">■</button>
-    <p class="note">AI-assisted reading may make mistakes. Swipe the page to see saved tests.</p>
+    <p class="note">AI ಓದುವಿಕೆಯಲ್ಲಿ ತಪ್ಪುಗಳಿರಬಹುದು. ಉಳಿಸಿದ ಚಿತ್ರ ನೋಡಲು ಬಾಣ ಒತ್ತಿ.</p>
   </main>
   <section id="camera-guide" data-quality="wait" hidden role="dialog" aria-modal="true" aria-label="Guided camera">
     <div class="camera-view">
@@ -165,12 +182,17 @@
       <div id="camera-tap-arrow" aria-hidden="true">↓</div>
     </div>
     <div class="camera-panel">
-      <p id="camera-guidance" role="status" aria-live="polite">ಚಿತ್ರ ಅಥವಾ ಪುಟವನ್ನು ಚೌಕದೊಳಗೆ ಇರಿಸಿ · Fit the object or page inside the box</p>
+      <p id="camera-guidance" role="status" aria-live="polite">ಚಿತ್ರ ಅಥವಾ ಪುಟವನ್ನು ಚೌಕದೊಳಗೆ ಇರಿಸಿ</p>
       <p id="camera-metrics" aria-hidden="true">Starting camera…</p>
-      <p id="camera-crop-note">ಚೌಕದ ಒಳಗಿನ ಭಾಗ ಮಾತ್ರ ಚಿತ್ರದಲ್ಲಿ ಉಳಿಯುತ್ತದೆ · Only the area inside the box is saved</p>
+      <p id="camera-crop-note">ಚೌಕದ ಒಳಗಿನ ಭಾಗ ಮಾತ್ರ ಚಿತ್ರದಲ್ಲಿ ಉಳಿಯುತ್ತದೆ</p>
+      <div id="camera-zoom-controls" hidden>
+        <button id="camera-zoom-out" aria-label="Zoom out">−</button>
+        <input id="camera-zoom" type="range" aria-label="Camera zoom" min="1" max="1" step="0.1" value="1">
+        <button id="camera-zoom-in" aria-label="Zoom in">+</button>
+      </div>
       <div class="camera-actions">
         <button id="camera-cancel" aria-label="Cancel camera">✕</button>
-        <button id="camera-capture" aria-label="Take picture now">📷 ಈಗ ತೆಗೆಯಿರಿ · Take now</button>
+        <button id="camera-capture" aria-label="Take picture now">📷 ಈಗ ತೆಗೆಯಿರಿ</button>
       </div>
     </div>
     <canvas id="camera-analysis" width="192" height="144" hidden></canvas>
@@ -188,6 +210,7 @@
     const conversation=$('conversation'), conversationTurns=$('conversation-turns');
     const cameraGuide=$('camera-guide'), cameraPreview=$('camera-preview'),cameraFrame=$('camera-frame');
     const cameraGuidance=$('camera-guidance'), cameraMetrics=$('camera-metrics'), cameraCanvas=$('camera-analysis');
+    const cameraZoomControls=$('camera-zoom-controls'),cameraZoom=$('camera-zoom');
     let gallery=[], galleryIndex=0, result=null, mode='word', timerId=0, started=0, timerOwner=null;
     let navigationGeneration=0;
     let playbackGeneration=0, readingGeneration=0, speechGeneration=0, pointerStart=null, suppressTap=false, activeControl='mode-word';
@@ -197,6 +220,8 @@
     let cameraStream=null, cameraAnalysisTimer=0, previousCameraFrame=null;
     let cameraCapturing=false, lastCameraPrompt='', lastCameraPromptAt=0, latestCameraQuality=null;
     let cameraTarget={x:.07,y:.10,width:.86,height:.80},cameraTargetChangedAt=0;
+    let cameraZoomSupported=false,cameraZoomValue=1,cameraZoomStep=.1;
+    let cameraPointers=new Map(),pinchStartDistance=0,pinchStartZoom=1,cameraPinched=false;
     let nextCaptureSequence=1;
     const speechAudioCache=new Map();
     const translationCache=new Map();
@@ -218,22 +243,49 @@
     if (englishMode) {
       document.documentElement.lang='en'; document.title='VillageLens English Reader';
       $('mode-word').textContent='A'; $('mode-sentence').innerHTML='<small>A B C</small>';
-      $('mode-translate').innerHTML='<small>→ EN</small>';
-      $('mode-translate').setAttribute('aria-label','Translate selected word to English');
-      $('mode-translate').dataset.tip='Translate to English';
+      $('mode-translate').innerHTML='<small>EN</small>';
+      $('mode-translate').setAttribute('aria-label','Language: English. Touch for Kannada');
+      $('mode-translate').dataset.tip='Language: English';
       $('play-words').innerHTML='▶ A'; $('play-sentences').innerHTML='<small>▶ A B C</small>';
       $('current').lang='en'; $('conversation').querySelector('h2').textContent='Questions and answers';
       $('status').textContent='Preparing the image…';
       $('camera-guidance').textContent='Fit the object or page inside the box';
       $('camera-capture').textContent='📷 Take now';
+      $('camera-crop-note').textContent='Only the area inside the box is saved';
+      $('camera-cancel').setAttribute('aria-label','Cancel camera');
+      $('camera-zoom-out').setAttribute('aria-label','Zoom out');
+      $('camera-zoom-in').setAttribute('aria-label','Zoom in');
+      $('camera-zoom').setAttribute('aria-label','Camera zoom');
       document.querySelector('.note').textContent='AI-assisted reading may make mistakes. Swipe the image to see saved tests.';
       $('app-version').textContent=`EN · v${appVersion}`;
-      $('mode-translate').setAttribute('aria-label','English output language');
-      $('mode-translate').dataset.tip='Output: English';
-      $('language-toggle').textContent='ಕನ್ನಡ';
       $('welcome-touch').innerHTML='Touch here — hear how to use VillageLens<small>ಈ ಚೌಕವನ್ನು ಸ್ಪರ್ಶಿಸಿ</small>';
+      $('welcome-camera').textContent='📷 Start here';
+      const labels={word:['A','One word'],sentence:['A B C','One line'],language:['EN / ಕ','Change language'],
+        meaning:['◎ / 💡','Selected area or whole meaning'],question:['🎤','Ask a question'],install:['📲','Keep on phone']};
+      document.querySelectorAll('#welcome-help [data-help]').forEach(button=>{
+        const [icon,label]=labels[button.dataset.help]; button.querySelector('strong').textContent=icon;
+        button.querySelector('span').textContent=label;
+      });
       $('position').textContent='New picture';
       $('status').textContent='Tap the camera, or touch the yellow box below.';
+      const aria={
+        'mode-word':'Touch one word','mode-sentence':'Touch one sentence','play-words':'Read every word',
+        'play-sentences':'Read every sentence','select-object':'Select an area to read and explain',
+        'infer-global':'Explain the whole image','ask':'Ask a spoken question','install':'Keep VillageLens on this phone',
+        'camera':'Take a picture','previous':'Previous saved image','next':'Next saved image','stop':'Stop reading',
+      };
+      Object.entries(aria).forEach(([id,label])=>$(id).setAttribute('aria-label',label));
+    } else {
+      $('mode-translate').innerHTML='<small>ಕ</small>';
+      const aria={
+        'mode-word':'ಒಂದು ಪದವನ್ನು ಸ್ಪರ್ಶಿಸಿ','mode-sentence':'ಒಂದು ವಾಕ್ಯವನ್ನು ಸ್ಪರ್ಶಿಸಿ',
+        'mode-translate':'ಭಾಷೆ ಕನ್ನಡ. ಇಂಗ್ಲಿಷ್‌ಗೆ ಬದಲಿಸಲು ಸ್ಪರ್ಶಿಸಿ','play-words':'ಎಲ್ಲ ಪದಗಳನ್ನು ಓದಿ',
+        'play-sentences':'ಎಲ್ಲ ವಾಕ್ಯಗಳನ್ನು ಓದಿ','select-object':'ಒಂದು ಭಾಗವನ್ನು ಆಯ್ಕೆ ಮಾಡಿ ಓದಿ ಅರ್ಥ ಹೇಳಿ',
+        'infer-global':'ಸಂಪೂರ್ಣ ಚಿತ್ರದ ಅರ್ಥ ಹೇಳಿ','ask':'ಮಾತಿನಲ್ಲಿ ಪ್ರಶ್ನೆ ಕೇಳಿ','install':'ವಿಲೇಜ್‌ಲೆನ್ಸ್ ಅನ್ನು ಫೋನ್‌ನಲ್ಲಿ ಉಳಿಸಿ',
+        'camera':'ಚಿತ್ರ ತೆಗೆಯಿರಿ','previous':'ಹಿಂದಿನ ಉಳಿಸಿದ ಚಿತ್ರ','next':'ಮುಂದಿನ ಉಳಿಸಿದ ಚಿತ್ರ','stop':'ಓದುವುದನ್ನು ನಿಲ್ಲಿಸಿ',
+      };
+      Object.entries(aria).forEach(([id,label])=>$(id).setAttribute('aria-label',label));
+      $('mode-translate').dataset.tip='ಭಾಷೆ: ಕನ್ನಡ';
     }
     try { localStorage.setItem('villagelens.output_language.v1',outputLanguage); } catch (_) {}
 
@@ -270,12 +322,14 @@
       const parameters=new URLSearchParams();
       if (testerId) parameters.set('tester',testerId);
       parameters.set('lang',language);
+      const item=gallery[galleryIndex];
+      if ($('welcome').hidden&&item&&item.id) parameters.set('view',item.id);
       return `/a/?${parameters.toString()}`;
     }
     function showWelcome() {
       stop(); ++navigationGeneration; result=null; current.textContent=''; overlay.textContent=''; image.removeAttribute('src');
       stage.style.display='none'; ownerBadge.hidden=true; conversation.hidden=true; $('welcome').hidden=false;
-      position.textContent=englishMode?'New picture':'ಹೊಸ ಚಿತ್ರ · New picture';
+      position.textContent=englishMode?'New picture':'ಹೊಸ ಚಿತ್ರ';
       status.textContent=englishMode?'Tap the camera, or touch the yellow box below.':'ಕ್ಯಾಮೆರಾ ಒತ್ತಿ ಅಥವಾ ಕೆಳಗಿನ ಹಳದಿ ಚೌಕವನ್ನು ಸ್ಪರ್ಶಿಸಿ.';
     }
     async function speakWelcome() {
@@ -284,6 +338,24 @@
         'ಪದಗಳು ಅಥವಾ ವಸ್ತುವಿನ ಕಡೆ ಕ್ಯಾಮೆರಾ ತೋರಿಸಿ. ಬೇಕಾದ ಭಾಗವನ್ನು ಸ್ಪರ್ಶಿಸಿ. ಫೋನ್ ಸ್ಥಿರವಾಗಿ ಹಿಡಿದು ಕ್ಯಾಮೆರಾ ಬಟನ್ ಒತ್ತಿ.';
       status.textContent=englishMode?'Playing the instructions…':'ಬಳಸುವ ವಿಧಾನವನ್ನು ಹೇಳುತ್ತಿದೆ…';
       await speakRaw(message);
+    }
+    async function speakControlHelp(kind) {
+      const messages=englishMode?{
+        word:'Touch A, then touch one word. VillageLens reads the visible word first and then gives its English meaning when needed.',
+        sentence:'Touch A B C, then touch a line. VillageLens reads the visible line first and then gives its English meaning when needed.',
+        language:'This button changes all menus, meanings, and answers between English and Kannada.',
+        meaning:'Touch the circle to choose one area. Touch the light bulb to understand the whole image.',
+        question:'Touch the microphone, ask any question in any language, then touch it again. The answer is in English.',
+        install:'Touch this button to keep VillageLens on the phone home screen.',
+      }:{
+        word:'ಅ ಬಟನ್ ಒತ್ತಿ, ನಂತರ ಒಂದು ಪದವನ್ನು ಸ್ಪರ್ಶಿಸಿ. ಮೊದಲು ಕಾಣುವ ಪದವನ್ನು ಓದಿ, ಬೇಕಾದರೆ ಕನ್ನಡ ಅರ್ಥ ಹೇಳುತ್ತದೆ.',
+        sentence:'ಅ ಆ ಇ ಬಟನ್ ಒತ್ತಿ, ನಂತರ ಒಂದು ಸಾಲನ್ನು ಸ್ಪರ್ಶಿಸಿ. ಮೊದಲು ಕಾಣುವ ಸಾಲನ್ನು ಓದಿ, ನಂತರ ಕನ್ನಡ ಅರ್ಥ ಹೇಳುತ್ತದೆ.',
+        language:'ಈ ಬಟನ್ ಮೆನು, ಅರ್ಥ ಮತ್ತು ಉತ್ತರದ ಭಾಷೆಯನ್ನು ಕನ್ನಡ ಅಥವಾ ಇಂಗ್ಲಿಷ್‌ಗೆ ಬದಲಿಸುತ್ತದೆ.',
+        meaning:'ವೃತ್ತವನ್ನು ಒತ್ತಿ ಒಂದು ಭಾಗವನ್ನು ಆಯ್ಕೆ ಮಾಡಿ. ಬಲ್ಬ್ ಒತ್ತಿ ಸಂಪೂರ್ಣ ಚಿತ್ರದ ಅರ್ಥ ಕೇಳಿ.',
+        question:'ಮೈಕ್ ಒತ್ತಿ ಯಾವುದೇ ಭಾಷೆಯಲ್ಲಿ ಪ್ರಶ್ನೆ ಕೇಳಿ. ಮತ್ತೆ ಮೈಕ್ ಒತ್ತಿ. ಉತ್ತರ ಕನ್ನಡದಲ್ಲಿ ಬರುತ್ತದೆ.',
+        install:'ಈ ಬಟನ್ ಒತ್ತಿ ವಿಲೇಜ್‌ಲೆನ್ಸ್ ಅನ್ನು ಫೋನ್ ಮುಖಪುಟದಲ್ಲಿ ಉಳಿಸಿ.',
+      };
+      await speakRaw(messages[kind]||'');
     }
 
     async function ensureCurrentApp() {
@@ -1235,6 +1307,8 @@
       clearTimeout(cameraAnalysisTimer); cameraAnalysisTimer=0; previousCameraFrame=null;
       if (cameraStream) cameraStream.getTracks().forEach(track=>track.stop());
       cameraStream=null; cameraPreview.srcObject=null; cameraGuide.hidden=true; cameraCapturing=false;
+      cameraZoomControls.hidden=true; cameraZoomSupported=false; cameraZoomValue=1;
+      cameraPointers.clear(); cameraPinched=false;
     }
     function cameraPrompt(key,message,spokenKn) {
       cameraGuidance.textContent=message; const now=Date.now();
@@ -1274,6 +1348,56 @@
       cameraGuidance.textContent=englishMode?'Selected. Fill the yellow box and hold steady.':'ಆಯ್ಕೆಯಾಗಿದೆ. ಹಳದಿ ಚೌಕವನ್ನು ತುಂಬಿಸಿ ಸ್ಥಿರವಾಗಿ ಹಿಡಿಯಿರಿ.';
       await requestCameraFocus('continuous',x,y);
       track('camera_target');
+    }
+    async function setCameraZoom(value,announce=false) {
+      if (!cameraZoomSupported) return false;
+      const trackVideo=cameraStream&&cameraStream.getVideoTracks()[0]; if (!trackVideo) return false;
+      const minimum=Number(cameraZoom.min),maximum=Number(cameraZoom.max);
+      const next=Math.max(minimum,Math.min(maximum,Number(value)||minimum));
+      try {
+        await trackVideo.applyConstraints({advanced:[{zoom:next}]});
+        cameraZoomValue=next; cameraZoom.value=String(next); previousCameraFrame=null;
+        if (announce) cameraGuidance.textContent=englishMode?`Zoom ${next.toFixed(1)} times. Tap the target and hold steady.`:
+          `ಜೂಮ್ ${next.toFixed(1)} ಪಟ್ಟು. ಬೇಕಾದ ಭಾಗವನ್ನು ಸ್ಪರ್ಶಿಸಿ ಸ್ಥಿರವಾಗಿ ಹಿಡಿಯಿರಿ.`;
+        return true;
+      } catch (_) { return false; }
+    }
+    async function configureCameraZoom() {
+      const trackVideo=cameraStream&&cameraStream.getVideoTracks()[0];
+      const capabilities=trackVideo&&trackVideo.getCapabilities?trackVideo.getCapabilities():{};
+      const zoom=capabilities&&capabilities.zoom;
+      cameraZoomSupported=Boolean(zoom&&Number.isFinite(Number(zoom.min))&&Number(zoom.max)>Number(zoom.min));
+      cameraZoomControls.hidden=!cameraZoomSupported;
+      if (!cameraZoomSupported) return;
+      const settings=trackVideo.getSettings?trackVideo.getSettings():{};
+      cameraZoom.min=String(zoom.min); cameraZoom.max=String(zoom.max);
+      cameraZoomStep=Math.max(.1,Number(zoom.step)||.1); cameraZoom.step=String(cameraZoomStep);
+      cameraZoomValue=Math.max(Number(zoom.min),Math.min(Number(zoom.max),Number(settings.zoom)||Number(zoom.min)));
+      cameraZoom.value=String(cameraZoomValue);
+    }
+    function cameraPointerDistance() {
+      const points=[...cameraPointers.values()];
+      return points.length<2?0:Math.hypot(points[0].x-points[1].x,points[0].y-points[1].y);
+    }
+    function cameraPointerDown(event) {
+      try { event.currentTarget.setPointerCapture(event.pointerId); } catch (_) {}
+      cameraPointers.set(event.pointerId,{x:event.clientX,y:event.clientY});
+      if (cameraPointers.size===2) {
+        pinchStartDistance=cameraPointerDistance(); pinchStartZoom=cameraZoomValue; cameraPinched=true;
+      }
+    }
+    function cameraPointerMove(event) {
+      if (!cameraPointers.has(event.pointerId)) return;
+      cameraPointers.set(event.pointerId,{x:event.clientX,y:event.clientY});
+      if (cameraPointers.size===2&&cameraZoomSupported&&pinchStartDistance>0) {
+        event.preventDefault(); setCameraZoom(pinchStartZoom*cameraPointerDistance()/pinchStartDistance);
+      }
+    }
+    function cameraPointerUp(event) {
+      const wasSingle=cameraPointers.size===1&&!cameraPinched;
+      cameraPointers.delete(event.pointerId);
+      if (wasSingle) selectCameraTarget(event);
+      if (!cameraPointers.size) cameraPinched=false;
     }
     function drawCameraGuideFrame(canvas) {
       const source=cameraGuideSourceRect(); if (!source) return false;
@@ -1316,11 +1440,11 @@
       const clearlySharp=quality.sharpness>=7, moving=quality.motion>(clearlySharp?24:16);
       const soft=quality.sharpness<4.5;
       if (Date.now()-cameraTargetChangedAt<800) return ['wait','positioning',englishMode?'Keep framing the selected area':'ಆಯ್ದ ಭಾಗವನ್ನು ಚೌಕದೊಳಗೆ ಇರಿಸಿ',englishMode?'Keep framing the selected area.':'ಆಯ್ದ ಭಾಗವನ್ನು ಚೌಕದೊಳಗೆ ಇರಿಸಿ.'];
-      if (dark) return ['bad','dark',englishMode?'Need more light':'ಬೆಳಕು ಬೇಕು · Need more light',englishMode?'Need more light.':'ಬೆಳಕು ಬೇಕು.'];
-      if (glare) return ['wait','glare',englishMode?'Tilt slightly to remove glare':'ಪ್ರತಿಫಲನ ತಪ್ಪಿಸಲು ಸ್ವಲ್ಪ ಓರೆಯಾಗಿಸಿ · Tilt slightly to remove glare',englishMode?'Tilt slightly to remove glare.':'ಬೆಳಕಿನ ಪ್ರತಿಫಲನ ತಪ್ಪಿಸಲು ಸ್ವಲ್ಪ ಓರೆಯಾಗಿಸಿ.'];
-      if (moving) return ['wait','motion',englishMode?'Hold the phone steady':'ಫೋನ್ ಸ್ಥಿರವಾಗಿ ಹಿಡಿಯಿರಿ · Hold the phone steady',englishMode?'Hold the phone steady.':'ಫೋನ್ ಸ್ಥಿರವಾಗಿ ಹಿಡಿಯಿರಿ.'];
-      if (soft) return ['wait','soft',englishMode?'Move slowly until the image is clear':'ಸ್ಪಷ್ಟವಾಗಲು ನಿಧಾನವಾಗಿ ಹತ್ತಿರ ಅಥವಾ ದೂರ ಸರಿಸಿ · Move slowly until clear',englishMode?'Move slowly until the image is clear.':'ಚಿತ್ರ ಸ್ಪಷ್ಟವಾಗುವವರೆಗೆ ನಿಧಾನವಾಗಿ ಹತ್ತಿರ ಅಥವಾ ದೂರ ಸರಿಸಿ.'];
-      return ['ready','ready',englishMode?'Good—hold steady':'ಚೆನ್ನಾಗಿದೆ—ಸ್ಥಿರವಾಗಿ ಹಿಡಿಯಿರಿ · Good—hold steady',englishMode?'Good. Hold steady.':'ಚೆನ್ನಾಗಿದೆ. ಸ್ಥಿರವಾಗಿ ಹಿಡಿಯಿರಿ.'];
+      if (dark) return ['bad','dark',englishMode?'Need more light':'ಬೆಳಕು ಬೇಕು',englishMode?'Need more light.':'ಬೆಳಕು ಬೇಕು.'];
+      if (glare) return ['wait','glare',englishMode?'Tilt slightly to remove glare':'ಪ್ರತಿಫಲನ ತಪ್ಪಿಸಲು ಸ್ವಲ್ಪ ಓರೆಯಾಗಿಸಿ',englishMode?'Tilt slightly to remove glare.':'ಬೆಳಕಿನ ಪ್ರತಿಫಲನ ತಪ್ಪಿಸಲು ಸ್ವಲ್ಪ ಓರೆಯಾಗಿಸಿ.'];
+      if (moving) return ['wait','motion',englishMode?'Hold the phone steady':'ಫೋನ್ ಸ್ಥಿರವಾಗಿ ಹಿಡಿಯಿರಿ',englishMode?'Hold the phone steady.':'ಫೋನ್ ಸ್ಥಿರವಾಗಿ ಹಿಡಿಯಿರಿ.'];
+      if (soft) return ['wait','soft',englishMode?'Move slowly until the image is clear':'ಸ್ಪಷ್ಟವಾಗಲು ನಿಧಾನವಾಗಿ ಹತ್ತಿರ ಅಥವಾ ದೂರ ಸರಿಸಿ',englishMode?'Move slowly until the image is clear.':'ಚಿತ್ರ ಸ್ಪಷ್ಟವಾಗುವವರೆಗೆ ನಿಧಾನವಾಗಿ ಹತ್ತಿರ ಅಥವಾ ದೂರ ಸರಿಸಿ.'];
+      return ['ready','ready',englishMode?'Good—hold steady':'ಚೆನ್ನಾಗಿದೆ—ಸ್ಥಿರವಾಗಿ ಹಿಡಿಯಿರಿ',englishMode?'Good. Hold steady.':'ಚೆನ್ನಾಗಿದೆ. ಸ್ಥಿರವಾಗಿ ಹಿಡಿಯಿರಿ.'];
     }
     function updateCameraGuide() {
       if (!cameraStream||cameraCapturing) return;
@@ -1331,7 +1455,7 @@
       cameraGuide.dataset.quality=state; cameraPrompt(key,message,spoken);
       cameraMetrics.textContent=`Light ${Math.round(quality.brightness)} · Sharp ${quality.sharpness.toFixed(1)} · Motion ${quality.motion.toFixed(1)} · Glare ${Math.round(quality.glare_percent)}%`;
       if (state==='ready'&&key==='ready') {
-        cameraGuidance.textContent=englishMode?'Ready—tap the green camera':'ಚಿತ್ರ ಸಿದ್ಧವಾಗಿದೆ—ಹಸಿರು ಕ್ಯಾಮೆರಾ ಒತ್ತಿ · Ready—tap the green camera';
+        cameraGuidance.textContent=englishMode?'Ready—tap the green camera':'ಚಿತ್ರ ಸಿದ್ಧವಾಗಿದೆ—ಹಸಿರು ಕ್ಯಾಮೆರಾ ಒತ್ತಿ';
       }
       cameraAnalysisTimer=setTimeout(updateCameraGuide,320);
     }
@@ -1339,18 +1463,19 @@
       stop(); activeControl='camera'; $('camera').classList.add('active'); track('camera_open');
       if (!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia) { track('camera_fallback'); input.click(); return; }
       try {
-        cameraStream=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:{ideal:'environment'},width:{ideal:1920},height:{ideal:1080}}});
+        cameraStream=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:{ideal:'environment'},width:{ideal:3840},height:{ideal:2160}}});
         cameraPreview.srcObject=cameraStream; cameraGuide.hidden=false; cameraGuide.dataset.quality='wait';
         positionCameraTarget({x:.07,y:.10,width:.86,height:.80}); $('camera-tap-arrow').hidden=false;
         cameraTargetChangedAt=Date.now(); previousCameraFrame=null;
         cameraGuidance.textContent=englishMode?'Tap the words or object you want, then fill the box':'ಬೇಕಾದ ಪದ ಅಥವಾ ವಸ್ತುವನ್ನು ಸ್ಪರ್ಶಿಸಿ, ನಂತರ ಚೌಕವನ್ನು ತುಂಬಿಸಿ';
         cameraMetrics.textContent='Checking light and focus…'; cameraCapturing=false; latestCameraQuality=null;
         await cameraPreview.play();
+        await configureCameraZoom();
         await requestCameraFocus('continuous');
         cameraAnalysisTimer=setTimeout(updateCameraGuide,450);
       } catch (_) {
         closeGuidedCamera(); track('camera_fallback',false);
-        status.textContent='ಮಾರ್ಗದರ್ಶಿ ಕ್ಯಾಮೆರಾ ತೆರೆಯಲಿಲ್ಲ. ಸಾಮಾನ್ಯ ಕ್ಯಾಮೆರಾ ಬಳಸುತ್ತಿದೆ. · Using the regular camera.';
+        status.textContent=englishMode?'Using the regular camera.':'ಮಾರ್ಗದರ್ಶಿ ಕ್ಯಾಮೆರಾ ತೆರೆಯಲಿಲ್ಲ. ಸಾಮಾನ್ಯ ಕ್ಯಾಮೆರಾ ಬಳಸುತ್ತಿದೆ.';
         input.click();
       }
     }
@@ -1380,7 +1505,7 @@
     async function captureGuidedPhoto() {
       if (cameraCapturing||!cameraPreview.videoWidth) return;
       cameraCapturing=true; clearTimeout(cameraAnalysisTimer);
-      cameraGuidance.textContent='ಸ್ಥಿರವಾಗಿ ಹಿಡಿಯಿರಿ—ಸ್ಪಷ್ಟ ಚಿತ್ರ ಆಯ್ಕೆ ಮಾಡುತ್ತಿದೆ… · Hold steady—choosing the clearest photo…';
+      cameraGuidance.textContent=englishMode?'Hold steady—choosing the clearest photo…':'ಸ್ಥಿರವಾಗಿ ಹಿಡಿಯಿರಿ—ಸ್ಪಷ್ಟ ಚಿತ್ರ ಆಯ್ಕೆ ಮಾಡುತ್ತಿದೆ…';
       cameraGuide.dataset.quality='wait';
       await requestCameraFocus('single-shot',cameraTarget.x+cameraTarget.width/2,cameraTarget.y+cameraTarget.height/2);
       let best=null;
@@ -1393,7 +1518,7 @@
         if (!best||candidate.score>best.score) best=candidate;
       }
       const quality={...(best&&best.quality||latestCameraQuality||{}),auto_captured:false,
-        burst_frames:captureBurstFrames};
+        burst_frames:captureBurstFrames,zoom:cameraZoomValue};
       closeGuidedCamera(); track('camera_manual');
       if (!best) { input.click(); return; }
       best.output.toBlob(blob=>{
@@ -1648,7 +1773,12 @@
       }
     }
     $('mode-word').onclick=()=>setMode('word','mode-word'); $('mode-sentence').onclick=()=>setMode('sentence','mode-sentence');
-    $('mode-translate').onclick=()=>setMode('translate','mode-translate'); $('camera').onclick=openGuidedCamera;
+    $('mode-translate').onclick=()=>{
+      const next=englishMode?'kn':'en';
+      try { localStorage.setItem('villagelens.output_language.v1',next); } catch (_) {}
+      location.assign(canonicalUrl(next));
+    };
+    $('camera').onclick=openGuidedCamera;
     $('quality-4').onclick=requestStrongestReading;
     $('play-words').onclick=()=>result&&play(readingWords(),'play-words','word');
     $('play-sentences').onclick=()=>result&&play(readingLines(),'play-sentences','line');
@@ -1656,14 +1786,19 @@
     $('previous').onclick=()=>showGallery($('welcome').hidden?galleryIndex-1:gallery.length-1);
     $('next').onclick=()=>showGallery($('welcome').hidden?galleryIndex+1:0);
     $('welcome-touch').onclick=speakWelcome;
-    $('language-toggle').onclick=()=>{
-      const next=englishMode?'kn':'en';
-      try { localStorage.setItem('villagelens.output_language.v1',next); } catch (_) {}
-      location.assign(canonicalUrl(next));
-    };
+    $('welcome-camera').onclick=openGuidedCamera;
+    document.querySelectorAll('#welcome-help [data-help]').forEach(button=>button.onclick=()=>speakControlHelp(button.dataset.help));
     $('camera-cancel').onclick=()=>{ closeGuidedCamera(); clearControls(); track('camera_cancel'); };
     $('camera-capture').onclick=captureGuidedPhoto;
-    cameraPreview.addEventListener('pointerup',selectCameraTarget);
+    $('camera-zoom-out').onclick=()=>setCameraZoom(cameraZoomValue-cameraZoomStep,true);
+    $('camera-zoom-in').onclick=()=>setCameraZoom(cameraZoomValue+cameraZoomStep,true);
+    cameraZoom.oninput=()=>setCameraZoom(cameraZoom.value);
+    cameraZoom.onchange=()=>setCameraZoom(cameraZoom.value,true);
+    const cameraView=cameraPreview.parentElement;
+    cameraView.addEventListener('pointerdown',cameraPointerDown);
+    cameraView.addEventListener('pointermove',cameraPointerMove);
+    cameraView.addEventListener('pointerup',cameraPointerUp);
+    cameraView.addEventListener('pointercancel',cameraPointerUp);
     input.onchange=()=>useCapture(input.files&&input.files[0]);
     document.addEventListener('pointerdown',unlockAudioPlayback,{passive:true});
     document.addEventListener('visibilitychange',async()=>{
@@ -1729,8 +1864,13 @@
         } catch (_) {}
       }
       const galleryLoading=loadGallery();
-      const shared=new URLSearchParams(location.search).get('shared')==='1';
+      const parameters=new URLSearchParams(location.search),shared=parameters.get('shared')==='1';
+      const requestedView=parameters.get('view')||'';
       if (shared) { await galleryLoading; await loadSharedImage(); }
+      else if (requestedView) {
+        await galleryLoading; const index=gallery.findIndex(item=>item.id===requestedView);
+        if (index>=0) await showGallery(index);
+      }
     }
     startApp();
   </script>
