@@ -328,3 +328,26 @@ asynchronous version health check. A regression assertion fixes that ordering.
 - Live `/health`: healthy and reports `app_version: 2026-09-15.3`
 - Warning/error query on the new revision: empty
 - Immediate rollback: `vlens-a-00062-99l`
+
+## Browser version single source of truth
+
+Field verification exposed that the browser had a fourth, stale hard-coded
+version value (`2026-09-15.1`). Although the server returned `.15.3` and the
+foreground check successfully reloaded `/b/`, that stale JavaScript constant
+overwrote the visible label and continued to report itself as old.
+
+Version `v2026.09.15.4` removes the duplicate JavaScript version literal. The
+updater now derives its value from the server-delivered version element, so the
+visible label, foreground comparison, and usage telemetry cannot disagree.
+
+- Source commit: `dbe09c4`
+- GitHub Actions run `35049875496`: passed
+- Tests: `67/67` passed; regression coverage rejects the stale literal
+- Cloud Build: `a78a0063-2b4f-4e0a-a541-deef5db359b2`
+- Container digest:
+  `sha256:4e9721e31095ab99c974bed549bafb9a4389a94e474ff229d3a4acb8b6759ac0`
+- Production revision: `vlens-a-00064-8jd`, 100 percent traffic
+- Live `/health`: healthy and reports `app_version: 2026-09-15.4`
+- Authenticated A3 `/b/`: visible label and derived browser version both `.15.4`
+- Warning/error query on the new revision: empty
+- Immediate rollback: `vlens-a-00063-7kd`
