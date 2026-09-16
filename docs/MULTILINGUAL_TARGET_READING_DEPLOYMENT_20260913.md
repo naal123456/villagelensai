@@ -381,3 +381,37 @@ well-supported page isolation such as A3-22 remains active.
 - Existing A3-7/A3-8 stage evidence was inspected; no OCR or LLM regeneration
   was made
 - Immediate rollback: `vlens-a-00064-8jd`
+
+## Handwriting script-mismatch safety
+
+Version `v2026.09.15.6` treats A1-5 and A1-6 as a paired handwriting safety
+case. Both photographs contain Kannada handwriting, but Google document OCR
+returned predominantly Telugu characters. Terra correctly identified Kannada,
+rejected the OCR evidence, and reported low confidence. Previously the word
+controls continued to expose the false Telugu boxes and translate them.
+
+The browser now compares the semantic language evidence with the OCR script.
+When a Kannada-handwriting result contains predominantly Telugu OCR, word boxes
+and continuous word reading are disabled. Sentence reading uses the semantic
+reader's honest uncertainty instead of speaking false OCR first. The interface
+asks for a closer photo and retains meaning/inference controls.
+
+A1-5's manual Sol request completed successfully in 42.85 seconds (about 47
+seconds including browser overhead). It recovered the second riddle and answer
+about tender coconut water, but `consensus_validated` remained false for the
+page. The fourth bar therefore correctly remained orange. Orange results now
+say explicitly that Sol finished but the readers disagree, and the timer says
+`review !` rather than `best` or `4/4 ready`. No stage-4 request was recorded
+for A1-6, whose distant overview lacks adequate word detail.
+
+- Source commit: `bb7c85f`
+- GitHub Actions run `35052223652`: passed
+- Tests: `67/67` passed; Python and browser JavaScript parsing passed
+- Cloud Build: `ebb25a4c-2e6d-494b-9c33-29c2bc61c05f`
+- Container digest:
+  `sha256:c0b46ff00e582272a1acb69bd5e32f827d453e7845dad5a9a45259c32d123e32`
+- Production revision: `vlens-a-00066-vp8`, 100 percent traffic
+- Live `/health`: healthy and reports `app_version: 2026-09-15.6`
+- Warning/error query on the new revision: empty
+- Foundational handwriting registry updated for A1-5 and A1-6
+- Immediate rollback: `vlens-a-00065-cgw`

@@ -1,11 +1,12 @@
 {
   "schema": "villagelens.handwriting-samples.v1",
-  "updated_at": "2026-09-09",
+  "updated_at": "2026-09-15",
   "privacy": "References only. Images and transcribed page contents remain in protected storage.",
   "samples": [
     {
       "sample_id": "HW-0001",
-      "capture_code": "A1-185142",
+      "capture_code": "A1-5",
+      "legacy_capture_code": "A1-185142",
       "capture_id": "1851422669a6487892e1f6e5189982fa",
       "captured_at": "2026-09-04T13:37:17.668935+00:00",
       "tester_session": "a1",
@@ -19,13 +20,17 @@
       "quality_notes": [
         "Writing is larger and clearer than the paired overview.",
         "The right side of multiple lines is cropped.",
-        "The page is angled and some contrast is low."
+        "The page is angled and some contrast is low.",
+        "Google document OCR incorrectly rendered the Kannada handwriting as Telugu script.",
+        "Terra correctly identified Kannada but abstained from unsafe line translation.",
+        "Sol recovered the tender-coconut-water riddle but did not reach independent consensus on most lines."
       ],
       "field_status": "foundational sample"
     },
     {
       "sample_id": "HW-0002",
-      "capture_code": "A1-4E3077",
+      "capture_code": "A1-6",
+      "legacy_capture_code": "A1-4E3077",
       "capture_id": "4e30772f680147b49c2c3b2f2cb73aff",
       "captured_at": "2026-09-04T13:37:24.084878+00:00",
       "tester_session": "a1",
@@ -39,7 +44,10 @@
       "quality_notes": [
         "Nearly the complete notebook page is visible.",
         "Page context is stronger than the paired close view.",
-        "Writing is smaller and harder for recognition."
+        "Writing is smaller and harder for recognition.",
+        "Google document OCR incorrectly rendered the Kannada handwriting as Telugu script.",
+        "Terra correctly rejected the mismatched OCR and marked the page unreliable for line reading.",
+        "No Sol stage-4 request was recorded during the 2026-09-15 review; the source lacks sufficient word detail."
       ],
       "field_status": "foundational sample"
     },
