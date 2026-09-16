@@ -116,7 +116,7 @@
         <span class="bar" id="quality-1"></span><span class="bar" id="quality-2"></span>
         <span class="bar" id="quality-3"></span><button class="bar" id="quality-4" aria-label="Request strongest reading" data-tip="Request strongest reading"></button>
         <span id="quality-timer">—</span>
-        <span id="app-version" aria-label="App version">v2026.09.15.5</span>
+        <span id="app-version" aria-label="App version">v2026.09.15.6</span>
       </div>
       <p id="mic-status" role="status" aria-live="assertive" hidden></p>
     </section>
@@ -346,6 +346,14 @@
       if (stageNumber>1&&value&&String(value.output_language||'kn')!==outputLanguage) return null;
       return value;
     }
+    function acceptedStrongest(value) {
+      return Boolean(value&&value.quality_validated===true&&value.consensus_validated===true);
+    }
+    function strongestStatus(value) {
+      return acceptedStrongest(value)?'4/4 reading stages ready.':(englishMode?
+        'Sol finished, but the readers disagree. The photo is not reliable enough for word reading; take a closer photo.':
+        'Sol ಓದುವಿಕೆ ಮುಗಿದಿದೆ, ಆದರೆ ಓದುಗರು ಒಪ್ಪುತ್ತಿಲ್ಲ. ಪದ ಓದಲು ಚಿತ್ರ ನಿಖರವಾಗಿಲ್ಲ; ಹತ್ತಿರದಿಂದ ಚಿತ್ರ ತೆಗೆಯಿರಿ.');
+    }
     function saveCachedStage(item,stageNumber,value) {
       item[`stage${stageNumber}`]=value;
       try {
@@ -375,9 +383,10 @@
         if (value.scene_type) item.label=String(value.scene_type).slice(0,60);
         if (item.result) copyMeaning(item.result,item);
         if (gallery[galleryIndex]===item&&result) copyMeaning(result,item);
+        if (gallery[galleryIndex]===item&&result&&untrustedOcr(result)) render(result,false);
       }
       if (gallery[galleryIndex]===item) {
-        const validated=stageNumber!==4||value.quality_validated===true&&value.consensus_validated===true;
+        const validated=stageNumber!==4||acceptedStrongest(value);
         $('quality-'+stageNumber).classList.toggle('ready',validated);
         $('quality-'+stageNumber).classList.toggle('failed',!validated);
         if (stageNumber===1) $('quality-1').classList.remove('local');
@@ -388,7 +397,8 @@
         if ([2,3,4].includes(stageNumber)&&value.summary_kn) {
           position.textContent=`${item.capture_code?item.capture_code+' · ':''}${item.label}  ${galleryIndex+1}/${gallery.length}`;
           const count=(value.objects||[]).length;
-          status.textContent=count?`ಓದುವಿಕೆ, ಅರ್ಥ ಮತ್ತು ${count} ವಸ್ತುಗಳು ಸಿದ್ಧವಾಗಿವೆ.`:'ಓದುವಿಕೆ ಮತ್ತು ಅರ್ಥ ಸಿದ್ಧವಾಗಿದೆ.';
+          status.textContent=stageNumber===4&&!validated?strongestStatus(value):
+            (count?`ಓದುವಿಕೆ, ಅರ್ಥ ಮತ್ತು ${count} ವಸ್ತುಗಳು ಸಿದ್ಧವಾಗಿವೆ.`:'ಓದುವಿಕೆ ಮತ್ತು ಅರ್ಥ ಸಿದ್ಧವಾಗಿದೆ.');
           renderContextRegions(); track(`stage_${stageNumber}`,validated,value.latency_ms||0);
         }
       }
@@ -868,7 +878,7 @@
         (objects.length?'ಮಾಹಿತಿಗಾಗಿ ನೀಲಿ ಚೌಕಟ್ಟಿನ ವಸ್ತುವನ್ನು ಸ್ಪರ್ಶಿಸಿ.':'ವಸ್ತುಗಳ ಮಾಹಿತಿ ಇನ್ನೂ ಸಿದ್ಧವಾಗಿಲ್ಲ.');
     }
     function sourceTextForBox(box) {
-      if (!result||!box) return '';
+      if (!result||!box||untrustedOcr()) return '';
       return (result.lines||[]).filter(line=>overlapScore(line.box,box)>=.55)
         .map(line=>String(line.text||'').trim()).filter(Boolean).join('. ');
     }
@@ -879,6 +889,18 @@
       }));
     }
     function verifiedRegions() { return result&&result.verified_regions||[]; }
+    function untrustedOcr(value=result) {
+      if (!value||verifiedRegions().length) return false;
+      const context=[value.scene_type,value.summary_kn,value.uncertainty_kn,value.warning_kn]
+        .filter(Boolean).join(' ');
+      const text=(value.words||[]).map(word=>word.text||'').join(' ');
+      const kannada=(text.match(/[\u0c80-\u0cff]/g)||[]).length;
+      const telugu=(text.match(/[\u0c00-\u0c7f]/g)||[]).length;
+      const declaredKannada=/(?:Kannada|ಕನ್ನಡ)/i.test(context);
+      const scriptMismatch=declaredKannada&&telugu>=5&&telugu>Math.max(2,kannada*2);
+      const rejectedOcr=/OCR[^.]{0,100}(?:does not|doesn't|not reliably|mismatch|wrong)/i.test(context);
+      return scriptMismatch||rejectedOcr;
+    }
     function verifiedSpeech(region) {
       return englishMode?(region.spoken_en||region.label||region.spoken_kn):region.spoken_kn;
     }
@@ -925,6 +947,7 @@
       return x>=region.x&&x<=region.x+region.width&&y>=region.y&&y<=region.y+region.height;
     }
     function readingWords() {
+      if (untrustedOcr()) return [];
       const words=result&&result.words||[],primary=primaryReadingRegion();
       if (!primary) return words;
       const selected=words.filter(word=>centeredInRegion(word,primary));
@@ -978,7 +1001,8 @@
     function render(value,markStageOne=true) {
       result=value; overlay.textContent=''; current.textContent='';
       overlay.setAttribute('viewBox',`0 0 ${value.image_size.width} ${value.image_size.height}`);
-      for (const word of value.words||[]) {
+      const words=untrustedOcr(value)?[]:(value.words||[]);
+      for (const word of words) {
         const hit=document.createElementNS('http://www.w3.org/2000/svg','rect');
         for (const key of ['x','y','width','height']) hit.setAttribute(key,word.box[key]);
         hit.setAttribute('class','hit'); hit.dataset.id=word.id;
@@ -987,8 +1011,10 @@
       }
       renderContextRegions();
       if (markStageOne) { $('quality-1').classList.add('local'); track('stage_1'); }
-      status.textContent=englishMode?((value.words||[]).length?'Tap a word or line.':'No text was found; try another picture.'):
-        ((value.words||[]).length?'ಪದ ಅಥವಾ ಸಾಲನ್ನು ಸ್ಪರ್ಶಿಸಿ.':'ಪಠ್ಯ ಸಿಗಲಿಲ್ಲ. ಮತ್ತೊಂದು ಚಿತ್ರ ಪ್ರಯತ್ನಿಸಿ.');
+      status.textContent=untrustedOcr(value)?(englishMode?'Handwriting is not clear enough for word reading. Use sentences or meaning, or take a closer photo.':
+        'ಕೈಬರಹವನ್ನು ಪದವಾಗಿ ನಿಖರವಾಗಿ ಓದಲು ಆಗುತ್ತಿಲ್ಲ. ವಾಕ್ಯ ಅಥವಾ ಅರ್ಥ ಬಳಸಿ, ಇಲ್ಲವೇ ಹತ್ತಿರದಿಂದ ಚಿತ್ರ ತೆಗೆಯಿರಿ.'):
+        (englishMode?(words.length?'Tap a word or line.':'No text was found; try another picture.'):
+        (words.length?'ಪದ ಅಥವಾ ಸಾಲನ್ನು ಸ್ಪರ್ಶಿಸಿ.':'ಪಠ್ಯ ಸಿಗಲಿಲ್ಲ. ಮತ್ತೊಂದು ಚಿತ್ರ ಪ್ರಯತ್ನಿಸಿ.'));
     }
     function sceneToResult(scene) {
       if (scene.schema==='smart-glasses.word-annotation.v1') {
@@ -1051,7 +1077,9 @@
           if (cached) applyReaderResult(item,stageNumber,cached);
         }
         renderConversation(item); restoreQuestionFocus(item);
-        timer.textContent=readCachedStage(item,4)?'best ✓':(readCachedStage(item,3)?'meaning ✓':(readCachedStage(item,1)?'OCR ✓':'local'));
+        const strongest=readCachedStage(item,4);
+        timer.textContent=strongest?(acceptedStrongest(strongest)?'best ✓':'review !'):
+          (readCachedStage(item,3)?'meaning ✓':(readCachedStage(item,1)?'OCR ✓':'local'));
         if (item.kind==='capture'&&automaticStages.some(stageNumber=>!readCachedStage(item,stageNumber))) {
           startCloudReaders(item);
         }
@@ -1112,6 +1140,11 @@
     }
     async function play(items,buttonId,eventName) {
       if (!startAction(buttonId)) return;
+      if (!items.length) {
+        status.textContent=englishMode?'No reliable words are available. Use sentences or meaning, or take a closer photo.':
+          'ನಿಖರವಾದ ಪದಗಳು ಲಭ್ಯವಿಲ್ಲ. ವಾಕ್ಯ ಅಥವಾ ಅರ್ಥ ಬಳಸಿ, ಇಲ್ಲವೇ ಹತ್ತಿರದಿಂದ ಚಿತ್ರ ತೆಗೆಯಿರಿ.';
+        finishAction(buttonId); return;
+      }
       const generation=playbackGeneration; stage.classList.add('playing'); const began=Date.now();
       const queue=eventName==='word'?groupedWords(items):items;
       let ok=true,failures=0,index=0;
@@ -1309,7 +1342,8 @@
       const requested=missing.filter(stageNumber=>!cooling.includes(stageNumber));
       if (!missing.length) {
         endTimer(item);
-        status.textContent=readCachedStage(item,4)?'4/4 reading stages ready.':'3/4 reading stages ready. Tap the fourth bar for the strongest reading.';
+        const strongest=readCachedStage(item,4);
+        status.textContent=strongest?strongestStatus(strongest):'3/4 reading stages ready. Tap the fourth bar for the strongest reading.';
         return;
       }
       if (!requested.length) { endTimer(item); status.textContent='ಮೊದಲ ಓದುವಿಕೆ ಸಿದ್ಧವಾಗಿದೆ. Cloud reading is cooling down.'; return; }
@@ -1332,7 +1366,7 @@
           completed.forEach(({stageNumber,outcome})=>{ if (!outcome.ok&&stageNumber!==1) $('quality-'+stageNumber).classList.add('failed'); });
           const ready=1+enabledStages.filter(stageNumber=>stageNumber>1).filter(stageNumber=>{
             const cached=readCachedStage(item,stageNumber);
-            return Boolean(cached)&&(stageNumber!==4||cached.quality_validated===true);
+            return Boolean(cached)&&(stageNumber!==4||acceptedStrongest(cached));
           }).length;
           status.textContent=`${ready}/${enabledStages.length} reading stages ready.`;
         }
@@ -1345,8 +1379,9 @@
     async function requestStrongestReading() {
       const item=gallery[galleryIndex];
       if (!item) return;
-      if (readCachedStage(item,4)) {
-        status.textContent='4/4 reading stages ready.'; return;
+      const cachedStrongest=readCachedStage(item,4);
+      if (cachedStrongest) {
+        status.textContent=strongestStatus(cachedStrongest); return;
       }
       const retained=item.kind==='capture'&&/^[0-9a-f]{32}$/.test(item.id)&&
         (item.retained===true||item.result&&item.result.retained===true);
@@ -1372,7 +1407,7 @@
         status.textContent=englishMode?'Strongest reading was not completed. Tap the fourth bar to retry.':'ಅತ್ಯುತ್ತಮ ಓದುವಿಕೆ ಪೂರ್ಣವಾಗಲಿಲ್ಲ. ಮತ್ತೆ ನಾಲ್ಕನೇ ಪಟ್ಟಿಯನ್ನು ಒತ್ತಿ.';
         return;
       }
-      status.textContent='4/4 reading stages ready.';
+      status.textContent=strongestStatus(readCachedStage(item,4));
     }
     async function useCapture(file,captureMeta={}) {
       if (!file) return; stop(); defaultWordMode(); const navigation=++navigationGeneration; resetQuality(); status.textContent='ಚಿತ್ರವನ್ನು ಓದುತ್ತಿದೆ…';

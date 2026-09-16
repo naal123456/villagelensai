@@ -61,7 +61,7 @@ class ApiTests(unittest.TestCase):
         self.assertIn(b'id="quality-4" aria-label="Request strongest reading"', response.data)
         self.assertIn(b'id="owner-badge"', response.data)
         self.assertIn(b'id="app-version"', response.data)
-        self.assertIn(b'v2026.09.15.5', response.data)
+        self.assertIn(b'v2026.09.15.6', response.data)
         self.assertIn(b"const appVersion=$('app-version').textContent.replace(/^v/,'')", response.data)
         self.assertNotIn(b"const appVersion='2026-09-15.1'", response.data)
         self.assertIn(b"'UNASSIGNED \xc2\xb7 OLDER CAPTURE'", response.data)
@@ -89,6 +89,15 @@ class ApiTests(unittest.TestCase):
         self.assertIn(b'function contextualTranslation', response.data)
         self.assertIn(b'function contextualWordTranslation', response.data)
         self.assertIn(b'function sourceTextForBox', response.data)
+        self.assertIn(b'function untrustedOcr', response.data)
+        self.assertIn(b'declaredKannada&&telugu>=5', response.data)
+        self.assertIn(b'if (!result||!box||untrustedOcr())', response.data)
+        self.assertIn(b'if (untrustedOcr()) return []', response.data)
+        self.assertIn(b'No reliable words are available.', response.data)
+        self.assertIn(b'function acceptedStrongest', response.data)
+        self.assertIn(b'function strongestStatus', response.data)
+        self.assertIn(b'Sol finished, but the readers disagree.', response.data)
+        self.assertIn(b"acceptedStrongest(strongest)?'best \xe2\x9c\x93':'review !'", response.data)
         self.assertIn(b'Math.max(3,Math.ceil(lines.length*.5))', response.data)
         self.assertIn(b'return selected.length>=minimum?selected:lines', response.data)
         self.assertIn(b'function textInsideObject', response.data)
@@ -269,7 +278,7 @@ class ApiTests(unittest.TestCase):
             "stage_4": "gpt-5.6-sol",
         })
         self.assertEqual(response.get_json()["stage_4"], "manual")
-        self.assertEqual(response.get_json()["app_version"], "2026-09-15.5")
+        self.assertEqual(response.get_json()["app_version"], "2026-09-15.6")
 
     def test_old_sol_and_astra_evidence_is_not_current(self) -> None:
         self.assertFalse(_current_reader_stage({
@@ -1521,7 +1530,7 @@ class ApiTests(unittest.TestCase):
 
     def test_usage_events_accept_only_privacy_safe_aggregates(self) -> None:
         with self.assertLogs("api.app", level="INFO") as logs:
-            response = self.client.post("/api/events", json={"app_version": "2026.09.15.5<script>", "events": [
+            response = self.client.post("/api/events", json={"app_version": "2026.09.15.6<script>", "events": [
                 {"name": "infer", "capture_id": "e" * 32, "ok": True,
                  "elapsed_ms": "bad", "question": "private spoken words"},
                 {"name": "not-allowed", "text": "private OCR"},
@@ -1531,7 +1540,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.get_json()["accepted"], 1)
         joined = " ".join(logs.output)
         self.assertIn('"name":"infer"', joined)
-        self.assertIn('"app_version":"2026.09.15.5script"', joined)
+        self.assertIn('"app_version":"2026.09.15.6script"', joined)
         self.assertNotIn("private spoken words", joined)
         self.assertNotIn("private OCR", joined)
 
