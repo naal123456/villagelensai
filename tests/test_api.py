@@ -12,7 +12,7 @@ from api.app import (
     _access_token, _filter_local_regions, _normalize_stage_three,
     _openai_question, _openai_reader, _openai_transcribe, _openai_translate, _parse_tsv,
     _process_stored_capture, _process_stored_stage, _current_reader_stage,
-    _reader_stage_name,
+    _reader_stage_name, _repair_underscaled_context_boxes,
     _saved_scene_identity_answer,
     _tester_link_token, app,
 )
@@ -62,7 +62,7 @@ class ApiTests(unittest.TestCase):
         self.assertIn(b'id="quality-4" aria-label="Request strongest reading"', response.data)
         self.assertIn(b'id="owner-badge"', response.data)
         self.assertIn(b'id="app-version"', response.data)
-        self.assertIn(b'v2026-09-16.7', response.data)
+        self.assertIn(b'v2026-09-16.8', response.data)
         self.assertIn(b"const appVersion=$('app-version').textContent.replace(/^v/,'')", response.data)
         self.assertNotIn(b"const appVersion='2026-09-15.1'", response.data)
         self.assertIn(b"'UNASSIGNED \xc2\xb7 OLDER CAPTURE'", response.data)
@@ -74,6 +74,9 @@ class ApiTests(unittest.TestCase):
         self.assertIn(b'X-VillageLens-Tester-ID', response.data)
         self.assertIn(b'function speechSegments', response.data)
         self.assertIn(b'function sourceLanguageInfo', response.data)
+        self.assertIn(b'function alignOverlayToImage', response.data)
+        self.assertIn(b"window.addEventListener('resize',alignOverlayToImage)", response.data)
+        self.assertIn(b"const markedSwitch=parameters.get('switch')==='1'", response.data)
         self.assertIn(b"name:'Malayalam'", response.data)
         self.assertIn(b'languageSwitchViewKey', response.data)
         self.assertIn(b'function showLanguageSwitchLoading', response.data)
@@ -292,10 +295,10 @@ class ApiTests(unittest.TestCase):
             "stage_4": "gpt-5.6-sol",
         })
         self.assertEqual(response.get_json()["stage_4"], "manual")
-        self.assertEqual(response.get_json()["app_version"], "2026-09-16.7")
+        self.assertEqual(response.get_json()["app_version"], "2026-09-16.8")
         page = self.client.get("/a/?tester=a3")
         self.addCleanup(page.close)
-        self.assertIn(b'v2026-09-16.7', page.data)
+        self.assertIn(b'v2026-09-16.8', page.data)
 
     def test_old_sol_and_astra_evidence_is_not_current(self) -> None:
         self.assertTrue(_current_reader_stage({
@@ -352,7 +355,9 @@ class ApiTests(unittest.TestCase):
 
     def test_a3_stale_kannada_url_redirects_to_english_home(self) -> None:
         stale = self.client.get("/a/?tester=a3&lang=kn")
-        active_switch = self.client.get("/a/?tester=a3&lang=kn&switch=1")
+        active_switch = self.client.get(
+            f"/a/?tester=a3&lang=kn&switch=1&view={'a' * 32}",
+        )
         self.addCleanup(stale.close)
         self.addCleanup(active_switch.close)
 
@@ -401,7 +406,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(value["start_url"], "/a/")
         self.assertEqual(value["display"], "standalone")
         self.assertEqual(value["share_target"]["action"], "/a/share-target")
-        self.assertIn(b"const APP_VERSION = '2026-09-16.7'", worker.data)
+        self.assertIn(b"const APP_VERSION = '2026-09-16.8'", worker.data)
         self.assertEqual(value["share_target"]["params"]["files"][0]["name"], "image")
         self.assertEqual(worker.status_code, 200)
         self.assertEqual(manifest.headers["Cache-Control"], "no-cache, max-age=0")
@@ -501,6 +506,22 @@ class ApiTests(unittest.TestCase):
             _reader_stage_name(capture_id, 3, "kn"),
             _reader_stage_name(capture_id, 3, "en"),
         )
+
+    def test_percent_scale_context_boxes_are_repaired(self) -> None:
+        value = {
+            "image_size": {"width": 1446, "height": 1600},
+            "objects": [
+                {"box": {"x": 65, "y": 99, "width": 68, "height": 29}},
+                {"box": {"x": 20, "y": 40, "width": 94, "height": 11}},
+                {"box": {"x": 23, "y": 59, "width": 56, "height": 32}},
+            ],
+        }
+
+        self.assertTrue(_repair_underscaled_context_boxes(value))
+        self.assertEqual(value["objects"][0]["box"], {
+            "x": 650, "y": 990, "width": 680, "height": 290,
+        })
+        self.assertEqual(value["box_scale_repaired"], "percent-to-pixels")
 
     @patch("api.app.requests.post")
     def test_openai_translation_uses_fast_structured_response(self, provider: object) -> None:

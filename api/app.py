@@ -56,7 +56,7 @@ OPENAI_TRANSLATION_MODEL = os.environ.get("VILLAGELENS_TRANSLATION_MODEL", "gpt-
 OPENAI_STAGE_TWO_ANALYSIS_VERSION = "luna-compact-v1"
 OPENAI_STAGE_THREE_ANALYSIS_VERSION = "terra-ocr-grounded-v4"
 OPENAI_STAGE_FOUR_ANALYSIS_VERSION = "sol-ocr-review-v4"
-APP_VERSION = "2026-09-16.7"
+APP_VERSION = "2026-09-16.8"
 SPEECH_VOICES = {
     "kn-IN": os.environ.get("VILLAGELENS_KANNADA_TTS_VOICE", "kn-IN-Wavenet-A"),
     "ta-IN": os.environ.get("VILLAGELENS_TAMIL_TTS_VOICE", "ta-IN-Wavenet-A"),
@@ -430,7 +430,10 @@ def tester_page() -> Response:
     if (
         tester_id == "a3"
         and request.args.get("lang", "").strip().lower() == "kn"
-        and request.args.get("switch") != "1"
+        and not (
+            request.args.get("switch") == "1"
+            and _valid_capture_id(request.args.get("view", ""))
+        )
     ):
         return redirect("/a/?tester=a3&lang=en", code=302)
     return send_from_directory(WEB_ROOT / "a", "index.html")
@@ -779,6 +782,45 @@ def _no_material_disagreement(value: Any) -> bool:
     )) or (disagreement.startswith("ಯಾವುದೇ") and disagreement.endswith("ಇಲ್ಲ"))
 
 
+def _repair_underscaled_context_boxes(value: dict[str, Any]) -> bool:
+    image_size = value.get("image_size", {})
+    try:
+        width = float(image_size.get("width", 0))
+        height = float(image_size.get("height", 0))
+    except (AttributeError, TypeError, ValueError):
+        return False
+    if width < 500 or height < 500:
+        return False
+    boxes: list[dict[str, Any]] = []
+    for key in ("objects", "transcription_kn", "spoken_sections"):
+        boxes.extend(
+            item["box"] for item in value.get(key, [])
+            if isinstance(item, dict) and isinstance(item.get("box"), dict)
+        )
+    for container, keys in (
+        (value.get("calendar", {}), ("weekday_header_box", "date_grid_box")),
+        (value.get("primary_text", {}), ("box",)),
+    ):
+        if isinstance(container, dict):
+            boxes.extend(container[key] for key in keys if isinstance(container.get(key), dict))
+    if len(boxes) < 3:
+        return False
+    try:
+        max_right = max(float(box.get("x", 0)) + float(box.get("width", 0)) for box in boxes)
+        max_bottom = max(float(box.get("y", 0)) + float(box.get("height", 0)) for box in boxes)
+    except (TypeError, ValueError):
+        return False
+    if max_right > width * .16 or max_bottom > height * .16:
+        return False
+    for box in boxes:
+        box["x"] = round(min(width, max(0, float(box.get("x", 0)) * 10)))
+        box["y"] = round(min(height, max(0, float(box.get("y", 0)) * 10)))
+        box["width"] = round(min(width - box["x"], max(0, float(box.get("width", 0)) * 10)))
+        box["height"] = round(min(height - box["y"], max(0, float(box.get("height", 0)) * 10)))
+    value["box_scale_repaired"] = "percent-to-pixels"
+    return True
+
+
 def _normalize_stage_three(value: dict[str, Any]) -> dict[str, Any]:
     normalized = dict(value)
     output_language = str(normalized.get("output_language", "kn"))
@@ -800,6 +842,7 @@ def _normalize_stage_three(value: dict[str, Any]) -> dict[str, Any]:
         )
     if has_context:
         normalized.update(context)
+    _repair_underscaled_context_boxes(normalized)
     return normalized
 
 
@@ -850,15 +893,34 @@ def _selectable_object_box(value: Any, parsed: dict[str, Any]) -> list[float] | 
 
 
 def _scale_context_boxes(context: dict[str, Any], width: int, height: int) -> None:
+    raw_boxes = []
+    for key in ("objects", "transcription_kn", "spoken_sections"):
+        raw_boxes.extend(
+            item.get("box") for item in context.get(key, [])
+            if isinstance(item, dict) and isinstance(item.get("box"), list)
+        )
+    for container, keys in (
+        (context.get("calendar", {}), ("weekday_header_box", "date_grid_box")),
+        (context.get("primary_text", {}), ("box",)),
+    ):
+        if isinstance(container, dict):
+            raw_boxes.extend(container.get(key) for key in keys if isinstance(container.get(key), list))
+    valid_raw = [box for box in raw_boxes if len(box) == 4]
+    coordinate_basis = 1000
+    if len(valid_raw) >= 3 and max(box[0] + box[2] for box in valid_raw) <= 160 \
+            and max(box[1] + box[3] for box in valid_raw) <= 160:
+        coordinate_basis = 100
+
     def scaled(value: Any) -> dict[str, int] | None:
         box = _context_box(value)
         if not isinstance(box, list):
             return box
         x, y, box_width, box_height = box
         return {
-            "x": round(x * width / 1000), "y": round(y * height / 1000),
-            "width": round(box_width * width / 1000),
-            "height": round(box_height * height / 1000),
+            "x": round(x * width / coordinate_basis),
+            "y": round(y * height / coordinate_basis),
+            "width": round(box_width * width / coordinate_basis),
+            "height": round(box_height * height / coordinate_basis),
         }
 
     for key in ("objects", "transcription_kn", "spoken_sections"):

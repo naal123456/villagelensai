@@ -143,7 +143,7 @@
         <span class="bar" id="quality-1"></span><span class="bar" id="quality-2"></span>
         <span class="bar" id="quality-3"></span><button class="bar" id="quality-4" aria-label="Request strongest reading" data-tip="Request strongest reading"></button>
         <span id="quality-timer">—</span>
-        <span id="app-version" aria-label="App version">v2026-09-16.7</span>
+        <span id="app-version" aria-label="App version">v2026-09-16.8</span>
       </div>
       <p id="mic-status" role="status" aria-live="assertive" hidden></p>
     </section>
@@ -385,7 +385,7 @@
       if (!reference||!reference.id) return;
       stop(); ++navigationGeneration; $('welcome').hidden=true; ownerBadge.hidden=true; conversation.hidden=true;
       stage.style.display='inline-block'; stage.classList.add('loading'); overlay.textContent=''; current.textContent='';
-      image.onload=()=>stage.classList.remove('loading');
+      image.onload=()=>{ stage.classList.remove('loading'); alignOverlayToImage(); };
       image.src=reference.image_url||`/api/captures/${reference.id}/image`;
       position.textContent=[reference.capture_code,reference.label].filter(Boolean).join(' · ')||
         (englishMode?'Saved image':'ಉಳಿಸಿದ ಚಿತ್ರ');
@@ -416,6 +416,11 @@
       stage.style.display='none'; ownerBadge.hidden=true; conversation.hidden=true; $('welcome').hidden=false;
       position.textContent=englishMode?'New picture':'ಹೊಸ ಚಿತ್ರ';
       status.textContent=englishMode?'Tap the camera, or touch the yellow box below.':'ಕ್ಯಾಮೆರಾ ಒತ್ತಿ ಅಥವಾ ಕೆಳಗಿನ ಹಳದಿ ಚೌಕವನ್ನು ಸ್ಪರ್ಶಿಸಿ.';
+    }
+    function alignOverlayToImage() {
+      if (!image.clientWidth||!image.clientHeight) return;
+      overlay.style.inset='auto'; overlay.style.left=`${image.offsetLeft}px`; overlay.style.top=`${image.offsetTop}px`;
+      overlay.style.width=`${image.clientWidth}px`; overlay.style.height=`${image.clientHeight}px`;
     }
     async function speakWelcome() {
       const message=englishMode?
@@ -1250,6 +1255,7 @@
     function render(value,markStageOne=true) {
       result=value; overlay.textContent=''; current.textContent='';
       overlay.setAttribute('viewBox',`0 0 ${value.image_size.width} ${value.image_size.height}`);
+      alignOverlayToImage();
       const words=untrustedOcr(value)?[]:(value.words||[]);
       for (const word of words) {
         const hit=document.createElementNS('http://www.w3.org/2000/svg','rect');
@@ -1316,7 +1322,7 @@
         (owner?`${owner}${ownerName}`:'UNASSIGNED · OLDER CAPTURE');
       status.textContent='ಚಿತ್ರವನ್ನು ಸಿದ್ಧಪಡಿಸುತ್ತಿದೆ…';
       current.textContent=''; overlay.textContent=''; stage.style.display='inline-block'; stage.classList.add('loading'); resetQuality();
-      image.onload=()=>{ if (navigation===navigationGeneration) stage.classList.remove('loading'); };
+      image.onload=()=>{ if (navigation===navigationGeneration) { stage.classList.remove('loading'); alignOverlayToImage(); } };
       image.onerror=()=>{ if (navigation===navigationGeneration) status.textContent='ಚಿತ್ರವನ್ನು ತೆರೆಯಲು ಆಗಲಿಲ್ಲ.'; };
       image.src=item.image_url;
       try {
@@ -2014,15 +2020,17 @@
       showWelcome();
       const parameters=new URLSearchParams(location.search),shared=parameters.get('shared')==='1';
       const pendingView=pendingLanguageSwitchView();
-      if (!shared&&testerId==='a3'&&languageParameter==='kn'&&!pendingView) {
+      const markedSwitch=parameters.get('switch')==='1'&&/^[0-9a-f]{32}$/.test(parameters.get('view')||'');
+      if (!shared&&testerId==='a3'&&languageParameter==='kn'&&!pendingView&&!markedSwitch) {
         location.replace('/a/?tester=a3'); return;
       }
-      if (!shared&&parameters.get('view')&&!pendingView) {
+      if (!shared&&parameters.get('view')&&!pendingView&&!markedSwitch) {
         location.replace(homeUrl()); return;
       }
       // A view parameter alone is not sticky: an ordinary refresh must open Home.
       // Only the short-lived same-tab language-switch handoff restores a capture.
-      const requestedView=pendingView&&(parameters.get('view')||pendingView.id)||'';
+      const requestedView=markedSwitch?parameters.get('view'):
+        (pendingView&&(parameters.get('view')||pendingView.id)||'');
       if (!shared&&/^[0-9a-f]{32}$/.test(requestedView)) showLanguageSwitchLoading(pendingView||{
         id:requestedView,image_url:`/api/captures/${requestedView}/image`,
       });
@@ -2052,6 +2060,7 @@
         }
       }
     }
+    window.addEventListener('resize',alignOverlayToImage);
     startApp();
   </script>
 </body>
