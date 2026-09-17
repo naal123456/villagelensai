@@ -71,3 +71,24 @@ language-switch confirmation pending.
 Route traffic back to `vlens-a-00070-zdk`. That revision preserves a capture
 across language switching and identifies source languages, but has the refresh,
 serial-gallery, and missing-stage failure described above.
+
+## A3 default-language follow-up
+
+Physical testing exposed that an explicit stale `lang=kn` URL still overrode
+the A3 English default in version `2026-09-16.5`. Version `2026-09-16.7` moves
+the rule to the server: an unmarked A3 Kannada request redirects to
+`/a/?tester=a3&lang=en`, while a newly initiated image-language transition is
+marked with `switch=1` and remains allowed. The Kannada subtitle was also
+removed from the first English welcome box.
+
+- Final source commit: `9830f73`
+- Final Cloud Build: `f5a927a8-eda2-4d57-85c5-26759d97d8d7`
+- Final container digest:
+  `sha256:b6a6d699a7beccb7c83c50c755bfbfe855b1aeba48e6df152e662e0c1876776c`
+- Final Cloud Run revision: `vlens-a-00073-gv6`, 100 percent traffic
+- Unit tests: `72/72` passed
+- Public stale A3 Kannada URL: HTTP 302 to the English A3 URL
+- Public marked Kannada switch and English Home: HTTP 200
+- Public English welcome box contains no Kannada subtitle
+- Error-level logs after validation: empty
+- Roll back this follow-up to `vlens-a-00071-rc5` if necessary
