@@ -143,7 +143,7 @@
         <span class="bar" id="quality-1"></span><span class="bar" id="quality-2"></span>
         <span class="bar" id="quality-3"></span><button class="bar" id="quality-4" aria-label="Request strongest reading" data-tip="Request strongest reading"></button>
         <span id="quality-timer">—</span>
-        <span id="app-version" aria-label="App version">v2026-09-16.4</span>
+        <span id="app-version" aria-label="App version">v2026-09-16.5</span>
       </div>
       <p id="mic-status" role="status" aria-live="assertive" hidden></p>
     </section>
@@ -215,10 +215,13 @@
   </section>
   <script>
     const $ = id => document.getElementById(id);
-    const languageParameter=(new URLSearchParams(location.search).get('lang')||'').toLowerCase();
+    const initialParameters=new URLSearchParams(location.search);
+    const languageParameter=(initialParameters.get('lang')||'').toLowerCase();
     let savedLanguage=''; try { savedLanguage=localStorage.getItem('villagelens.output_language.v1')||''; } catch (_) {}
+    let savedTester=''; try { savedTester=localStorage.getItem('villagelens.tester.v1')||''; } catch (_) {}
+    const initialTester=(initialParameters.get('tester')||savedTester).toLowerCase();
     const englishMode=languageParameter==='en'||(!languageParameter&&
-      (location.pathname==='/b/'||location.pathname.startsWith('/b/')||savedLanguage==='en'));
+      (location.pathname==='/b/'||location.pathname.startsWith('/b/')||initialTester==='a3'||savedLanguage==='en'));
     const outputLanguage=englishMode?'en':'kn';
     const input=$('camera-input'), image=$('source-image'), overlay=$('overlay'), stage=$('stage');
     const status=$('status'), current=$('current'), position=$('position'), timer=$('quality-timer');
@@ -228,6 +231,7 @@
     const cameraGuidance=$('camera-guidance'), cameraMetrics=$('camera-metrics'), cameraCanvas=$('camera-analysis');
     const cameraZoomControls=$('camera-zoom-controls'),cameraZoom=$('camera-zoom');
     let gallery=[], galleryIndex=0, result=null, mode='word', timerId=0, started=0, timerOwner=null;
+    let galleryWaitTimer=0,galleryWaitStarted=0;
     let navigationGeneration=0;
     let playbackGeneration=0, readingGeneration=0, speechGeneration=0, pointerStart=null, suppressTap=false, activeControl='mode-word';
     let lastSpokenSourceLanguage='';
@@ -351,6 +355,12 @@
       else if ($('welcome').hidden&&/^[0-9a-f]{32}$/.test(existingView)) parameters.set('view',existingView);
       return `/a/?${parameters.toString()}`;
     }
+    function homeUrl() {
+      const parameters=new URLSearchParams();
+      if (testerId) parameters.set('tester',testerId);
+      if (testerId!=='a3') parameters.set('lang',outputLanguage);
+      return `/a/?${parameters.toString()}`;
+    }
     function saveLanguageSwitchView(language) {
       const item=gallery[galleryIndex];
       if (!$('welcome').hidden&&item&&/^[0-9a-f]{32}$/.test(item.id)) {
@@ -381,6 +391,24 @@
       status.textContent=englishMode?'Keeping this image while switching its meaning to English…':
         'ಈ ಚಿತ್ರವನ್ನು ಉಳಿಸಿಕೊಂಡು ಅದರ ಅರ್ಥವನ್ನು ಕನ್ನಡಕ್ಕೆ ಬದಲಿಸುತ್ತಿದೆ…';
       timer.textContent='…';
+    }
+    function beginGalleryWait(showProgress=false) {
+      clearInterval(galleryWaitTimer); galleryWaitStarted=Date.now();
+      $('previous').disabled=true; $('next').disabled=true;
+      $('previous').classList.add('working'); $('next').classList.add('working');
+      if (!showProgress) return;
+      const update=()=>{
+        const seconds=Math.floor((Date.now()-galleryWaitStarted)/1000);
+        timer.textContent=`${seconds}s`;
+        status.textContent=englishMode?`Loading saved images… arrows will work when ready. ${seconds}s`:
+          `ಉಳಿಸಿದ ಚಿತ್ರಗಳನ್ನು ತೆರೆಯುತ್ತಿದೆ… ಸಿದ್ಧವಾದಾಗ ಬಾಣಗಳು ಕೆಲಸ ಮಾಡುತ್ತವೆ. ${seconds}s`;
+      };
+      update(); galleryWaitTimer=setInterval(update,1000);
+    }
+    function endGalleryWait() {
+      clearInterval(galleryWaitTimer); galleryWaitTimer=0;
+      $('previous').disabled=!gallery.length; $('next').disabled=!gallery.length;
+      $('previous').classList.remove('working'); $('next').classList.remove('working');
     }
     function showWelcome() {
       stop(); ++navigationGeneration; result=null; current.textContent=''; overlay.textContent=''; image.removeAttribute('src');
@@ -1278,7 +1306,6 @@
       stop(); defaultWordMode(); const navigation=++navigationGeneration;
       $('welcome').hidden=true;
       galleryIndex=(index+gallery.length)%gallery.length; const item=gallery[galleryIndex];
-      history.replaceState(null,'',canonicalUrl());
       renderConversation(item);
       const owner=item.tester_id&&item.tester_id!=='unassigned'?item.tester_id.toUpperCase():'';
       const ownerName=item.tester_name?` · ${item.tester_name}`:'';
@@ -1310,13 +1337,16 @@
     }
     async function loadGallery() {
       try {
-        const response=await fetch('/api/gallery',{headers:testerHeaders()}); if (response.status===401) return location.href='/access';
+        const response=await fetch('/api/gallery',{headers:testerHeaders()});
+        if (response.status===401) { location.href='/access'; return false; }
         if (!response.ok) throw new Error('GALLERY_FAILED');
         const payload=await response.json(); gallery=payload.items||[];
         nextCaptureSequence=Math.max(1,Number(payload.next_capture_sequence)||1);
+        return true;
       } catch (_) {
         if (!$('welcome').hidden) status.textContent=englishMode?'Tap the camera to take a picture.':'ಚಿತ್ರ ತೆಗೆಯಲು ಕ್ಯಾಮೆರಾ ಒತ್ತಿ.';
-      }
+        return false;
+      } finally { endGalleryWait(); }
     }
     function applyVerifiedReadingRegions(items) {
       const regions=verifiedRegions(); if (!regions.length) return items;
@@ -1983,7 +2013,12 @@
       showWelcome();
       const parameters=new URLSearchParams(location.search),shared=parameters.get('shared')==='1';
       const pendingView=pendingLanguageSwitchView();
-      const requestedView=parameters.get('view')||pendingView&&pendingView.id||'';
+      if (!shared&&parameters.get('view')&&!pendingView) {
+        location.replace(homeUrl()); return;
+      }
+      // A view parameter alone is not sticky: an ordinary refresh must open Home.
+      // Only the short-lived same-tab language-switch handoff restores a capture.
+      const requestedView=pendingView&&(parameters.get('view')||pendingView.id)||'';
       if (!shared&&/^[0-9a-f]{32}$/.test(requestedView)) showLanguageSwitchLoading(pendingView||{
         id:requestedView,image_url:`/api/captures/${requestedView}/image`,
       });
@@ -1995,17 +2030,21 @@
           await registration.update();
         } catch (_) {}
       }
+      beginGalleryWait(Boolean(requestedView));
       const galleryLoading=loadGallery();
       if (shared) { await galleryLoading; await loadSharedImage(); }
       else if (requestedView) {
-        await galleryLoading;
+        const galleryReady=await galleryLoading;
         const index=gallery.findIndex(item=>item.id===requestedView||
           pendingView&&pendingView.capture_code&&item.capture_code===pendingView.capture_code);
-        if (index>=0) { await showGallery(index); clearLanguageSwitchView(); }
+        if (galleryReady&&index>=0) {
+          await showGallery(index); clearLanguageSwitchView(); history.replaceState(null,'',homeUrl());
+        }
         else {
-          showWelcome();
-          status.textContent=englishMode?'The saved image could not be restored. Use the arrows to find it.':
-            'ಉಳಿಸಿದ ಚಿತ್ರವನ್ನು ಮತ್ತೆ ತೆರೆಯಲಾಗಲಿಲ್ಲ. ಅದನ್ನು ಹುಡುಕಲು ಬಾಣಗಳನ್ನು ಬಳಸಿ.';
+          clearLanguageSwitchView(); showWelcome(); history.replaceState(null,'',homeUrl());
+          status.textContent=galleryReady?
+            (englishMode?'The previous image was not found. Home is ready.':'ಹಿಂದಿನ ಚಿತ್ರ ಸಿಗಲಿಲ್ಲ. ಮುಖಪುಟ ಸಿದ್ಧವಾಗಿದೆ.'):
+            (englishMode?'Saved images are temporarily unavailable. Camera is ready.':'ಉಳಿಸಿದ ಚಿತ್ರಗಳು ತಾತ್ಕಾಲಿಕವಾಗಿ ಲಭ್ಯವಿಲ್ಲ. ಕ್ಯಾಮೆರಾ ಸಿದ್ಧವಾಗಿದೆ.');
         }
       }
     }

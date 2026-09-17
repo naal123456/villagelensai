@@ -56,7 +56,7 @@ OPENAI_TRANSLATION_MODEL = os.environ.get("VILLAGELENS_TRANSLATION_MODEL", "gpt-
 OPENAI_STAGE_TWO_ANALYSIS_VERSION = "luna-compact-v1"
 OPENAI_STAGE_THREE_ANALYSIS_VERSION = "terra-ocr-grounded-v4"
 OPENAI_STAGE_FOUR_ANALYSIS_VERSION = "sol-ocr-review-v4"
-APP_VERSION = "2026-09-16.4"
+APP_VERSION = "2026-09-16.5"
 SPEECH_VOICES = {
     "kn-IN": os.environ.get("VILLAGELENS_KANNADA_TTS_VOICE", "kn-IN-Wavenet-A"),
     "ta-IN": os.environ.get("VILLAGELENS_TAMIL_TTS_VOICE", "ta-IN-Wavenet-A"),
@@ -1896,19 +1896,21 @@ def gallery() -> tuple[Response, int]:
                 parts = blob.name.split("/")
                 if len(parts) == 3 and parts[2] == "stage-1.json" and _valid_capture_id(parts[1]):
                     evidence[(parts[1], 1)] = blob
-            for blob in blobs:
-                if not blob.name.endswith("/result.json"):
-                    continue
-                value = json.loads(blob.download_as_text(encoding="utf-8"))
+            def load_gallery_item(blob: Any) -> dict[str, Any] | None:
+                try:
+                    value = json.loads(blob.download_as_text(encoding="utf-8"))
+                except Exception:
+                    app.logger.warning("Skipping unavailable gallery record %s", blob.name)
+                    return None
                 capture_id = value.get("capture_id", "")
                 if not _valid_capture_id(capture_id):
-                    continue
+                    return None
                 if (
                     requested_tester_id
                     and not _is_reviewer(requested_tester_id)
                     and value.get("tester_id") != requested_tester_id
                 ):
-                    continue
+                    return None
                 owner_id = str(value.get("tester_id", "")).strip().lower()
                 verified_regions = VERIFIED_CAPTURE_REGIONS.get(capture_id, [])
                 displayed_result = dict(value)
@@ -1934,9 +1936,9 @@ def gallery() -> tuple[Response, int]:
                             stage_values[stored_stage] = json.loads(
                                 evidence_blob.download_as_text(encoding="utf-8")
                             )
-                        except (TypeError, ValueError, json.JSONDecodeError):
+                        except Exception:
                             app.logger.warning(
-                                "Ignoring invalid stage %s evidence for capture %s",
+                                "Ignoring unavailable stage %s evidence for capture %s",
                                 stored_stage, capture_id,
                             )
                 if 1 not in stage_values and _current_reader_stage(stage_values.get(2), 1, output_language):
@@ -1954,7 +1956,19 @@ def gallery() -> tuple[Response, int]:
                         scene_type = str(normalized.get("scene_type", "")).strip()
                         if scene_type:
                             item["label"] = scene_type[:60]
-                stored.append(item)
+                return item
+
+            result_blobs = [blob for blob in blobs if blob.name.endswith("/result.json")]
+            # Cloud Storage reads dominate reviewer gallery time. They are independent,
+            # so bounded parallel loading avoids a long, apparently frozen interface.
+            with ThreadPoolExecutor(max_workers=min(8, max(1, len(result_blobs)))) as executor:
+                futures = [executor.submit(load_gallery_item, blob) for blob in result_blobs]
+                for future in as_completed(futures):
+                    try:
+                        if item := future.result():
+                            stored.append(item)
+                    except Exception:
+                        app.logger.warning("Skipping one unavailable gallery item", exc_info=True)
             stored.sort(key=lambda item: (item.get("captured_at") or "", item["id"]))
             sequence_counts: defaultdict[str, int] = defaultdict(int)
             for item in stored:

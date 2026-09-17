@@ -62,7 +62,7 @@ class ApiTests(unittest.TestCase):
         self.assertIn(b'id="quality-4" aria-label="Request strongest reading"', response.data)
         self.assertIn(b'id="owner-badge"', response.data)
         self.assertIn(b'id="app-version"', response.data)
-        self.assertIn(b'v2026-09-16.4', response.data)
+        self.assertIn(b'v2026-09-16.5', response.data)
         self.assertIn(b"const appVersion=$('app-version').textContent.replace(/^v/,'')", response.data)
         self.assertNotIn(b"const appVersion='2026-09-15.1'", response.data)
         self.assertIn(b"'UNASSIGNED \xc2\xb7 OLDER CAPTURE'", response.data)
@@ -292,10 +292,10 @@ class ApiTests(unittest.TestCase):
             "stage_4": "gpt-5.6-sol",
         })
         self.assertEqual(response.get_json()["stage_4"], "manual")
-        self.assertEqual(response.get_json()["app_version"], "2026-09-16.4")
+        self.assertEqual(response.get_json()["app_version"], "2026-09-16.5")
         page = self.client.get("/a/?tester=a3")
         self.addCleanup(page.close)
-        self.assertIn(b'v2026-09-16.4', page.data)
+        self.assertIn(b'v2026-09-16.5', page.data)
 
     def test_old_sol_and_astra_evidence_is_not_current(self) -> None:
         self.assertTrue(_current_reader_stage({
@@ -331,11 +331,16 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertNotIn(b'id="language-toggle"', response.data)
         self.assertIn(b"$('mode-translate').onclick=()=>", response.data)
+        self.assertIn(b"initialTester==='a3'", response.data)
         self.assertIn(b'id="welcome-camera"', response.data)
         self.assertIn(b'width: calc((100% - 15px)/4)', response.data)
         self.assertIn(b'background: #9a4f05', response.data)
         self.assertIn(b'id="welcome-help"', response.data)
         self.assertIn(b"parameters.set('view',item.id)", response.data)
+        self.assertIn(b"an ordinary refresh must open Home", response.data)
+        self.assertIn(b"location.replace(homeUrl()); return", response.data)
+        self.assertIn(b"Loading saved images", response.data)
+        self.assertNotIn(b"history.replaceState(null,'',canonicalUrl());\n      renderConversation(item)", response.data)
         self.assertIn(b'id="welcome-touch"', response.data)
         self.assertIn(b'function speakWelcome', response.data)
         self.assertIn(b"$('welcome-touch').onclick=speakWelcome", response.data)
@@ -382,7 +387,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(value["start_url"], "/a/")
         self.assertEqual(value["display"], "standalone")
         self.assertEqual(value["share_target"]["action"], "/a/share-target")
-        self.assertIn(b"const APP_VERSION = '2026-09-16.4'", worker.data)
+        self.assertIn(b"const APP_VERSION = '2026-09-16.5'", worker.data)
         self.assertEqual(value["share_target"]["params"]["files"][0]["name"], "image")
         self.assertEqual(worker.status_code, 200)
         self.assertEqual(manifest.headers["Cache-Control"], "no-cache, max-age=0")
@@ -597,6 +602,29 @@ class ApiTests(unittest.TestCase):
         }).get_json()["items"]
 
         self.assertEqual(items[2]["stage1"]["reader"], "cloud_ocr")
+
+    @patch("api.app._storage_bucket")
+    def test_gallery_skips_stage_deleted_during_loading(
+        self, storage_bucket: object,
+    ) -> None:
+        capture_id = "c" * 32
+        result_blob = MagicMock(name="result_blob")
+        result_blob.name = f"captures/{capture_id}/result.json"
+        result_blob.download_as_text.return_value = json.dumps({
+            "capture_id": capture_id, "captured_at": "2026-09-16T00:00:00+00:00",
+            "label": "Packet", "tester_id": "a3", "words": [], "lines": [],
+        })
+        vanished_stage = MagicMock(name="vanished_stage")
+        vanished_stage.name = f"captures/{capture_id}/stage-2.json"
+        vanished_stage.download_as_text.side_effect = FileNotFoundError
+        storage_bucket.return_value.list_blobs.return_value = [result_blob, vanished_stage]
+
+        response = self.client.get(
+            "/api/gallery", headers={"X-VillageLens-Tester-ID": "a3"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["items"][2]["id"], capture_id)
 
     @patch("api.app._storage_bucket")
     def test_gallery_assigns_stable_chronological_codes_per_tester(
