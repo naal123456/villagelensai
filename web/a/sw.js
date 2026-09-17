@@ -1,6 +1,6 @@
 const SHARED_IMAGE = '/a/shared-image';
 const SHARED_CACHE = 'villagelens-shared-image-v1';
-const APP_VERSION = '2026-09-16.5';
+const APP_VERSION = '2026-09-16.6';
 
 self.addEventListener('install', event => {
   event.waitUntil(self.skipWaiting());
