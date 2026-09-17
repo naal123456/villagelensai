@@ -12,6 +12,7 @@ from api.app import (
     _access_token, _filter_local_regions, _normalize_stage_three,
     _openai_question, _openai_reader, _openai_transcribe, _openai_translate, _parse_tsv,
     _process_stored_capture, _process_stored_stage, _current_reader_stage,
+    _reader_stage_name,
     _saved_scene_identity_answer,
     _tester_link_token, app,
 )
@@ -61,7 +62,7 @@ class ApiTests(unittest.TestCase):
         self.assertIn(b'id="quality-4" aria-label="Request strongest reading"', response.data)
         self.assertIn(b'id="owner-badge"', response.data)
         self.assertIn(b'id="app-version"', response.data)
-        self.assertIn(b'v2026-09-16.3', response.data)
+        self.assertIn(b'v2026-09-16.4', response.data)
         self.assertIn(b"const appVersion=$('app-version').textContent.replace(/^v/,'')", response.data)
         self.assertNotIn(b"const appVersion='2026-09-15.1'", response.data)
         self.assertIn(b"'UNASSIGNED \xc2\xb7 OLDER CAPTURE'", response.data)
@@ -72,6 +73,10 @@ class ApiTests(unittest.TestCase):
         self.assertIn(b'localStorage.setItem', response.data)
         self.assertIn(b'X-VillageLens-Tester-ID', response.data)
         self.assertIn(b'function speechSegments', response.data)
+        self.assertIn(b'function sourceLanguageInfo', response.data)
+        self.assertIn(b"name:'Malayalam'", response.data)
+        self.assertIn(b'languageSwitchViewKey', response.data)
+        self.assertIn(b'function showLanguageSwitchLoading', response.data)
         self.assertIn(b'function speechChunks', response.data)
         self.assertIn(b'function applyVerifiedReadingRegions', response.data)
         self.assertIn(b'function verifiedSpeech', response.data)
@@ -287,12 +292,15 @@ class ApiTests(unittest.TestCase):
             "stage_4": "gpt-5.6-sol",
         })
         self.assertEqual(response.get_json()["stage_4"], "manual")
-        self.assertEqual(response.get_json()["app_version"], "2026-09-16.3")
+        self.assertEqual(response.get_json()["app_version"], "2026-09-16.4")
         page = self.client.get("/a/?tester=a3")
         self.addCleanup(page.close)
-        self.assertIn(b'v2026-09-16.3', page.data)
+        self.assertIn(b'v2026-09-16.4', page.data)
 
     def test_old_sol_and_astra_evidence_is_not_current(self) -> None:
+        self.assertTrue(_current_reader_stage({
+            "reader": "cloud_ocr", "output_language": "en",
+        }, 1, "kn"))
         self.assertFalse(_current_reader_stage({
             "reader": "vision_language", "model": "gpt-5.6-sol",
             "analysis_version": "instant-v2",
@@ -374,7 +382,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(value["start_url"], "/a/")
         self.assertEqual(value["display"], "standalone")
         self.assertEqual(value["share_target"]["action"], "/a/share-target")
-        self.assertIn(b"const APP_VERSION = '2026-09-16.3'", worker.data)
+        self.assertIn(b"const APP_VERSION = '2026-09-16.4'", worker.data)
         self.assertEqual(value["share_target"]["params"]["files"][0]["name"], "image")
         self.assertEqual(worker.status_code, 200)
         self.assertEqual(manifest.headers["Cache-Control"], "no-cache, max-age=0")
@@ -450,7 +458,8 @@ class ApiTests(unittest.TestCase):
         self, synthesize: object, storage_bucket: object,
     ) -> None:
         examples = {
-            "ta-IN": "தமிழ்", "te-IN": "తెలుగు", "hi-IN": "हिन्दी", "en-IN": "English",
+            "ta-IN": "தமிழ்", "te-IN": "తెలుగు", "ml-IN": "മലയാളം",
+            "hi-IN": "हिन्दी", "en-IN": "English",
         }
         for language, text in examples.items():
             with self.subTest(language=language):
@@ -461,6 +470,17 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(
             [call.args for call in synthesize.call_args_list],
             [(text, language) for language, text in examples.items()],
+        )
+
+    def test_stage_one_ocr_storage_is_shared_across_output_languages(self) -> None:
+        capture_id = "a" * 32
+        self.assertEqual(
+            _reader_stage_name(capture_id, 1, "kn"),
+            _reader_stage_name(capture_id, 1, "en"),
+        )
+        self.assertNotEqual(
+            _reader_stage_name(capture_id, 3, "kn"),
+            _reader_stage_name(capture_id, 3, "en"),
         )
 
     @patch("api.app.requests.post")
@@ -553,6 +573,30 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(reviewer["items"][2]["tester_id"], "a1")
         self.assertEqual(reviewer["items"][2]["tester_name"], "Eeregowda")
         self.assertEqual(reviewer["next_capture_sequence"], 1)
+
+    @patch("api.app._storage_bucket")
+    def test_english_gallery_reuses_language_neutral_stage_one(
+        self, storage_bucket: object,
+    ) -> None:
+        capture_id = "b" * 32
+        result_blob = MagicMock(name="result_blob")
+        result_blob.name = f"captures/{capture_id}/result.json"
+        result_blob.download_as_text.return_value = json.dumps({
+            "capture_id": capture_id, "captured_at": "2026-09-16T00:00:00+00:00",
+            "label": "Packet", "tester_id": "a3", "words": [], "lines": [],
+        })
+        stage_blob = MagicMock(name="stage_blob")
+        stage_blob.name = f"captures/{capture_id}/stage-1.json"
+        stage_blob.download_as_text.return_value = json.dumps({
+            "stage": 1, "reader": "cloud_ocr", "output_language": "kn", "words": [],
+        })
+        storage_bucket.return_value.list_blobs.return_value = [result_blob, stage_blob]
+
+        items = self.client.get("/api/gallery", headers={
+            "X-VillageLens-Tester-ID": "a3", "X-VillageLens-Output-Language": "en",
+        }).get_json()["items"]
+
+        self.assertEqual(items[2]["stage1"]["reader"], "cloud_ocr")
 
     @patch("api.app._storage_bucket")
     def test_gallery_assigns_stable_chronological_codes_per_tester(

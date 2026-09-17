@@ -143,7 +143,7 @@
         <span class="bar" id="quality-1"></span><span class="bar" id="quality-2"></span>
         <span class="bar" id="quality-3"></span><button class="bar" id="quality-4" aria-label="Request strongest reading" data-tip="Request strongest reading"></button>
         <span id="quality-timer">—</span>
-        <span id="app-version" aria-label="App version">v2026-09-16.3</span>
+        <span id="app-version" aria-label="App version">v2026-09-16.4</span>
       </div>
       <p id="mic-status" role="status" aria-live="assertive" hidden></p>
     </section>
@@ -230,6 +230,7 @@
     let gallery=[], galleryIndex=0, result=null, mode='word', timerId=0, started=0, timerOwner=null;
     let navigationGeneration=0;
     let playbackGeneration=0, readingGeneration=0, speechGeneration=0, pointerStart=null, suppressTap=false, activeControl='mode-word';
+    let lastSpokenSourceLanguage='';
     let audioContext=null, activeAudioSource=null, activeAudioResolve=null, activeSpeechResolve=null;
     let activeSpeechFetchController=null,activeTranslationController=null;
     let activeRecorder=null, recordingTimer=0, micTimerId=0;
@@ -253,6 +254,7 @@
     const automaticStages=[1,2,3],enabledStages=[1,2,3,4];
     const appVersion=$('app-version').textContent.replace(/^v/,'');
     const captureBurstFrames=4;
+    const languageSwitchViewKey='villagelens.language_switch_view.v1';
     let versionCheckPromise=null,pendingAppVersion='';
     let speechVoices=[];
     const testerId=configureTesterId();
@@ -344,8 +346,41 @@
       if (testerId) parameters.set('tester',testerId);
       parameters.set('lang',language);
       const item=gallery[galleryIndex];
+      const existingView=(new URLSearchParams(location.search).get('view')||'').trim();
       if ($('welcome').hidden&&item&&item.id) parameters.set('view',item.id);
+      else if ($('welcome').hidden&&/^[0-9a-f]{32}$/.test(existingView)) parameters.set('view',existingView);
       return `/a/?${parameters.toString()}`;
+    }
+    function saveLanguageSwitchView(language) {
+      const item=gallery[galleryIndex];
+      if (!$('welcome').hidden&&item&&/^[0-9a-f]{32}$/.test(item.id)) {
+        try { sessionStorage.setItem(languageSwitchViewKey,JSON.stringify({
+          target_language:language,saved_at:Date.now(),id:item.id,capture_code:item.capture_code||'',
+          label:item.label||'',image_url:item.image_url||`/api/captures/${item.id}/image`,
+        })); } catch (_) {}
+      }
+    }
+    function pendingLanguageSwitchView() {
+      try {
+        const value=JSON.parse(sessionStorage.getItem(languageSwitchViewKey)||'null');
+        return value&&value.target_language===outputLanguage&&Date.now()-Number(value.saved_at)<5*60*1000&&
+          /^[0-9a-f]{32}$/.test(value.id||'')?value:null;
+      } catch (_) { return null; }
+    }
+    function clearLanguageSwitchView() {
+      try { sessionStorage.removeItem(languageSwitchViewKey); } catch (_) {}
+    }
+    function showLanguageSwitchLoading(reference) {
+      if (!reference||!reference.id) return;
+      stop(); ++navigationGeneration; $('welcome').hidden=true; ownerBadge.hidden=true; conversation.hidden=true;
+      stage.style.display='inline-block'; stage.classList.add('loading'); overlay.textContent=''; current.textContent='';
+      image.onload=()=>stage.classList.remove('loading');
+      image.src=reference.image_url||`/api/captures/${reference.id}/image`;
+      position.textContent=[reference.capture_code,reference.label].filter(Boolean).join(' · ')||
+        (englishMode?'Saved image':'ಉಳಿಸಿದ ಚಿತ್ರ');
+      status.textContent=englishMode?'Keeping this image while switching its meaning to English…':
+        'ಈ ಚಿತ್ರವನ್ನು ಉಳಿಸಿಕೊಂಡು ಅದರ ಅರ್ಥವನ್ನು ಕನ್ನಡಕ್ಕೆ ಬದಲಿಸುತ್ತಿದೆ…';
+      timer.textContent='…';
     }
     function showWelcome() {
       stop(); ++navigationGeneration; result=null; current.textContent=''; overlay.textContent=''; image.removeAttribute('src');
@@ -464,6 +499,7 @@
     }
     function stop(keepControl=false) {
       playbackGeneration++; readingGeneration++; stopSpeechOnly();
+      lastSpokenSourceLanguage='';
       if (activeTranslationController) { activeTranslationController.abort(); activeTranslationController=null; }
       clearTimeout(recordingTimer); recordingTimer=0;
       if (activeRecorder&&activeRecorder.state!=='inactive') { try { activeRecorder.stop(); } catch (_) {} }
@@ -581,11 +617,28 @@
       if (/[\u0c80-\u0cff]/.test(text)) return 'kn-IN';
       if (/[\u0b80-\u0bff]/.test(text)) return 'ta-IN';
       if (/[\u0c00-\u0c7f]/.test(text)) return 'te-IN';
+      if (/[\u0d00-\u0d7f]/.test(text)) return 'ml-IN';
       if (/[\u0900-\u097f]/.test(text)) return 'hi-IN';
       return /[A-Za-z]/.test(text)?'en-IN':'';
     }
+    function sourceLanguageInfo(text) {
+      const source=String(text||'');
+      const candidates=[
+        {code:'kn-IN',pattern:/[\u0c80-\u0cff]/g,name:'Kannada',kn:'ಕನ್ನಡ'},
+        {code:'ta-IN',pattern:/[\u0b80-\u0bff]/g,name:'Tamil',kn:'ತಮಿಳು'},
+        {code:'te-IN',pattern:/[\u0c00-\u0c7f]/g,name:'Telugu',kn:'ತೆಲುಗು'},
+        {code:'ml-IN',pattern:/[\u0d00-\u0d7f]/g,name:'Malayalam',kn:'ಮಲಯಾಳಂ'},
+        {code:'hi-IN',pattern:/[\u0900-\u097f]/g,name:'Hindi / Devanagari',kn:'ಹಿಂದಿ ಅಥವಾ ದೇವನಾಗರಿ'},
+        {code:'en-IN',pattern:/[A-Za-z]/g,name:'English',kn:'ಇಂಗ್ಲಿಷ್'},
+      ].map(item=>({...item,count:(source.match(item.pattern)||[]).length}));
+      return candidates.sort((left,right)=>right.count-left.count).find(item=>item.count)||null;
+    }
+    function sourceLanguageAnnouncement(text) {
+      const info=sourceLanguageInfo(text); if (!info) return {info:null,text:''};
+      return {info,text:englishMode?`This text is in ${info.name}.`:`ಈ ಪಠ್ಯ ${info.kn} ಭಾಷೆಯಲ್ಲಿದೆ.`};
+    }
     function speechSegments(text) {
-      const chunks=normalizedSpeech(text).match(/[\u0900-\u097f]+|[\u0b80-\u0bff]+|[\u0c00-\u0c7f]+|[\u0c80-\u0cff]+|[A-Za-z]+|[^A-Za-z\u0900-\u097f\u0b80-\u0cff]+/g)||[];
+      const chunks=normalizedSpeech(text).match(/[\u0900-\u097f]+|[\u0b80-\u0bff]+|[\u0c00-\u0c7f]+|[\u0c80-\u0cff]+|[\u0d00-\u0d7f]+|[A-Za-z]+|[^A-Za-z\u0900-\u097f\u0b80-\u0d7f]+/g)||[];
       const segments=[];
       for (let index=0;index<chunks.length;index++) {
         const chunk=chunks[index];
@@ -593,7 +646,7 @@
         if (!language) {
           language=segments.length?segments[segments.length-1].language:'';
           if (!language) {
-            const next=chunks.slice(index+1).find(value=>/[A-Za-z\u0900-\u097f\u0b80-\u0cff]/.test(value))||'';
+            const next=chunks.slice(index+1).find(value=>/[A-Za-z\u0900-\u097f\u0b80-\u0d7f]/.test(value))||'';
             language=scriptLanguage(next)||'en-IN';
           }
         }
@@ -683,7 +736,7 @@
       for (const prepared of speechChunks(text)) {
         for (const segment of speechSegments(prepared)) {
         if (generation!==speechGeneration) return false;
-        if (['kn-IN','ta-IN','te-IN','hi-IN','en-IN'].includes(segment.language)) {
+        if (['kn-IN','ta-IN','te-IN','ml-IN','hi-IN','en-IN'].includes(segment.language)) {
           if (await playServerSpeech(segment.text,segment.language,generation)) continue;
           if (generation!==speechGeneration) return false;
         }
@@ -797,7 +850,7 @@
     function needsTargetTranslation(text) {
       const source=String(text||'');
       if (!Array.from(source).some(character=>/\p{L}/u.test(character))) return false;
-      if (englishMode) return /[\u0900-\u097f\u0b80-\u0bff\u0c00-\u0c7f\u0c80-\u0cff]/.test(source);
+      if (englishMode) return /[\u0900-\u097f\u0b80-\u0bff\u0c00-\u0c7f\u0c80-\u0cff\u0d00-\u0d7f]/.test(source);
       return !/[\u0c80-\u0cff]/.test(source);
     }
     async function translateOnDemand(text) {
@@ -857,19 +910,32 @@
       const source=String(target&&target.text||'').trim(); if (!source) return false;
       const request=++readingGeneration; stopSpeechOnly();
       if (activeTranslationController) { activeTranslationController.abort(); activeTranslationController=null; }
-      activate(target,source);
+      const language=sourceLanguageAnnouncement(source);
+      const announceLanguage=language.info&&language.info.code!==lastSpokenSourceLanguage;
+      activate(target,`${language.info?`[${language.info.name}]\n`:''}${source}`);
+      if (language.info) status.textContent=englishMode?`${language.info.name} text`:`${language.info.kn} ಪಠ್ಯ`;
       if (target.semanticText) { current.textContent=target.semanticText; return speak(target.semanticText); }
       let translation=useContext?contextualTranslation(target):contextualWordTranslation(target);
       if (translation&&translation.toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu,'')===
           source.toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu,'')) translation='';
-      if (!translation&&!needsTargetTranslation(source)) return speak(source);
+      if (!translation&&!needsTargetTranslation(source)) {
+        if (announceLanguage&&language.text&&!await speak(language.text)) return false;
+        if (language.info) lastSpokenSourceLanguage=language.info.code;
+        return request===readingGeneration&&speak(source);
+      }
       if (!translation) translation=translatedWord({text:source});
       if (!translation) translation=await translateOnDemand(source);
       if (request!==readingGeneration) return false;
-      if (!translation) return speak(source);
+      if (!translation) {
+        if (announceLanguage&&language.text&&!await speak(language.text)) return false;
+        if (language.info) lastSpokenSourceLanguage=language.info.code;
+        return request===readingGeneration&&speak(source);
+      }
       const bridge=englishMode?'In English, this means:':'ಕನ್ನಡದಲ್ಲಿ ಇದರ ಅರ್ಥ:';
-      current.textContent=`${source}\n${translation}`;
-      if (!await speak(source)||request!==readingGeneration) return false;
+      current.textContent=`${language.info?`[${language.info.name}]\n`:''}${source}\n${translation}`;
+      if (announceLanguage&&language.text&&!await speak(language.text)) return false;
+      if (language.info) lastSpokenSourceLanguage=language.info.code;
+      if (request!==readingGeneration||!await speak(source)||request!==readingGeneration) return false;
       return speak(`${bridge} ${translation}`);
     }
     async function selectWord(word) {
@@ -1212,6 +1278,7 @@
       stop(); defaultWordMode(); const navigation=++navigationGeneration;
       $('welcome').hidden=true;
       galleryIndex=(index+gallery.length)%gallery.length; const item=gallery[galleryIndex];
+      history.replaceState(null,'',canonicalUrl());
       renderConversation(item);
       const owner=item.tester_id&&item.tester_id!=='unassigned'?item.tester_id.toUpperCase():'';
       const ownerName=item.tester_name?` · ${item.tester_name}`:'';
@@ -1828,6 +1895,7 @@
     $('mode-translate').onclick=()=>{
       const next=englishMode?'kn':'en';
       try { localStorage.setItem('villagelens.output_language.v1',next); } catch (_) {}
+      saveLanguageSwitchView(next);
       location.assign(canonicalUrl(next));
     };
     $('camera').onclick=openGuidedCamera;
@@ -1913,6 +1981,12 @@
     }
     async function startApp() {
       showWelcome();
+      const parameters=new URLSearchParams(location.search),shared=parameters.get('shared')==='1';
+      const pendingView=pendingLanguageSwitchView();
+      const requestedView=parameters.get('view')||pendingView&&pendingView.id||'';
+      if (!shared&&/^[0-9a-f]{32}$/.test(requestedView)) showLanguageSwitchLoading(pendingView||{
+        id:requestedView,image_url:`/api/captures/${requestedView}/image`,
+      });
       if ('serviceWorker' in navigator) {
         try {
           const registration=await navigator.serviceWorker.register('/a/sw.js',{
@@ -1922,12 +1996,17 @@
         } catch (_) {}
       }
       const galleryLoading=loadGallery();
-      const parameters=new URLSearchParams(location.search),shared=parameters.get('shared')==='1';
-      const requestedView=parameters.get('view')||'';
       if (shared) { await galleryLoading; await loadSharedImage(); }
       else if (requestedView) {
-        await galleryLoading; const index=gallery.findIndex(item=>item.id===requestedView);
-        if (index>=0) await showGallery(index);
+        await galleryLoading;
+        const index=gallery.findIndex(item=>item.id===requestedView||
+          pendingView&&pendingView.capture_code&&item.capture_code===pendingView.capture_code);
+        if (index>=0) { await showGallery(index); clearLanguageSwitchView(); }
+        else {
+          showWelcome();
+          status.textContent=englishMode?'The saved image could not be restored. Use the arrows to find it.':
+            'ಉಳಿಸಿದ ಚಿತ್ರವನ್ನು ಮತ್ತೆ ತೆರೆಯಲಾಗಲಿಲ್ಲ. ಅದನ್ನು ಹುಡುಕಲು ಬಾಣಗಳನ್ನು ಬಳಸಿ.';
+        }
       }
     }
     startApp();

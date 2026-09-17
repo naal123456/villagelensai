@@ -56,11 +56,12 @@ OPENAI_TRANSLATION_MODEL = os.environ.get("VILLAGELENS_TRANSLATION_MODEL", "gpt-
 OPENAI_STAGE_TWO_ANALYSIS_VERSION = "luna-compact-v1"
 OPENAI_STAGE_THREE_ANALYSIS_VERSION = "terra-ocr-grounded-v4"
 OPENAI_STAGE_FOUR_ANALYSIS_VERSION = "sol-ocr-review-v4"
-APP_VERSION = "2026-09-16.3"
+APP_VERSION = "2026-09-16.4"
 SPEECH_VOICES = {
     "kn-IN": os.environ.get("VILLAGELENS_KANNADA_TTS_VOICE", "kn-IN-Wavenet-A"),
     "ta-IN": os.environ.get("VILLAGELENS_TAMIL_TTS_VOICE", "ta-IN-Wavenet-A"),
     "te-IN": os.environ.get("VILLAGELENS_TELUGU_TTS_VOICE", "te-IN-Standard-A"),
+    "ml-IN": os.environ.get("VILLAGELENS_MALAYALAM_TTS_VOICE", "ml-IN-Chirp3-HD-Achernar"),
     "hi-IN": os.environ.get("VILLAGELENS_HINDI_TTS_VOICE", "hi-IN-Wavenet-A"),
     "en-IN": os.environ.get("VILLAGELENS_ENGLISH_TTS_VOICE", "en-IN-Wavenet-A"),
 }
@@ -68,6 +69,7 @@ SPEECH_LANGUAGE_PATTERNS = {
     "kn-IN": re.compile(r"[\u0c80-\u0cff]"),
     "ta-IN": re.compile(r"[\u0b80-\u0bff]"),
     "te-IN": re.compile(r"[\u0c00-\u0c7f]"),
+    "ml-IN": re.compile(r"[\u0d00-\u0d7f]"),
     "hi-IN": re.compile(r"[\u0900-\u097f]"),
     "en-IN": re.compile(r"[A-Za-z]"),
 }
@@ -1521,7 +1523,8 @@ def _store_capture(data: bytes, media_type: str, result: dict[str, Any]) -> bool
 
 
 def _reader_stage_name(capture_id: str, stage: int, output_language: str = "kn") -> str:
-    suffix = "" if output_language == "kn" else f"-{output_language}"
+    # OCR words, lines, and boxes do not change with the spoken output language.
+    suffix = "" if stage == 1 or output_language == "kn" else f"-{output_language}"
     return f"captures/{capture_id}/stage-{stage}{suffix}.json"
 
 
@@ -1558,7 +1561,7 @@ def _current_reader_stage(
 ) -> bool:
     if not value:
         return False
-    if value.get("output_language", "kn") != output_language:
+    if stage != 1 and value.get("output_language", "kn") != output_language:
         return False
     if stage == 1:
         return value.get("reader") == "cloud_ocr"
@@ -1622,6 +1625,10 @@ def _process_stored_stage(
     with _capture_processing_locks[(capture_id, stage, output_language)]:
         capture = _authorized_capture(bucket, capture_id, tester_id)
         existing = _stored_json(bucket, _reader_stage_name(capture_id, stage, output_language))
+        if stage == 1 and not _current_reader_stage(existing, 1, output_language):
+            # Compatibility with English OCR saved before stage one became language-neutral.
+            legacy_english = _stored_json(bucket, f"captures/{capture_id}/stage-1-en.json")
+            existing = legacy_english if _current_reader_stage(legacy_english, 1, output_language) else existing
         if stage == 1 and output_language == "kn" and not _current_reader_stage(existing, 1):
             legacy_google = _stored_json(bucket, f"captures/{capture_id}/stage-2.json")
             existing = legacy_google if _current_reader_stage(legacy_google, 1) else existing
@@ -1793,7 +1800,7 @@ def translate() -> Response | tuple[Response, int]:
         output_language == "kn" and bool(re.search(r"[\u0c80-\u0cff]", text))
     ) or (
         output_language == "en" and bool(re.search(r"[A-Za-z]", text))
-        and not re.search(r"[\u0900-\u097f\u0b80-\u0cff]", text)
+        and not re.search(r"[\u0900-\u097f\u0b80-\u0cff\u0d00-\u0d7f]", text)
     )
     if not has_letters or already_target:
         return jsonify(error="TRANSLATION_LANGUAGE_UNSUPPORTED"), 400
@@ -1883,6 +1890,12 @@ def gallery() -> tuple[Response, int]:
                 and (match := re.fullmatch(rf"stage-([1-4]){re.escape(suffix)}\.json", parts[2]))
                 and _valid_capture_id(parts[1])
             }
+            # Stage-one OCR is shared by every output language. Prefer the canonical
+            # language-neutral evidence when an older language-specific copy exists.
+            for blob in blobs:
+                parts = blob.name.split("/")
+                if len(parts) == 3 and parts[2] == "stage-1.json" and _valid_capture_id(parts[1]):
+                    evidence[(parts[1], 1)] = blob
             for blob in blobs:
                 if not blob.name.endswith("/result.json"):
                     continue
