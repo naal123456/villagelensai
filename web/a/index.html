@@ -143,7 +143,7 @@
         <span class="bar" id="quality-1"></span><span class="bar" id="quality-2"></span>
         <span class="bar" id="quality-3"></span><button class="bar" id="quality-4" aria-label="Request strongest reading" data-tip="Request strongest reading"></button>
         <span id="quality-timer">—</span>
-        <span id="app-version" aria-label="App version">v2026-09-16.8</span>
+        <span id="app-version" aria-label="App version">v2026-09-17.1</span>
       </div>
       <p id="mic-status" role="status" aria-live="assertive" hidden></p>
     </section>
@@ -239,7 +239,7 @@
     let activeSpeechFetchController=null,activeTranslationController=null;
     let activeRecorder=null, recordingTimer=0, micTimerId=0;
     let cameraStream=null, cameraAnalysisTimer=0, previousCameraFrame=null;
-    let cameraCapturing=false, lastCameraPrompt='', lastCameraPromptAt=0, latestCameraQuality=null;
+    let cameraCapturing=false, lastCameraPrompt='', lastCameraPromptAt=0, latestCameraQuality=null,cameraReadyUntil=0;
     let cameraTarget={x:.07,y:.10,width:.86,height:.80},cameraTargetChangedAt=0;
     let cameraZoomSupported=false,cameraZoomValue=1,cameraZoomStep=.1;
     let cameraPointers=new Map(),pinchStartDistance=0,pinchStartZoom=1,cameraPinched=false;
@@ -368,6 +368,7 @@
         try { sessionStorage.setItem(languageSwitchViewKey,JSON.stringify({
           target_language:language,saved_at:Date.now(),id:item.id,capture_code:item.capture_code||'',
           label:item.label||'',image_url:item.image_url||`/api/captures/${item.id}/image`,
+          completed_stages:enabledStages.filter(stageNumber=>Boolean(readCachedStage(item,stageNumber))),
         })); } catch (_) {}
       }
     }
@@ -391,6 +392,9 @@
         (englishMode?'Saved image':'ಉಳಿಸಿದ ಚಿತ್ರ');
       status.textContent=englishMode?'Keeping this image while switching its meaning to English…':
         'ಈ ಚಿತ್ರವನ್ನು ಉಳಿಸಿಕೊಂಡು ಅದರ ಅರ್ಥವನ್ನು ಕನ್ನಡಕ್ಕೆ ಬದಲಿಸುತ್ತಿದೆ…';
+      for (const stageNumber of reference.completed_stages||[]) {
+        if (enabledStages.includes(stageNumber)) $('quality-'+stageNumber).classList.add('ready');
+      }
       timer.textContent='…';
     }
     function beginGalleryWait(showProgress=false) {
@@ -648,6 +652,7 @@
         .replace(/ಪ್ರೊ\.?/g,'ಪ್ರೊಫೆಸರ್ ').replace(/ಡಾ\.?/g,'ಡಾಕ್ಟರ್ ');
     }
     function scriptLanguage(text) {
+      if (/[\u0600-\u06ff]/.test(text)) return 'ur-IN';
       if (/[\u0c80-\u0cff]/.test(text)) return 'kn-IN';
       if (/[\u0b80-\u0bff]/.test(text)) return 'ta-IN';
       if (/[\u0c00-\u0c7f]/.test(text)) return 'te-IN';
@@ -658,6 +663,7 @@
     function sourceLanguageInfo(text) {
       const source=String(text||'');
       const candidates=[
+        {code:'ur-IN',pattern:/[\u0600-\u06ff]/g,name:'Urdu / Arabic script',kn:'ಉರ್ದು ಅಥವಾ ಅರೇಬಿಕ್ ಲಿಪಿ'},
         {code:'kn-IN',pattern:/[\u0c80-\u0cff]/g,name:'Kannada',kn:'ಕನ್ನಡ'},
         {code:'ta-IN',pattern:/[\u0b80-\u0bff]/g,name:'Tamil',kn:'ತಮಿಳು'},
         {code:'te-IN',pattern:/[\u0c00-\u0c7f]/g,name:'Telugu',kn:'ತೆಲುಗು'},
@@ -672,7 +678,7 @@
       return {info,text:englishMode?`This text is in ${info.name}.`:`ಈ ಪಠ್ಯ ${info.kn} ಭಾಷೆಯಲ್ಲಿದೆ.`};
     }
     function speechSegments(text) {
-      const chunks=normalizedSpeech(text).match(/[\u0900-\u097f]+|[\u0b80-\u0bff]+|[\u0c00-\u0c7f]+|[\u0c80-\u0cff]+|[\u0d00-\u0d7f]+|[A-Za-z]+|[^A-Za-z\u0900-\u097f\u0b80-\u0d7f]+/g)||[];
+      const chunks=normalizedSpeech(text).match(/[\u0600-\u06ff]+|[\u0900-\u097f]+|[\u0b80-\u0bff]+|[\u0c00-\u0c7f]+|[\u0c80-\u0cff]+|[\u0d00-\u0d7f]+|[A-Za-z]+|[^A-Za-z\u0600-\u06ff\u0900-\u097f\u0b80-\u0d7f]+/g)||[];
       const segments=[];
       for (let index=0;index<chunks.length;index++) {
         const chunk=chunks[index];
@@ -680,7 +686,7 @@
         if (!language) {
           language=segments.length?segments[segments.length-1].language:'';
           if (!language) {
-            const next=chunks.slice(index+1).find(value=>/[A-Za-z\u0900-\u097f\u0b80-\u0d7f]/.test(value))||'';
+            const next=chunks.slice(index+1).find(value=>/[A-Za-z\u0600-\u06ff\u0900-\u097f\u0b80-\u0d7f]/.test(value))||'';
             language=scriptLanguage(next)||'en-IN';
           }
         }
@@ -770,7 +776,7 @@
       for (const prepared of speechChunks(text)) {
         for (const segment of speechSegments(prepared)) {
         if (generation!==speechGeneration) return false;
-        if (['kn-IN','ta-IN','te-IN','ml-IN','hi-IN','en-IN'].includes(segment.language)) {
+        if (['kn-IN','ta-IN','te-IN','ml-IN','hi-IN','ur-IN','en-IN'].includes(segment.language)) {
           if (await playServerSpeech(segment.text,segment.language,generation)) continue;
           if (generation!==speechGeneration) return false;
         }
@@ -1322,6 +1328,9 @@
         (owner?`${owner}${ownerName}`:'UNASSIGNED · OLDER CAPTURE');
       status.textContent='ಚಿತ್ರವನ್ನು ಸಿದ್ಧಪಡಿಸುತ್ತಿದೆ…';
       current.textContent=''; overlay.textContent=''; stage.style.display='inline-block'; stage.classList.add('loading'); resetQuality();
+      for (const stageNumber of item.handoff_completed_stages||[]) {
+        if (enabledStages.includes(stageNumber)) $('quality-'+stageNumber).classList.add('ready');
+      }
       image.onload=()=>{ if (navigation===navigationGeneration) { stage.classList.remove('loading'); alignOverlayToImage(); } };
       image.onerror=()=>{ if (navigation===navigationGeneration) status.textContent='ಚಿತ್ರವನ್ನು ತೆರೆಯಲು ಆಗಲಿಲ್ಲ.'; };
       image.src=item.image_url;
@@ -1480,7 +1489,7 @@
       if (state.corner.includes('n')) top=Math.max(0,Math.min(bottom-minHeight,start.y+dy));
       if (state.corner.includes('s')) bottom=Math.min(1,Math.max(top+minHeight,start.y+start.height+dy));
       positionCameraTarget({x:left,y:top,width:right-left,height:bottom-top});
-      cameraTargetChangedAt=Date.now(); previousCameraFrame=null; cameraGuide.dataset.quality='wait';
+      cameraTargetChangedAt=Date.now(); previousCameraFrame=null; cameraReadyUntil=0; cameraGuide.dataset.quality='wait';
     }
     async function cameraResizeUp(event) {
       const state=cameraResizeState;
@@ -1591,15 +1600,18 @@
     }
     function cameraQualityState(quality) {
       const dark=quality.brightness<48||quality.dark_percent>48, glare=quality.glare_percent>22;
-      // A genuinely sharp frame can survive normal hand tremor. Softer frames still
-      // require steadier hands so motion is not mistaken for useful edge detail.
-      const clearlySharp=quality.sharpness>=7, moving=quality.motion>(clearlySharp?24:16);
+      // A genuinely sharp frame can survive ordinary hand tremor. Keep the green
+      // state briefly so a single auto-exposure or hand-motion sample cannot make
+      // a clearly readable target flicker back to orange before the user taps.
+      const clearlySharp=quality.sharpness>=7, moving=quality.motion>(clearlySharp?32:16);
       const soft=quality.sharpness<4.5;
       if (Date.now()-cameraTargetChangedAt<800) return ['wait','positioning',englishMode?'Keep framing the selected area':'ಆಯ್ದ ಭಾಗವನ್ನು ಚೌಕದೊಳಗೆ ಇರಿಸಿ',englishMode?'Keep framing the selected area.':'ಆಯ್ದ ಭಾಗವನ್ನು ಚೌಕದೊಳಗೆ ಇರಿಸಿ.'];
-      if (dark) return ['bad','dark',englishMode?'Need more light':'ಬೆಳಕು ಬೇಕು',englishMode?'Need more light.':'ಬೆಳಕು ಬೇಕು.'];
-      if (glare) return ['wait','glare',englishMode?'Tilt slightly to remove glare':'ಪ್ರತಿಫಲನ ತಪ್ಪಿಸಲು ಸ್ವಲ್ಪ ಓರೆಯಾಗಿಸಿ',englishMode?'Tilt slightly to remove glare.':'ಬೆಳಕಿನ ಪ್ರತಿಫಲನ ತಪ್ಪಿಸಲು ಸ್ವಲ್ಪ ಓರೆಯಾಗಿಸಿ.'];
+      if (dark) { cameraReadyUntil=0; return ['bad','dark',englishMode?'Need more light':'ಬೆಳಕು ಬೇಕು',englishMode?'Need more light.':'ಬೆಳಕು ಬೇಕು.']; }
+      if (glare) { cameraReadyUntil=0; return ['wait','glare',englishMode?'Tilt slightly to remove glare':'ಪ್ರತಿಫಲನ ತಪ್ಪಿಸಲು ಸ್ವಲ್ಪ ಓರೆಯಾಗಿಸಿ',englishMode?'Tilt slightly to remove glare.':'ಬೆಳಕಿನ ಪ್ರತಿಫಲನ ತಪ್ಪಿಸಲು ಸ್ವಲ್ಪ ಓರೆಯಾಗಿಸಿ.']; }
+      if (soft) { cameraReadyUntil=0; return ['wait','soft',englishMode?'Move slowly until the image is clear':'ಸ್ಪಷ್ಟವಾಗಲು ನಿಧಾನವಾಗಿ ಹತ್ತಿರ ಅಥವಾ ದೂರ ಸರಿಸಿ',englishMode?'Move slowly until the image is clear.':'ಚಿತ್ರ ಸ್ಪಷ್ಟವಾಗುವವರೆಗೆ ನಿಧಾನವಾಗಿ ಹತ್ತಿರ ಅಥವಾ ದೂರ ಸರಿಸಿ.']; }
+      if (!moving) cameraReadyUntil=Date.now()+1800;
+      if (Date.now()<cameraReadyUntil) return ['ready','ready',englishMode?'Good—tap the camera':'ಚೆನ್ನಾಗಿದೆ—ಕ್ಯಾಮೆರಾ ಒತ್ತಿ',englishMode?'Good. Tap the camera.':'ಚೆನ್ನಾಗಿದೆ. ಕ್ಯಾಮೆರಾ ಒತ್ತಿ.'];
       if (moving) return ['wait','motion',englishMode?'Hold the phone steady':'ಫೋನ್ ಸ್ಥಿರವಾಗಿ ಹಿಡಿಯಿರಿ',englishMode?'Hold the phone steady.':'ಫೋನ್ ಸ್ಥಿರವಾಗಿ ಹಿಡಿಯಿರಿ.'];
-      if (soft) return ['wait','soft',englishMode?'Move slowly until the image is clear':'ಸ್ಪಷ್ಟವಾಗಲು ನಿಧಾನವಾಗಿ ಹತ್ತಿರ ಅಥವಾ ದೂರ ಸರಿಸಿ',englishMode?'Move slowly until the image is clear.':'ಚಿತ್ರ ಸ್ಪಷ್ಟವಾಗುವವರೆಗೆ ನಿಧಾನವಾಗಿ ಹತ್ತಿರ ಅಥವಾ ದೂರ ಸರಿಸಿ.'];
       return ['ready','ready',englishMode?'Good—hold steady':'ಚೆನ್ನಾಗಿದೆ—ಸ್ಥಿರವಾಗಿ ಹಿಡಿಯಿರಿ',englishMode?'Good. Hold steady.':'ಚೆನ್ನಾಗಿದೆ. ಸ್ಥಿರವಾಗಿ ಹಿಡಿಯಿರಿ.'];
     }
     function updateCameraGuide() {
@@ -1622,7 +1634,7 @@
         cameraStream=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:{ideal:'environment'},width:{ideal:3840},height:{ideal:2160}}});
         cameraPreview.srcObject=cameraStream; cameraGuide.hidden=false; cameraGuide.dataset.quality='wait';
         positionCameraTarget({x:.07,y:.10,width:.86,height:.80}); $('camera-tap-arrow').hidden=false;
-        cameraTargetChangedAt=Date.now(); previousCameraFrame=null;
+        cameraTargetChangedAt=Date.now(); previousCameraFrame=null; cameraReadyUntil=0;
         cameraGuidance.textContent=englishMode?'Tap the target. Drag orange corners to fit it.':'ಬೇಕಾದ ಭಾಗವನ್ನು ಸ್ಪರ್ಶಿಸಿ. ಸರಿಹೊಂದಿಸಲು ಕಿತ್ತಳೆ ಮೂಲೆಗಳನ್ನು ಎಳೆಯಿರಿ.';
         cameraMetrics.textContent='Checking light and focus…'; cameraCapturing=false; latestCameraQuality=null;
         await cameraPreview.play();
@@ -2050,6 +2062,7 @@
         const index=gallery.findIndex(item=>item.id===requestedView||
           pendingView&&pendingView.capture_code&&item.capture_code===pendingView.capture_code);
         if (galleryReady&&index>=0) {
+          gallery[index].handoff_completed_stages=(pendingView&&pendingView.completed_stages)||[];
           await showGallery(index); clearLanguageSwitchView(); history.replaceState(null,'',homeUrl());
         }
         else {

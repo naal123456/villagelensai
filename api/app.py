@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import base64
+import copy
 import hashlib
 import hmac
 import io
@@ -56,13 +57,14 @@ OPENAI_TRANSLATION_MODEL = os.environ.get("VILLAGELENS_TRANSLATION_MODEL", "gpt-
 OPENAI_STAGE_TWO_ANALYSIS_VERSION = "luna-compact-v1"
 OPENAI_STAGE_THREE_ANALYSIS_VERSION = "terra-ocr-grounded-v4"
 OPENAI_STAGE_FOUR_ANALYSIS_VERSION = "sol-ocr-review-v4"
-APP_VERSION = "2026-09-16.8"
+APP_VERSION = "2026-09-17.1"
 SPEECH_VOICES = {
     "kn-IN": os.environ.get("VILLAGELENS_KANNADA_TTS_VOICE", "kn-IN-Wavenet-A"),
     "ta-IN": os.environ.get("VILLAGELENS_TAMIL_TTS_VOICE", "ta-IN-Wavenet-A"),
     "te-IN": os.environ.get("VILLAGELENS_TELUGU_TTS_VOICE", "te-IN-Standard-A"),
     "ml-IN": os.environ.get("VILLAGELENS_MALAYALAM_TTS_VOICE", "ml-IN-Chirp3-HD-Achernar"),
     "hi-IN": os.environ.get("VILLAGELENS_HINDI_TTS_VOICE", "hi-IN-Wavenet-A"),
+    "ur-IN": os.environ.get("VILLAGELENS_URDU_TTS_VOICE", "ur-IN-Wavenet-A"),
     "en-IN": os.environ.get("VILLAGELENS_ENGLISH_TTS_VOICE", "en-IN-Wavenet-A"),
 }
 SPEECH_LANGUAGE_PATTERNS = {
@@ -71,6 +73,7 @@ SPEECH_LANGUAGE_PATTERNS = {
     "te-IN": re.compile(r"[\u0c00-\u0c7f]"),
     "ml-IN": re.compile(r"[\u0d00-\u0d7f]"),
     "hi-IN": re.compile(r"[\u0900-\u097f]"),
+    "ur-IN": re.compile(r"[\u0600-\u06ff]"),
     "en-IN": re.compile(r"[A-Za-z]"),
 }
 ACCESS_COOKIE_NAME = "villagelens_access_v2"
@@ -1565,6 +1568,103 @@ def _openai_translate(text: str, output_language: str = "kn") -> dict[str, str]:
             "output_language": output_language}
 
 
+def _translate_reader_output(
+    source: dict[str, Any], output_language: str,
+) -> dict[str, Any]:
+    """Translate narrative fields while retaining the completed visual analysis."""
+    if output_language not in OUTPUT_LANGUAGES:
+        raise RuntimeError("OPENAI_TRANSLATION_INVALID_LANGUAGE")
+    api_key = os.environ.get("OPENAI_API_KEY", "").strip()
+    if not api_key:
+        raise RuntimeError("OPENAI_READER_NOT_CONFIGURED")
+    adapted = copy.deepcopy(source)
+    slots: list[tuple[dict[str, Any], str]] = []
+
+    def add(container: Any, key: str) -> None:
+        if isinstance(container, dict) and str(container.get(key, "")).strip():
+            slots.append((container, key))
+
+    for key in (
+        "scene_type", "what_is_it_kn", "what_it_does_kn", "action_needed_kn",
+        "warning_kn", "uncertainty_kn", "brief_spoken_kn", "detailed_spoken_kn",
+        "material_disagreement_kn",
+    ):
+        add(adapted, key)
+    for point_index, point in enumerate(adapted.get("important_points_kn", [])):
+        if str(point).strip():
+            # A tiny holder lets list values use the same slot update path.
+            holder = {"text": point}
+            adapted["important_points_kn"][point_index] = holder
+            slots.append((holder, "text"))
+    for item in adapted.get("translations", []):
+        add(item, "translation_kn")
+    for item in adapted.get("objects", []):
+        add(item, "name_kn")
+        add(item, "purpose_kn")
+    for key in ("transcription_kn", "spoken_sections"):
+        for item in adapted.get(key, []):
+            add(item, "text_kn")
+    if not slots:
+        raise RuntimeError("OPENAI_TRANSLATION_EMPTY_SOURCE")
+
+    source_texts = [str(container[key]).strip() for container, key in slots]
+    schema = {
+        "type": "object", "additionalProperties": False,
+        "required": ["translated"],
+        "properties": {"translated": {
+            "type": "array", "items": {"type": "string"},
+            "minItems": len(source_texts), "maxItems": len(source_texts),
+        }},
+    }
+    target = "clear natural English" if output_language == "en" else "simple natural Kannada"
+    instruction = (
+        f"Translate each JSON array entry into {target} for spoken assistance. Preserve the array length and "
+        "order, names, numbers, units, uncertainty, and safety meaning. Do not add facts or reinterpret the "
+        "image. A Kannada result must use Kannada script even for short labels; an English result must use "
+        "English words. Return only the structured field.\n\nEntries:\n"
+    )
+    payload = {
+        "model": OPENAI_TRANSLATION_MODEL, "store": False,
+        "reasoning": {"effort": "minimal"}, "max_output_tokens": 7000,
+        "input": [{"role": "user", "content": [{
+            "type": "input_text",
+            "text": instruction + json.dumps(source_texts, ensure_ascii=False, separators=(",", ":")),
+        }]}],
+        "text": {"verbosity": "low", "format": {
+            "type": "json_schema", "name": "villagelens_reader_translation",
+            "strict": True, "schema": schema,
+        }},
+    }
+    started = time.monotonic()
+    response = requests.post(
+        "https://api.openai.com/v1/responses", json=payload,
+        headers={"Authorization": f"Bearer {api_key}"}, timeout=45,
+    )
+    if response.status_code != 200:
+        app.logger.warning("OpenAI reader translation failed with HTTP %s", response.status_code)
+        raise RuntimeError("OPENAI_TRANSLATION_FAILED")
+    try:
+        translated = json.loads(_openai_output_text(response.json())).get("translated", [])
+    except (TypeError, ValueError, json.JSONDecodeError):
+        raise RuntimeError("OPENAI_TRANSLATION_INVALID_RESPONSE") from None
+    if not isinstance(translated, list) or len(translated) != len(slots) or not all(
+        _valid_output_text(text, output_language) for text in translated
+    ):
+        raise RuntimeError("OPENAI_TRANSLATION_INVALID_RESPONSE")
+    for (container, key), text in zip(slots, translated):
+        container[key] = str(text).strip()
+    adapted["important_points_kn"] = [
+        item["text"] if isinstance(item, dict) and set(item) == {"text"} else item
+        for item in adapted.get("important_points_kn", [])
+    ]
+    adapted["output_language"] = output_language
+    adapted["summary_kn"] = str(adapted.get("brief_spoken_kn", "")).strip()
+    adapted["language_adapted_from"] = str(source.get("output_language", "kn"))
+    adapted["language_adaptation_model"] = OPENAI_TRANSLATION_MODEL
+    adapted["language_adaptation_latency_ms"] = round((time.monotonic() - started) * 1000)
+    return _normalize_stage_three(adapted)
+
+
 def _storage_bucket() -> Any:
     if not CAPTURE_BUCKET:
         return None
@@ -1708,6 +1808,27 @@ def _process_stored_stage(
             migrated = dict(existing)
             migrated["stage"] = 1
             _store_reader_evidence(capture_id, 1, migrated, output_language)
+        if stage in {2, 3, 4}:
+            alternate_language = "en" if output_language == "kn" else "kn"
+            alternate = _stored_json(
+                bucket, _reader_stage_name(capture_id, stage, alternate_language),
+            )
+            if _current_reader_stage(alternate, stage, alternate_language):
+                try:
+                    value = _translate_reader_output(alternate, output_language)
+                    value["stage"] = stage
+                    owner_id = str(capture.get("tester_id", "")).strip().lower()
+                    value["tester_id"] = (
+                        owner_id if TESTER_ID_PATTERN.fullmatch(owner_id)
+                        else tester_id or "unassigned"
+                    )
+                    _store_reader_evidence(capture_id, stage, value, output_language)
+                    return value
+                except RuntimeError:
+                    app.logger.warning(
+                        "Could not adapt stored stage %s for capture %s; using image reader",
+                        stage, capture_id,
+                    )
         if stage in {2, 3, 4} and not os.environ.get("OPENAI_API_KEY", "").strip():
             raise RuntimeError("OPENAI_READER_NOT_CONFIGURED")
         cooling_down = (

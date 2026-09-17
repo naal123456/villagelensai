@@ -13,7 +13,7 @@ from api.app import (
     _openai_question, _openai_reader, _openai_transcribe, _openai_translate, _parse_tsv,
     _process_stored_capture, _process_stored_stage, _current_reader_stage,
     _reader_stage_name, _repair_underscaled_context_boxes,
-    _saved_scene_identity_answer,
+    _saved_scene_identity_answer, _translate_reader_output,
     _tester_link_token, app,
 )
 
@@ -62,7 +62,7 @@ class ApiTests(unittest.TestCase):
         self.assertIn(b'id="quality-4" aria-label="Request strongest reading"', response.data)
         self.assertIn(b'id="owner-badge"', response.data)
         self.assertIn(b'id="app-version"', response.data)
-        self.assertIn(b'v2026-09-16.8', response.data)
+        self.assertIn(b'v2026-09-17.1', response.data)
         self.assertIn(b"const appVersion=$('app-version').textContent.replace(/^v/,'')", response.data)
         self.assertNotIn(b"const appVersion='2026-09-15.1'", response.data)
         self.assertIn(b"'UNASSIGNED \xc2\xb7 OLDER CAPTURE'", response.data)
@@ -73,6 +73,9 @@ class ApiTests(unittest.TestCase):
         self.assertIn(b'localStorage.setItem', response.data)
         self.assertIn(b'X-VillageLens-Tester-ID', response.data)
         self.assertIn(b'function speechSegments', response.data)
+        self.assertIn(b"return 'ur-IN'", response.data)
+        self.assertIn(b'cameraReadyUntil=Date.now()+1800', response.data)
+        self.assertIn(b'completed_stages:enabledStages.filter', response.data)
         self.assertIn(b'function sourceLanguageInfo', response.data)
         self.assertIn(b'function alignOverlayToImage', response.data)
         self.assertIn(b"window.addEventListener('resize',alignOverlayToImage)", response.data)
@@ -139,7 +142,7 @@ class ApiTests(unittest.TestCase):
         self.assertIn(b'id="camera-capture"', response.data)
         self.assertIn(b'function analyzeCameraFrame', response.data)
         self.assertIn(b'function cameraQualityState', response.data)
-        self.assertIn(b"clearlySharp?24:16", response.data)
+        self.assertIn(b"clearlySharp?32:16", response.data)
         self.assertNotIn(b'page_clipped', response.data)
         self.assertNotIn(b'page_too_small', response.data)
         self.assertIn(b'function cameraGuideSourceRect', response.data)
@@ -295,10 +298,10 @@ class ApiTests(unittest.TestCase):
             "stage_4": "gpt-5.6-sol",
         })
         self.assertEqual(response.get_json()["stage_4"], "manual")
-        self.assertEqual(response.get_json()["app_version"], "2026-09-16.8")
+        self.assertEqual(response.get_json()["app_version"], "2026-09-17.1")
         page = self.client.get("/a/?tester=a3")
         self.addCleanup(page.close)
-        self.assertIn(b'v2026-09-16.8', page.data)
+        self.assertIn(b'v2026-09-17.1', page.data)
 
     def test_old_sol_and_astra_evidence_is_not_current(self) -> None:
         self.assertTrue(_current_reader_stage({
@@ -406,7 +409,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(value["start_url"], "/a/")
         self.assertEqual(value["display"], "standalone")
         self.assertEqual(value["share_target"]["action"], "/a/share-target")
-        self.assertIn(b"const APP_VERSION = '2026-09-16.8'", worker.data)
+        self.assertIn(b"const APP_VERSION = '2026-09-17.1'", worker.data)
         self.assertEqual(value["share_target"]["params"]["files"][0]["name"], "image")
         self.assertEqual(worker.status_code, 200)
         self.assertEqual(manifest.headers["Cache-Control"], "no-cache, max-age=0")
@@ -483,7 +486,7 @@ class ApiTests(unittest.TestCase):
     ) -> None:
         examples = {
             "ta-IN": "தமிழ்", "te-IN": "తెలుగు", "ml-IN": "മലയാളം",
-            "hi-IN": "हिन्दी", "en-IN": "English",
+            "hi-IN": "हिन्दी", "ur-IN": "اردو", "en-IN": "English",
         }
         for language, text in examples.items():
             with self.subTest(language=language):
@@ -538,6 +541,48 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(request_payload["model"], "gpt-5-mini")
         self.assertFalse(request_payload["store"])
         self.assertEqual(request_payload["reasoning"]["effort"], "minimal")
+        self.assertNotIn("input_image", str(request_payload))
+
+    @patch("api.app.requests.post")
+    def test_reader_language_adaptation_preserves_visual_analysis(self, provider: object) -> None:
+        provider.return_value.status_code = 200
+        provider.return_value.json.return_value = {"output": [{"content": [{
+            "type": "output_text", "text": json.dumps({"translated": ["ಕನ್ನಡ"] * 12}),
+        }]}]}
+        source = {
+            "stage": 3, "reader": "vision_language", "model": "gpt-5.6-terra",
+            "analysis_version": "terra-ocr-grounded-v4", "output_language": "en",
+            "image_size": {"width": 1000, "height": 800},
+            "scene_type": "package", "what_is_it_kn": "A package.",
+            "what_it_does_kn": "It contains a product.", "action_needed_kn": "",
+            "warning_kn": "", "uncertainty_kn": "The lower edge is cropped.",
+            "brief_spoken_kn": "This is a package.",
+            "detailed_spoken_kn": "This package has a printed label.",
+            "important_points_kn": ["The label is visible."],
+            "translations": [{"source": "ROJA", "translation_kn": "Roja"}],
+            "objects": [{"name": "label", "name_kn": "Label", "purpose_kn": "Names the item",
+                         "evidence": "printed text", "uncertain": False,
+                         "box": {"x": 100, "y": 100, "width": 300, "height": 200}}],
+            "transcription_kn": [{"text_kn": "Roja", "uncertain": False, "line_ids": [],
+                                  "box": {"x": 100, "y": 100, "width": 150, "height": 50}}],
+            "spoken_sections": [{"text_kn": "The label says Roja.",
+                                  "box": {"x": 100, "y": 100, "width": 300, "height": 200}}],
+            "primary_text": {"detected": True,
+                             "box": {"x": 100, "y": 100, "width": 300, "height": 200}},
+            "calendar": {"detected": False, "month": 0, "year": 0},
+            "confidence": "high", "needs_independent_review": False,
+        }
+
+        with patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"}):
+            value = _translate_reader_output(source, "kn")
+
+        self.assertEqual(value["output_language"], "kn")
+        self.assertEqual(value["language_adapted_from"], "en")
+        self.assertEqual(value["objects"][0]["box"], source["objects"][0]["box"])
+        self.assertEqual(value["primary_text"]["box"], source["primary_text"]["box"])
+        self.assertTrue(value["quality_validated"])
+        request_payload = provider.call_args.kwargs["json"]
+        self.assertEqual(request_payload["model"], "gpt-5-mini")
         self.assertNotIn("input_image", str(request_payload))
 
     @patch("api.app._openai_translate", return_value={
@@ -1527,6 +1572,43 @@ class ApiTests(unittest.TestCase):
 
         with self.assertRaises(FileNotFoundError):
             _process_stored_capture(capture_id, "a4")
+
+    @patch("api.app._store_reader_evidence")
+    @patch("api.app._translate_reader_output")
+    @patch("api.app._openai_reader")
+    @patch("api.app._storage_bucket")
+    def test_stored_stage_translates_other_language_without_reanalyzing_image(
+        self, storage_bucket: object, openai: object, translate: object, store: object,
+    ) -> None:
+        capture_id = "b" * 32
+        english = {
+            "stage": 3, "reader": "vision_language", "model": "gpt-5.6-terra",
+            "analysis_version": "terra-ocr-grounded-v4", "output_language": "en",
+            "summary_kn": "This is a package.",
+        }
+        translated = {**english, "output_language": "kn", "summary_kn": "ಇದು ಪ್ಯಾಕೆಟ್."}
+        values = {
+            f"captures/{capture_id}/result.json": {
+                "capture_id": capture_id, "tester_id": "a3",
+            },
+            f"captures/{capture_id}/stage-3-en.json": english,
+        }
+
+        def blob_for(name: str) -> MagicMock:
+            blob = MagicMock(name=name)
+            blob.exists.return_value = name in values
+            blob.download_as_text.return_value = json.dumps(values.get(name))
+            return blob
+
+        storage_bucket.return_value.blob.side_effect = blob_for
+        translate.return_value = translated
+
+        value = _process_stored_stage(capture_id, "a3", 3, "kn")
+
+        self.assertEqual(value["summary_kn"], "ಇದು ಪ್ಯಾಕೆಟ್.")
+        translate.assert_called_once_with(english, "kn")
+        store.assert_called_once_with(capture_id, 3, translated, "kn")
+        openai.assert_not_called()
 
     @patch("api.app._process_stored_stage")
     def test_stored_processing_leaves_stage_four_on_demand(self, process: object) -> None:
