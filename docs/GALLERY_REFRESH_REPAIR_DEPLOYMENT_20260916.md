@@ -92,3 +92,44 @@ removed from the first English welcome box.
 - Public English welcome box contains no Kannada subtitle
 - Error-level logs after validation: empty
 - Roll back this follow-up to `vlens-a-00071-rc5` if necessary
+
+## Overlay geometry and Safari language-handoff follow-up
+
+Field testing of A3-37 and A3-38 exposed two independent issues. The SVG
+selection layer filled the whole stage even when a portrait image rendered
+narrower than that stage, so a valid box could appear beside the photograph.
+A3-38 also retained older stage-three coordinates expressed on an apparent
+0–100 basis despite the 0–1000 model contract, producing very small boxes.
+Finally, Safari could lose the session-storage handoff during a language
+navigation, causing an otherwise valid Kannada switch to be treated as a stale
+URL and redirected to English Home.
+
+Version `2026-09-16.8` aligns the SVG layer to the photograph's actual rendered
+rectangle after image load, gallery navigation, and viewport resize. New model
+responses detect a consistent 0–100 coordinate basis, and retained results with
+the same unmistakable scale pattern are repaired in memory without rerunning a
+model or rewriting the stored evidence. A marked `switch=1` request carrying a
+valid capture identifier is now a sufficient language handoff even if Safari
+has discarded session storage; unmarked stale A3 Kannada URLs still redirect
+to English Home.
+
+- Source commit: `8260a4a`
+- Cloud Build: `c8417cea-6a6f-42f9-806e-860951fee57b`
+- Container digest:
+  `sha256:c80c4c73e9b6b341034535ebed636cc6129646dbbb7e6bfacaa40a22083e1daf`
+- Cloud Run revision: `vlens-a-00074-jmt`, 100 percent traffic
+- Controlled runtime retained: maximum one instance, concurrency eight
+- Unit tests: `73/73` passed
+- Python compilation, embedded JavaScript parsing, and `git diff --check`:
+  passed
+- Public `/health`: HTTP 200, version `2026-09-16.8`, zero missing OCR models
+- Public stale A3 Kannada URL: HTTP 302 to the English A3 URL
+- Authenticated marked A3 Kannada switch: HTTP 200 with the selected capture
+- Authenticated A3 gallery: HTTP 200 in 3.83 seconds; A3-38 reports
+  `box_scale_repaired: percent-to-pixels` and full-image box dimensions
+- Deployed page contains image-aligned overlay and marked-switch handling
+- Error-level logs after production validation: empty
+- Validation did not upload a photograph or invoke OCR, speech, or inference
+- Physical A3 Safari confirmation remains pending
+
+Roll back this follow-up to `vlens-a-00073-gv6` if necessary.
