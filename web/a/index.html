@@ -143,7 +143,7 @@
         <span class="bar" id="quality-1"></span><span class="bar" id="quality-2"></span>
         <span class="bar" id="quality-3"></span><button class="bar" id="quality-4" aria-label="Request strongest reading" data-tip="Request strongest reading"></button>
         <span id="quality-timer">—</span>
-        <span id="app-version" aria-label="App version">v2026-09-16.6</span>
+        <span id="app-version" aria-label="App version">v2026-09-16.7</span>
       </div>
       <p id="mic-status" role="status" aria-live="assertive" hidden></p>
     </section>
@@ -281,7 +281,7 @@
       $('camera-zoom').setAttribute('aria-label','Camera zoom');
       document.querySelector('.note').textContent='AI-assisted reading may make mistakes. Swipe the image to see saved tests.';
       $('app-version').textContent=`EN · v${appVersion}`;
-      $('welcome-touch').innerHTML='Touch here — hear how to use VillageLens<small>ಈ ಚೌಕವನ್ನು ಸ್ಪರ್ಶಿಸಿ</small>';
+      $('welcome-touch').textContent='Touch here — hear how to use VillageLens';
       $('welcome-camera-label').textContent='Start here';
       const labels={word:['A','One word'],sentence:['A B C','One line'],language:['EN / ಕ','Change language'],
         meaning:['◎ / 💡','Selected area or whole meaning'],question:['🎤','Ask a question'],install:['📲','Keep on phone']};
@@ -345,10 +345,11 @@
     function interactionBusy() {
       return Boolean(cameraStream||cameraCapturing||activeRecorder||recordingTimer||micTimerId||timerOwner);
     }
-    function canonicalUrl(language=outputLanguage) {
+    function canonicalUrl(language=outputLanguage,languageSwitch=false) {
       const parameters=new URLSearchParams();
       if (testerId) parameters.set('tester',testerId);
       parameters.set('lang',language);
+      if (languageSwitch) parameters.set('switch','1');
       const item=gallery[galleryIndex];
       const existingView=(new URLSearchParams(location.search).get('view')||'').trim();
       if ($('welcome').hidden&&item&&item.id) parameters.set('view',item.id);
@@ -1926,7 +1927,7 @@
       const next=englishMode?'kn':'en';
       try { localStorage.setItem('villagelens.output_language.v1',next); } catch (_) {}
       saveLanguageSwitchView(next);
-      location.assign(canonicalUrl(next));
+      location.assign(canonicalUrl(next,true));
     };
     $('camera').onclick=openGuidedCamera;
     $('quality-4').onclick=requestStrongestReading;

@@ -62,7 +62,7 @@ class ApiTests(unittest.TestCase):
         self.assertIn(b'id="quality-4" aria-label="Request strongest reading"', response.data)
         self.assertIn(b'id="owner-badge"', response.data)
         self.assertIn(b'id="app-version"', response.data)
-        self.assertIn(b'v2026-09-16.6', response.data)
+        self.assertIn(b'v2026-09-16.7', response.data)
         self.assertIn(b"const appVersion=$('app-version').textContent.replace(/^v/,'')", response.data)
         self.assertNotIn(b"const appVersion='2026-09-15.1'", response.data)
         self.assertIn(b"'UNASSIGNED \xc2\xb7 OLDER CAPTURE'", response.data)
@@ -292,10 +292,10 @@ class ApiTests(unittest.TestCase):
             "stage_4": "gpt-5.6-sol",
         })
         self.assertEqual(response.get_json()["stage_4"], "manual")
-        self.assertEqual(response.get_json()["app_version"], "2026-09-16.6")
+        self.assertEqual(response.get_json()["app_version"], "2026-09-16.7")
         page = self.client.get("/a/?tester=a3")
         self.addCleanup(page.close)
-        self.assertIn(b'v2026-09-16.6', page.data)
+        self.assertIn(b'v2026-09-16.7', page.data)
 
     def test_old_sol_and_astra_evidence_is_not_current(self) -> None:
         self.assertTrue(_current_reader_stage({
@@ -331,6 +331,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertNotIn(b'id="language-toggle"', response.data)
         self.assertIn(b"$('mode-translate').onclick=()=>", response.data)
+        self.assertIn(b"location.assign(canonicalUrl(next,true))", response.data)
         self.assertIn(b"initialTester==='a3'", response.data)
         self.assertIn(b"testerId==='a3'&&languageParameter==='kn'&&!pendingView", response.data)
         self.assertIn(b"location.replace('/a/?tester=a3'); return", response.data)
@@ -346,7 +347,18 @@ class ApiTests(unittest.TestCase):
         self.assertIn(b'id="welcome-touch"', response.data)
         self.assertIn(b'function speakWelcome', response.data)
         self.assertIn(b"$('welcome-touch').onclick=speakWelcome", response.data)
+        self.assertNotIn('ಈ ಚೌಕವನ್ನು ಸ್ಪರ್ಶಿಸಿ'.encode(), response.data)
         self.assertNotIn(b'await showGallery(0)', response.data)
+
+    def test_a3_stale_kannada_url_redirects_to_english_home(self) -> None:
+        stale = self.client.get("/a/?tester=a3&lang=kn")
+        active_switch = self.client.get("/a/?tester=a3&lang=kn&switch=1")
+        self.addCleanup(stale.close)
+        self.addCleanup(active_switch.close)
+
+        self.assertEqual(stale.status_code, 302)
+        self.assertEqual(stale.headers["Location"], "/a/?tester=a3&lang=en")
+        self.assertEqual(active_switch.status_code, 200)
 
     def test_protected_english_reader_routes_reviewer_to_access(self) -> None:
         self.enable_access_gate()
@@ -389,7 +401,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(value["start_url"], "/a/")
         self.assertEqual(value["display"], "standalone")
         self.assertEqual(value["share_target"]["action"], "/a/share-target")
-        self.assertIn(b"const APP_VERSION = '2026-09-16.6'", worker.data)
+        self.assertIn(b"const APP_VERSION = '2026-09-16.7'", worker.data)
         self.assertEqual(value["share_target"]["params"]["files"][0]["name"], "image")
         self.assertEqual(worker.status_code, 200)
         self.assertEqual(manifest.headers["Cache-Control"], "no-cache, max-age=0")

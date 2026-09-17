@@ -56,7 +56,7 @@ OPENAI_TRANSLATION_MODEL = os.environ.get("VILLAGELENS_TRANSLATION_MODEL", "gpt-
 OPENAI_STAGE_TWO_ANALYSIS_VERSION = "luna-compact-v1"
 OPENAI_STAGE_THREE_ANALYSIS_VERSION = "terra-ocr-grounded-v4"
 OPENAI_STAGE_FOUR_ANALYSIS_VERSION = "sol-ocr-review-v4"
-APP_VERSION = "2026-09-16.6"
+APP_VERSION = "2026-09-16.7"
 SPEECH_VOICES = {
     "kn-IN": os.environ.get("VILLAGELENS_KANNADA_TTS_VOICE", "kn-IN-Wavenet-A"),
     "ta-IN": os.environ.get("VILLAGELENS_TAMIL_TTS_VOICE", "ta-IN-Wavenet-A"),
@@ -427,6 +427,12 @@ def tester_page() -> Response:
             shared = "&shared=1" if request.args.get("shared") == "1" else ""
             return redirect(f"/a/?tester={installed_tester}{shared}", code=302)
         return redirect("/access", code=302)
+    if (
+        tester_id == "a3"
+        and request.args.get("lang", "").strip().lower() == "kn"
+        and request.args.get("switch") != "1"
+    ):
+        return redirect("/a/?tester=a3&lang=en", code=302)
     return send_from_directory(WEB_ROOT / "a", "index.html")
 
 
