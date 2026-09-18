@@ -15,11 +15,12 @@
     main { width: min(100%, 780px); margin: auto; padding: 8px 10px 18px; text-align: center; }
     .controls { position: sticky; top: 0; z-index: 4; padding: 5px 0 4px; background: rgba(16,20,24,.96); }
     .toolbar { display: grid; gap: 5px; margin-bottom: 5px; }
-    .touch-toolbar { grid-template-columns: repeat(4, 1fr); }
+    .touch-toolbar { grid-template-columns: repeat(5, 1fr); }
     .action-toolbar { grid-template-columns: repeat(6, 1fr); }
     button { min-height: 43px; border: 2px solid #52606d; border-radius: 10px; background: #26323b;
       color: white; font-size: 1.3rem; touch-action: manipulation; }
     #camera { background: #9a4f05; border-color: #ffb052; font-size: 1.7rem; }
+    #photos { background: #244c69; border-color: #7bcaff; font-size: 1.55rem; }
     button.active { border-color: #fff36a; background: #5b4c08; box-shadow: 0 0 0 3px #fff36a, 0 0 15px #fff36a; }
     button.working { border-color: #62d7ff; background: #174b5f; animation: working 1s infinite alternate; }
     @keyframes working { to { box-shadow: 0 0 15px #62d7ff; } }
@@ -57,8 +58,12 @@
     .welcome-camera-prompt { margin: 10px auto 13px; }
     #welcome-camera-label { margin: 0 0 3px; color: #fff36a; font-size: 1rem; font-weight: 850; }
     #welcome-camera-label::after { content: '  ↓'; font-size: 1.5rem; }
-    #welcome-camera { width: calc((100% - 15px)/4); min-width: 68px; min-height: 43px; padding: 0;
-      border: 2px solid #ffb052; border-radius: 10px; background: #9a4f05; font-size: 1.7rem; }
+    .welcome-source-actions { display: flex; justify-content: center; gap: 9px; }
+    #welcome-camera, #welcome-photos { width: calc((100% - 15px)/4); min-width: 68px; min-height: 52px; padding: 2px 5px;
+      border-radius: 10px; font-size: 1.55rem; }
+    #welcome-camera { border: 2px solid #ffb052; background: #9a4f05; }
+    #welcome-photos { border: 2px solid #7bcaff; background: #244c69; }
+    .welcome-source-actions small { display: block; font-size: .65rem; font-weight: 750; }
     #welcome-help { display: grid; grid-template-columns: repeat(2,1fr); gap: 7px; margin-top: 12px; }
     #welcome-help button { min-height: 60px; padding: 7px; font-size: .92rem; line-height: 1.2; }
     #welcome-help strong { display: block; font-size: 1.25rem; }
@@ -129,6 +134,7 @@
         <button id="mode-word" class="active" aria-label="Touch a word" data-tip="Touch a word">ಅ</button>
         <button id="mode-sentence" aria-label="Touch a sentence" data-tip="Touch a sentence"><small>ಅ ಆ ಇ</small></button>
         <button id="mode-translate" aria-label="Language: Kannada. Touch for English" data-tip="Language: Kannada"><small>ಕ</small></button>
+        <button id="photos" aria-label="Choose a photo" data-tip="Choose a photo">🖼️</button>
         <button id="camera" aria-label="Take a picture" data-tip="Take a picture">📷</button>
       </nav>
       <nav class="toolbar action-toolbar" aria-label="Reading actions">
@@ -143,7 +149,7 @@
         <span class="bar" id="quality-1"></span><span class="bar" id="quality-2"></span>
         <span class="bar" id="quality-3"></span><button class="bar" id="quality-4" aria-label="Request strongest reading" data-tip="Request strongest reading"></button>
         <span id="quality-timer">—</span>
-        <span id="app-version" aria-label="App version">v2026-09-17.1</span>
+        <span id="app-version" aria-label="App version">v2026-09-17.2</span>
       </div>
       <p id="mic-status" role="status" aria-live="assertive" hidden></p>
     </section>
@@ -154,6 +160,7 @@
     </div>
     <div id="owner-badge" aria-live="polite" hidden></div>
     <input id="camera-input" type="file" accept="image/jpeg,image/png,image/webp" capture="environment" hidden>
+    <input id="photo-input" type="file" accept="image/jpeg,image/png,image/webp" hidden>
     <p id="status" aria-live="polite">ಕ್ಯಾಮೆರಾ ಒತ್ತಿ ಅಥವಾ ಕೆಳಗಿನ ಹಳದಿ ಚೌಕವನ್ನು ಸ್ಪರ್ಶಿಸಿ.</p>
     <section id="welcome">
       <p class="welcome-arrow" aria-hidden="true">↓</p>
@@ -163,7 +170,10 @@
       </button>
       <div class="welcome-camera-prompt">
         <p id="welcome-camera-label">ಇಲ್ಲಿಂದ ಪ್ರಾರಂಭಿಸಿ</p>
-        <button id="welcome-camera" aria-label="Start with the camera">📷</button>
+        <div class="welcome-source-actions">
+          <button id="welcome-camera" aria-label="Start with the camera">📷<small>ಕ್ಯಾಮೆರಾ</small></button>
+          <button id="welcome-photos" aria-label="Choose from photos">🖼️<small>ಚಿತ್ರಗಳು</small></button>
+        </div>
       </div>
       <div id="welcome-help" aria-label="Button guide">
         <button data-help="word"><strong>ಅ</strong><span>ಒಂದು ಪದ</span></button>
@@ -223,7 +233,7 @@
     const englishMode=languageParameter==='en'||(!languageParameter&&
       (location.pathname==='/b/'||location.pathname.startsWith('/b/')||initialTester==='a3'||savedLanguage==='en'));
     const outputLanguage=englishMode?'en':'kn';
-    const input=$('camera-input'), image=$('source-image'), overlay=$('overlay'), stage=$('stage');
+    const input=$('camera-input'), photoInput=$('photo-input'), image=$('source-image'), overlay=$('overlay'), stage=$('stage');
     const status=$('status'), current=$('current'), position=$('position'), timer=$('quality-timer');
     const ownerBadge=$('owner-badge'), micStatus=$('mic-status'), askButton=$('ask');
     const conversation=$('conversation'), conversationTurns=$('conversation-turns');
@@ -247,7 +257,7 @@
     let nextCaptureSequence=1;
     const speechAudioCache=new Map();
     const translationCache=new Map();
-    const controlIds=['mode-word','mode-sentence','mode-translate','camera','play-words','play-sentences',
+    const controlIds=['mode-word','mode-sentence','mode-translate','photos','camera','play-words','play-sentences',
       'select-object','infer-global','ask','install'];
     const meaningFields=['summary_kn','brief_spoken_kn','detailed_spoken_kn','scene_type','objects',
       'what_is_it_kn','what_it_does_kn','important_points_kn','action_needed_kn','warning_kn','uncertainty_kn',
@@ -283,6 +293,8 @@
       $('app-version').textContent=`EN · v${appVersion}`;
       $('welcome-touch').textContent='Touch here — hear how to use VillageLens';
       $('welcome-camera-label').textContent='Start here';
+      $('welcome-camera').querySelector('small').textContent='Camera';
+      $('welcome-photos').querySelector('small').textContent='Photos';
       const labels={word:['A','One word'],sentence:['A B C','One line'],language:['EN / ಕ','Change language'],
         meaning:['◎ / 💡','Selected area or whole meaning'],question:['🎤','Ask a question'],install:['📲','Keep on phone']};
       document.querySelectorAll('#welcome-help [data-help]').forEach(button=>{
@@ -295,7 +307,7 @@
         'mode-word':'Touch one word','mode-sentence':'Touch one sentence','play-words':'Read every word',
         'play-sentences':'Read every sentence','select-object':'Select an area to read and explain',
         'infer-global':'Explain the whole image','ask':'Ask a spoken question','install':'Keep VillageLens on this phone',
-        'camera':'Take a picture','previous':'Previous saved image','next':'Next saved image','stop':'Stop reading',
+        'photos':'Choose a photo from this phone','camera':'Take a picture','previous':'Previous saved image','next':'Next saved image','stop':'Stop reading',
       };
       Object.entries(aria).forEach(([id,label])=>$(id).setAttribute('aria-label',label));
       const corners={nw:'Resize top left',ne:'Resize top right',sw:'Resize bottom left',se:'Resize bottom right'};
@@ -307,7 +319,7 @@
         'mode-translate':'ಭಾಷೆ ಕನ್ನಡ. ಇಂಗ್ಲಿಷ್‌ಗೆ ಬದಲಿಸಲು ಸ್ಪರ್ಶಿಸಿ','play-words':'ಎಲ್ಲ ಪದಗಳನ್ನು ಓದಿ',
         'play-sentences':'ಎಲ್ಲ ವಾಕ್ಯಗಳನ್ನು ಓದಿ','select-object':'ಒಂದು ಭಾಗವನ್ನು ಆಯ್ಕೆ ಮಾಡಿ ಓದಿ ಅರ್ಥ ಹೇಳಿ',
         'infer-global':'ಸಂಪೂರ್ಣ ಚಿತ್ರದ ಅರ್ಥ ಹೇಳಿ','ask':'ಮಾತಿನಲ್ಲಿ ಪ್ರಶ್ನೆ ಕೇಳಿ','install':'ವಿಲೇಜ್‌ಲೆನ್ಸ್ ಅನ್ನು ಫೋನ್‌ನಲ್ಲಿ ಉಳಿಸಿ',
-        'camera':'ಚಿತ್ರ ತೆಗೆಯಿರಿ','previous':'ಹಿಂದಿನ ಉಳಿಸಿದ ಚಿತ್ರ','next':'ಮುಂದಿನ ಉಳಿಸಿದ ಚಿತ್ರ','stop':'ಓದುವುದನ್ನು ನಿಲ್ಲಿಸಿ',
+        'photos':'ಫೋನ್‌ನಿಂದ ಚಿತ್ರ ಆಯ್ಕೆ ಮಾಡಿ','camera':'ಚಿತ್ರ ತೆಗೆಯಿರಿ','previous':'ಹಿಂದಿನ ಉಳಿಸಿದ ಚಿತ್ರ','next':'ಮುಂದಿನ ಉಳಿಸಿದ ಚಿತ್ರ','stop':'ಓದುವುದನ್ನು ನಿಲ್ಲಿಸಿ',
       };
       Object.entries(aria).forEach(([id,label])=>$(id).setAttribute('aria-label',label));
       $('mode-translate').dataset.tip='ಭಾಷೆ: ಕನ್ನಡ';
@@ -428,8 +440,8 @@
     }
     async function speakWelcome() {
       const message=englishMode?
-        'Point the camera at words or an object. Tap the area you want, hold the phone steady, then press the camera button.':
-        'ಪದಗಳು ಅಥವಾ ವಸ್ತುವಿನ ಕಡೆ ಕ್ಯಾಮೆರಾ ತೋರಿಸಿ. ಬೇಕಾದ ಭಾಗವನ್ನು ಸ್ಪರ್ಶಿಸಿ. ಫೋನ್ ಸ್ಥಿರವಾಗಿ ಹಿಡಿದು ಕ್ಯಾಮೆರಾ ಬಟನ್ ಒತ್ತಿ.';
+        'Take a new picture with the camera, or choose an existing screenshot or picture from Photos.':
+        'ಕ್ಯಾಮೆರಾದಿಂದ ಹೊಸ ಚಿತ್ರ ತೆಗೆಯಿರಿ, ಅಥವಾ ಫೋನ್‌ನ ಚಿತ್ರಗಳಿಂದ ಈಗಾಗಲೇ ಇರುವ ಚಿತ್ರವನ್ನು ಆಯ್ಕೆ ಮಾಡಿ.';
       status.textContent=englishMode?'Playing the instructions…':'ಬಳಸುವ ವಿಧಾನವನ್ನು ಹೇಳುತ್ತಿದೆ…';
       await speakRaw(message);
     }
@@ -1647,6 +1659,11 @@
         input.click();
       }
     }
+    function openPhotoLibrary() {
+      stop(); photoInput.value='';
+      status.textContent=englishMode?'Choose a screenshot or picture from Photos.':'ಫೋನ್‌ನ ಚಿತ್ರಗಳಿಂದ ಒಂದು ಚಿತ್ರವನ್ನು ಆಯ್ಕೆ ಮಾಡಿ.';
+      track('photo_picker_open'); photoInput.click();
+    }
     async function requestCameraFocus(mode,x=.5,y=.5) {
       const trackVideo=cameraStream&&cameraStream.getVideoTracks()[0];
       if (!trackVideo||!trackVideo.applyConstraints) return false;
@@ -1790,18 +1807,21 @@
       status.textContent=strongestStatus(readCachedStage(item,4));
     }
     async function useCapture(file,captureMeta={}) {
-      if (!file) return; stop(); defaultWordMode(); const navigation=++navigationGeneration; resetQuality(); status.textContent='ಚಿತ್ರವನ್ನು ಓದುತ್ತಿದೆ…';
+      if (!file) return; stop(); defaultWordMode(); const navigation=++navigationGeneration; resetQuality();
+      const imported=captureMeta.source==='photo-library-v1';
+      const captureLabel=imported?(englishMode?'Imported photo':'ಆಯ್ಕೆ ಮಾಡಿದ ಚಿತ್ರ'):(englishMode?'Captured photo':'ತೆಗೆದ ಚಿತ್ರ');
+      status.textContent=englishMode?(imported?'Reading the selected photo…':'Reading the new photo…'):'ಚಿತ್ರವನ್ನು ಓದುತ್ತಿದೆ…';
       $('welcome').hidden=true;
       const captureId=newCaptureId();
       const objectUrl=URL.createObjectURL(file); image.src=objectUrl; stage.style.display='inline-block';
       const captureSequence=nextCaptureSequence++;
       const captureCode=`${(testerId||'UN').toUpperCase()}-${captureSequence}`;
-      const item={id:captureId,label:'Captured photo',capture_code:captureCode,kind:'capture',image_url:objectUrl,result:null,
+      const item={id:captureId,label:captureLabel,capture_code:captureCode,kind:'capture',image_url:objectUrl,result:null,
         tester_id:testerId,tester_name:testerId==='a3'?'Reviewer':'',startedAt:Date.now()};
       renderConversation(item);
       beginTimer(item,item.startedAt);
       gallery.splice(Math.min(2,gallery.length),0,item); galleryIndex=gallery.indexOf(item);
-      position.textContent=`${captureCode} · Captured photo  ${galleryIndex+1}/${gallery.length}`;
+      position.textContent=`${captureCode} · ${captureLabel}  ${galleryIndex+1}/${gallery.length}`;
       ownerBadge.hidden=false; ownerBadge.textContent=testerId?testerId.toUpperCase():'UNASSIGNED';
       try {
         const captureHeaders={'Content-Type':file.type||'image/jpeg','X-VillageLens-Capture-ID':captureId};
@@ -1825,9 +1845,10 @@
         if (gallery[galleryIndex]===item) position.textContent=`${item.capture_code}  ${galleryIndex+1}/${gallery.length}`;
         track('capture',false,Date.now()-item.startedAt);
         endTimer(item); $('quality-1').classList.add('failed');
-        if (navigation===navigationGeneration) status.textContent='ಈ ಚಿತ್ರವನ್ನು ಓದಲು ಆಗಲಿಲ್ಲ. ಮತ್ತೊಮ್ಮೆ ಪ್ರಯತ್ನಿಸಿ.';
+        if (navigation===navigationGeneration) status.textContent=englishMode?
+          'This photo could not be read. Please try again.':'ಈ ಚಿತ್ರವನ್ನು ಓದಲು ಆಗಲಿಲ್ಲ. ಮತ್ತೊಮ್ಮೆ ಪ್ರಯತ್ನಿಸಿ.';
       }
-      finally { input.value=''; if (image.src!==objectUrl) URL.revokeObjectURL(objectUrl); }
+      finally { input.value=''; photoInput.value=''; if (image.src!==objectUrl) URL.revokeObjectURL(objectUrl); }
     }
     async function askImageQuestion() {
       if (activeRecorder&&activeRecorder.state!=='inactive') {
@@ -1947,6 +1968,7 @@
       saveLanguageSwitchView(next);
       location.assign(canonicalUrl(next,true));
     };
+    $('photos').onclick=openPhotoLibrary;
     $('camera').onclick=openGuidedCamera;
     $('quality-4').onclick=requestStrongestReading;
     $('play-words').onclick=()=>result&&play(readingWords(),'play-words','word');
@@ -1956,6 +1978,7 @@
     $('next').onclick=()=>showGallery($('welcome').hidden?galleryIndex+1:0);
     $('welcome-touch').onclick=speakWelcome;
     $('welcome-camera').onclick=openGuidedCamera;
+    $('welcome-photos').onclick=openPhotoLibrary;
     document.querySelectorAll('#welcome-help [data-help]').forEach(button=>button.onclick=()=>speakControlHelp(button.dataset.help));
     $('camera-cancel').onclick=()=>{ closeGuidedCamera(); clearControls(); track('camera_cancel'); };
     $('camera-capture').onclick=captureGuidedPhoto;
@@ -1975,6 +1998,10 @@
     cameraView.addEventListener('pointerup',cameraPointerUp);
     cameraView.addEventListener('pointercancel',cameraPointerUp);
     input.onchange=()=>useCapture(input.files&&input.files[0]);
+    photoInput.onchange=()=>{
+      const file=photoInput.files&&photoInput.files[0];
+      if (file) { track('photo_picker_selected'); useCapture(file,{source:'photo-library-v1'}); }
+    };
     document.addEventListener('pointerdown',unlockAudioPlayback,{passive:true});
     document.addEventListener('visibilitychange',async()=>{
       if (document.hidden) { stop(); return; }
