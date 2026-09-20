@@ -1,7 +1,8 @@
 # iPhone photo import deployment — 2026-09-18
 
-Status: deployed and publicly infrastructure-validated; physical iPhone Photos
-selection and end-to-end screenshot reading pending owner confirmation.
+Status: deployed, publicly infrastructure-validated, and confirmed by the owner
+on a physical iPhone. The owner reported that the Photos path now makes Kannada
+and other-language material readable in English.
 
 ## Goal
 
@@ -52,6 +53,11 @@ deliberately outside this increment.
 6. Touch a Kannada word and sentence; confirm the source is spoken and its
    English meaning follows. Use the lightbulb for the message meaning.
 7. Repeat with a saved Kannada document photograph.
+
+Owner confirmation was received after deployment: the feature was described as
+“excellent,” and the English-output workflow successfully enabled reading
+Kannada and other-language images. Treat this as qualitative acceptance of the
+Photos path; continue recording image-specific accuracy issues separately.
 
 ## Rollback
 
