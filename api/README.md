@@ -6,6 +6,7 @@ The initial Cloud Run API exposes:
 - `GET /health` for pinned-model readiness (`/healthz` remains a local alias,
   but Cloud Run reserves paths ending in `z`);
 - `GET /a/` for the tester camera client;
+- `GET /c/` for the isolated Pi-camera client experiment;
 - `GET /api/gallery` for I2, I1, and retained test captures;
 - `GET /api/captures/<id>/image` for authenticated private capture retrieval;
 - `POST /api/capture` for bounded JPEG, PNG, or WebP input and stage-one
@@ -16,6 +17,13 @@ The initial Cloud Run API exposes:
   page explanation;
 - `POST /api/captures/<id>/process/4` for a manually requested Sol review of
   the retained image and its Terra result.
+
+The undeployed `/c` experiment adds versioned `/api/pi/v1/` routes for an
+expiring browser session, one-time device pairing, bounded WebSocket control
+and preview, and a hash-bound still upload. A Pi still is passed to the same
+capture helper used by `/api/capture`; no reader or gallery pipeline is copied.
+See `docs/PI_CAMERA_C_SERVER_CHECKPOINT_20260923.md` for the contract, safety
+limits, current validation, and rollback.
 
 When `VILLAGELENS_CAPTURE_BUCKET` is set, source images and structured results
 are stored privately under `captures/<id>/`; without it, capture still succeeds

@@ -23,7 +23,11 @@ from typing import Any
 import requests
 
 from flask import Flask, Response, jsonify, make_response, redirect, request, send_from_directory
+from flask_sock import Sock
 from PIL import Image, ImageOps, UnidentifiedImageError
+from simple_websocket.errors import ConnectionClosed
+
+from .pi_bridge import PiBridgeError, PiSessionHub
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
@@ -178,10 +182,12 @@ VERIFIED_CAPTURE_REGIONS = {
 Image.MAX_IMAGE_PIXELS = MAX_IMAGE_PIXELS
 
 app = Flask(__name__)
+sock = Sock(app)
 app.config["MAX_CONTENT_LENGTH"] = MAX_CAPTURE_BYTES
 app.config["VILLAGELENS_ACCESS_CODE"] = os.environ.get("VILLAGELENS_ACCESS_CODE", "").strip()
 app.config["VILLAGELENS_SESSION_SECRET"] = os.environ.get("VILLAGELENS_SESSION_SECRET", "")
 _capture_processing_locks: defaultdict[tuple[str, int], threading.Lock] = defaultdict(threading.Lock)
+_pi_hub = PiSessionHub()
 
 
 def _access_code() -> str:
@@ -256,7 +262,10 @@ def _has_access() -> bool:
 
 @app.before_request
 def _require_access() -> Response | tuple[Response, int] | None:
-    if request.path in {"/access", "/access/link", "/health", "/healthz"} or _has_access():
+    if request.path in {
+        "/access", "/access/link", "/health", "/healthz", "/api/pi/v1/device/pair",
+        "/api/pi/v1/device/socket",
+    } or request.path.startswith("/api/pi/v1/device/captures/") or _has_access():
         return None
     if request.path.startswith("/api/"):
         return jsonify(error="ACCESS_REQUIRED"), 401
@@ -264,6 +273,8 @@ def _require_access() -> Response | tuple[Response, int] | None:
     if request.path in {"/b", "/b/"} and not tester_id:
         tester_id = "a3"
     destination = f"/access?tester={tester_id}" if TESTER_ID_PATTERN.fullmatch(tester_id) else "/access"
+    if request.path in {"/c", "/c/"}:
+        destination += "&next=c" if "?" in destination else "?next=c"
     return redirect(destination, code=302)
 
 
@@ -303,7 +314,7 @@ def _response_headers(response: Response) -> Response:
         if origin and origin in _allowed_origins():
             response.headers["Access-Control-Allow-Origin"] = origin
             response.headers["Vary"] = "Origin"
-    if request.path in {"/a", "/a/", "/b", "/b/"}:
+    if request.path in {"/a", "/a/", "/b", "/b/", "/c", "/c/"}:
         response.headers["Cache-Control"] = "no-store, max-age=0"
         response.headers["Pragma"] = "no-cache"
     return response
@@ -312,6 +323,11 @@ def _response_headers(response: Response) -> Response:
 @app.errorhandler(413)
 def _capture_too_large(_: Exception) -> tuple[Response, int]:
     return jsonify(error="CAPTURE_TOO_LARGE"), 413
+
+
+@app.errorhandler(PiBridgeError)
+def _pi_bridge_error(error: PiBridgeError) -> tuple[Response, int]:
+    return jsonify(error=error.code), error.status
 
 
 @app.get("/")
@@ -366,6 +382,7 @@ def access() -> Response:
         return redirect("/a/", code=302)
     message = "ಬಳಕೆದಾರರನ್ನು ಆಯ್ಕೆಮಾಡಿ ಮತ್ತು ಪ್ರವೇಶ ಕೋಡ್ ನಮೂದಿಸಿ"
     tester_id = request.values.get("tester", "").strip().lower()
+    next_lane = "c" if request.values.get("next", "").strip().lower() == "c" else "a"
     if not TESTER_ID_PATTERN.fullmatch(tester_id):
         tester_id = ""
     if request.method == "POST":
@@ -374,7 +391,7 @@ def access() -> Response:
         if tester_id and submitted and hmac.compare_digest(
             submitted.encode("utf-8"), expected.encode("utf-8")
         ):
-            destination = f"/a/?tester={tester_id}"
+            destination = f"/{next_lane}/?tester={tester_id}"
             return _with_access_cookie(make_response(redirect(destination, code=303)), tester_id)
         message = (
             "ಬಳಕೆದಾರರನ್ನು ಆಯ್ಕೆಮಾಡಿ. Choose a user."
@@ -396,6 +413,7 @@ label{{display:block;font-size:1.1rem;margin:1rem 0 .4rem;text-align:left}}input
 border-radius:12px;font-size:1.3rem}}input,select{{padding:0 14px;border:2px solid #64717d;background:#fff;color:#111}}
 button{{margin-top:14px;border:0;background:#168447;color:white;font-weight:700}}</style></head>
 <body><main><h1>VillageLensAI</h1><form method="post" action="/access">
+<input type="hidden" name="next" value="{next_lane}">
 <p>{message}</p>
 <label for="tester">User</label><select id="tester" name="tester" required autofocus>{user_options}</select>
 <label for="code">Code</label>
@@ -449,6 +467,15 @@ def english_tester_page() -> Response:
         tester_id = "a3"
     shared = "&shared=1" if request.args.get("shared") == "1" else ""
     return redirect(f"/a/?tester={tester_id}&lang=en{shared}", code=302)
+
+
+@app.get("/c/")
+def pi_camera_page() -> Response:
+    """Serve the isolated Pi-camera lane without changing /a or /b routing."""
+    tester_id = request.args.get("tester", "").strip().lower()
+    if _access_configured() and not TESTER_ID_PATTERN.fullmatch(tester_id):
+        return redirect("/access", code=302)
+    return send_from_directory(WEB_ROOT / "a", "index.html")
 
 
 @app.get("/a/<path:filename>")
@@ -2426,14 +2453,222 @@ def usage_events() -> tuple[Response, int]:
     return jsonify(accepted=len(accepted)), 202
 
 
-@app.post("/api/capture")
-def capture() -> tuple[Response, int]:
+def _pi_device_token() -> str:
+    return _pi_hub.token_from_authorization(request.headers.get("Authorization", ""))
+
+
+def _pi_capture_provenance(
+    request_id: str, device_profile_id: str, source_sha256: str, source_bytes: int,
+) -> dict[str, Any]:
+    if request.headers.get("X-VillageLens-Capture-Schema", "").strip() != (
+        "villagelens.pi-capture-response.v1"
+    ):
+        raise PiBridgeError("PI_CAPTURE_SCHEMA_INVALID", 400)
+    burst_capture_id = request.headers.get("X-VillageLens-Burst-Capture-ID", "").strip()
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", burst_capture_id):
+        raise PiBridgeError("PI_BURST_CAPTURE_ID_INVALID", 400)
+    captured_at = request.headers.get("X-VillageLens-Captured-At", "").strip()
+    try:
+        parsed_at = datetime.fromisoformat(captured_at.replace("Z", "+00:00"))
+    except ValueError as error:
+        raise PiBridgeError("PI_CAPTURED_AT_INVALID", 400) from error
+    if parsed_at.tzinfo is None:
+        raise PiBridgeError("PI_CAPTURED_AT_INVALID", 400)
+    try:
+        selected_frame = int(request.headers.get("X-VillageLens-Selected-Frame", ""))
+        burst_frames = int(request.headers.get("X-VillageLens-Burst-Frames", ""))
+    except ValueError as error:
+        raise PiBridgeError("PI_BURST_SELECTION_INVALID", 400) from error
+    if burst_frames != 4 or selected_frame not in range(1, burst_frames + 1):
+        raise PiBridgeError("PI_BURST_SELECTION_INVALID", 400)
+    return {
+        "schema": "villagelens.pi-capture-provenance.v1",
+        "request_id": request_id,
+        "device_profile_id": device_profile_id,
+        "burst_capture_id": burst_capture_id,
+        "captured_at": parsed_at.astimezone(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "burst_frames": burst_frames,
+        "selected_frame_index": selected_frame,
+        "source_sha256": source_sha256,
+        "source_bytes": source_bytes,
+    }
+
+
+@app.post("/api/pi/v1/sessions")
+def create_pi_session() -> tuple[Response, int]:
+    payload = request.get_json(silent=True)
+    output_language = (
+        str(payload.get("output_language", "")).strip().lower()
+        if isinstance(payload, dict)
+        else ""
+    )
+    value = _pi_hub.create_session(_tester_id(), output_language)
+    value["browser_socket_path"] = f"/api/pi/v1/browser/socket/{value['session_id']}"
+    return jsonify(value), 201
+
+
+@app.get("/api/pi/v1/sessions/<session_id>")
+def pi_session_status(session_id: str) -> tuple[Response, int]:
+    return jsonify(_pi_hub.describe_session(session_id, _tester_id())), 200
+
+
+@app.delete("/api/pi/v1/sessions/<session_id>")
+def revoke_pi_session(session_id: str) -> tuple[Response, int]:
+    _pi_hub.revoke_session(session_id, _tester_id())
+    return jsonify(revoked=True), 200
+
+
+@app.post("/api/pi/v1/sessions/<session_id>/commands")
+def create_pi_command(session_id: str) -> tuple[Response, int]:
+    payload = request.get_json(silent=True)
+    action = str(payload.get("action", "")).strip() if isinstance(payload, dict) else ""
+    command = _pi_hub.create_command(session_id, _tester_id(), action)
+    return jsonify(queued=True, command_type=command["type"]), 202
+
+
+@app.post("/api/pi/v1/device/pair")
+def pair_pi_device() -> tuple[Response, int]:
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        raise PiBridgeError("PI_PAIRING_REQUEST_INVALID", 400)
+    value = _pi_hub.pair_device(
+        str(payload.get("pairing_code", "")).strip(),
+        str(payload.get("device_profile_id", "")).strip(),
+    )
+    value["device_socket_path"] = "/api/pi/v1/device/socket"
+    return jsonify(value), 200
+
+
+@app.post("/api/pi/v1/device/captures/<request_id>")
+def upload_pi_capture(request_id: str) -> tuple[Response, int]:
+    token = _pi_device_token()
+    authenticated_session = _pi_hub.session_for_token(token)
+    source = request.get_data(cache=False)
+    source_sha256 = hashlib.sha256(source).hexdigest()
+    supplied_sha256 = request.headers.get("X-VillageLens-Source-SHA256", "").strip()
+    if not hmac.compare_digest(source_sha256, supplied_sha256):
+        raise PiBridgeError("PI_SOURCE_HASH_MISMATCH", 400)
+    session = _pi_hub.validate_upload(token, request_id, source_sha256)
+    if session is not authenticated_session:
+        raise PiBridgeError("PI_DEVICE_AUTH_INVALID", 401)
+    supplied_profile = request.headers.get("X-VillageLens-Device-Profile-ID", "").strip()
+    if supplied_profile != session.device_profile_id:
+        raise PiBridgeError("PI_DEVICE_PROFILE_MISMATCH", 409)
+    provenance = _pi_capture_provenance(
+        request_id, supplied_profile, source_sha256, len(source),
+    )
+    existing = _pi_hub.existing_acceptance(token, request_id, source_sha256)
+    if existing is not None:
+        return jsonify(existing), 200
+
     media_type = (request.content_type or "").split(";", 1)[0].lower()
+    result, status = _ingest_capture(
+        source,
+        media_type,
+        tester_id=session.tester_id,
+        requested_id=request_id,
+        capture_source="pi-camera-v1",
+        capture_quality=_capture_quality_header(),
+        capture_provenance=provenance,
+    )
+    if status != 200:
+        return jsonify(result), status
+    if not result.get("retained"):
+        return jsonify(error="PI_CAPTURE_NOT_RETAINED"), 503
+    acceptance = _pi_hub.complete_upload(
+        token, request_id, source_sha256, str(result["capture_id"]),
+    )
+    return jsonify(acceptance), 200
+
+
+def _serve_pi_browser_socket(socket: Any, session_id: str) -> None:
+    tester_id = request.args.get("tester", "").strip().lower()
+    try:
+        _pi_hub.session_for_browser(session_id, tester_id)
+        while True:
+            event = _pi_hub.next_browser_event(session_id, tester_id)
+            if event is not None:
+                socket.send(event if isinstance(event, bytes) else json.dumps(event))
+                continue
+            try:
+                message = socket.receive(timeout=0.5)
+            except TimeoutError:
+                continue
+            if message is None:
+                continue
+    except (ConnectionClosed, PiBridgeError):
+        return
+
+
+@sock.route("/api/pi/v1/device/socket")
+def _pi_device_socket_route(socket: Any) -> None:
+    _serve_pi_device_socket(socket)
+
+
+def _serve_pi_device_socket(socket: Any) -> None:
+    token = ""
+    try:
+        hello = socket.receive(timeout=5)
+        payload = json.loads(hello) if isinstance(hello, str) else None
+        if not isinstance(payload, dict) or payload.get("type") != "authenticate":
+            raise PiBridgeError("PI_DEVICE_AUTH_REQUIRED", 401)
+        token = str(payload.get("device_token", ""))
+        session = _pi_hub.session_for_token(token)
+        _pi_hub.publish_device_connection(token, True)
+        socket.send(json.dumps({
+            "type": "authenticated", "device_profile_id": session.device_profile_id,
+        }))
+        while True:
+            command = _pi_hub.next_command(token)
+            if command is not None:
+                socket.send(json.dumps(command))
+            try:
+                message = socket.receive(timeout=0.2)
+            except TimeoutError:
+                continue
+            if message is None:
+                continue
+            if isinstance(message, bytes):
+                _pi_hub.publish_preview(token, message)
+                continue
+            event = json.loads(message)
+            if not isinstance(event, dict) or event.get("type") != "capture_state":
+                raise PiBridgeError("PI_DEVICE_MESSAGE_INVALID", 400)
+            _pi_hub.publish_state(
+                token,
+                str(event.get("request_id", "")),
+                str(event.get("state", "")),
+            )
+    except (ConnectionClosed, json.JSONDecodeError, PiBridgeError, TimeoutError):
+        return
+    finally:
+        if token:
+            try:
+                _pi_hub.publish_device_connection(token, False)
+            except PiBridgeError:
+                pass
+
+
+@sock.route("/api/pi/v1/browser/socket/<session_id>")
+def _pi_browser_socket_route(socket: Any, session_id: str) -> None:
+    _serve_pi_browser_socket(socket, session_id)
+
+
+def _ingest_capture(
+    data: bytes,
+    media_type: str,
+    *,
+    tester_id: str,
+    requested_id: str = "",
+    capture_source: str = "file-camera",
+    capture_quality: dict[str, Any] | None = None,
+    capture_provenance: dict[str, Any] | None = None,
+) -> tuple[dict[str, Any], int]:
+    """Run one bounded still through the existing retained capture pipeline."""
     if media_type not in ALLOWED_MEDIA_TYPES:
-        return jsonify(error="CAPTURE_MEDIA_TYPE_UNSUPPORTED"), 415
-    data = request.get_data(cache=False)
+        return {"error": "CAPTURE_MEDIA_TYPE_UNSUPPORTED"}, 415
     if not data:
-        return jsonify(error="CAPTURE_EMPTY"), 400
+        return {"error": "CAPTURE_EMPTY"}, 400
     source_sha256 = hashlib.sha256(data).hexdigest()
     try:
         image, normalized = _normalized_image(data)
@@ -2452,23 +2687,21 @@ def capture() -> tuple[Response, int]:
             )
             words, lines = _select_regions(words, lines, width=image.width, height=image.height)
     except ValueError as exc:
-        return jsonify(error=str(exc)), 400
+        return {"error": str(exc)}, 400
     except RuntimeError as exc:
-        return jsonify(error=str(exc)), 503
+        return {"error": str(exc)}, 503
 
-    requested_id = request.headers.get("X-VillageLens-Capture-ID", "")
     capture_id = requested_id if _valid_capture_id(requested_id) else uuid.uuid4().hex
-    tester_id = _tester_id()
-    capture_source = request.headers.get("X-VillageLens-Capture-Source", "").strip().lower()
-    if capture_source not in {"guided-camera-v1", "file-camera", "shared-image"}:
+    if capture_source not in {
+        "guided-camera-v1", "file-camera", "shared-image", "photo-library-v1", "pi-camera-v1",
+    }:
         capture_source = "file-camera"
-    capture_quality = _capture_quality_header()
     capture_code = f"{(tester_id or 'UN').upper()}-{capture_id[:6].upper()}"
     result = {
         "schema": "villagelens.capture.v1", "capture_id": capture_id,
         "captured_at": datetime.now(timezone.utc).isoformat(), "label": "Captured photo",
         "capture_code": capture_code, "capture_source": capture_source,
-        "capture_quality": capture_quality,
+        "capture_quality": capture_quality or {},
         "source_sha256": source_sha256,
         "image_size": {"width": image.width, "height": image.height},
         "image_normalized": normalized, "stage": 1, "stage_state": "initial_reading",
@@ -2481,11 +2714,27 @@ def capture() -> tuple[Response, int]:
         "words": words, "lines": lines, "retained": False,
         "image_url": f"/api/captures/{capture_id}/image",
     }
+    if capture_provenance is not None:
+        result["source_provenance"] = capture_provenance
     try:
         result["retained"] = _store_capture(data, media_type, result)
     except Exception:
         app.logger.exception("Capture could not be retained")
-    return jsonify(result), 200
+    return result, 200
+
+
+@app.post("/api/capture")
+def capture() -> tuple[Response, int]:
+    media_type = (request.content_type or "").split(";", 1)[0].lower()
+    result, status = _ingest_capture(
+        request.get_data(cache=False),
+        media_type,
+        tester_id=_tester_id(),
+        requested_id=request.headers.get("X-VillageLens-Capture-ID", ""),
+        capture_source=request.headers.get("X-VillageLens-Capture-Source", "").strip().lower(),
+        capture_quality=_capture_quality_header(),
+    )
+    return jsonify(result), status
 
 
 @app.post("/api/read/<int:stage>")

@@ -21,6 +21,9 @@
       color: white; font-size: 1.3rem; touch-action: manipulation; }
     #camera { background: #9a4f05; border-color: #ffb052; font-size: 1.7rem; }
     #photos { background: #244c69; border-color: #7bcaff; font-size: 1.55rem; }
+    #pi-camera { background: #6d215f; border-color: #ff9ce9; font-size: 1.55rem; }
+    #pi-camera[hidden] { display: none; }
+    body.pi-lane .touch-toolbar { grid-template-columns: repeat(6, 1fr); }
     button.active { border-color: #fff36a; background: #5b4c08; box-shadow: 0 0 0 3px #fff36a, 0 0 15px #fff36a; }
     button.working { border-color: #62d7ff; background: #174b5f; animation: working 1s infinite alternate; }
     @keyframes working { to { box-shadow: 0 0 15px #62d7ff; } }
@@ -123,6 +126,14 @@
     .camera-actions { display: grid; grid-template-columns: 1fr 2fr; gap: 9px; }
     #camera-capture { min-height: 58px; background: #176c42; border-color: #55e58b; font-size: 1.15rem; }
     #camera-cancel { min-height: 58px; }
+    #pi-camera-guide { position: fixed; inset: 0; z-index: 31; display: grid; grid-template-rows: 1fr auto;
+      background: #050708; color: white; }
+    #pi-camera-guide[hidden] { display: none; }
+    #pi-preview { width: 100%; height: 100%; min-height: 220px; object-fit: contain; background: #000; }
+    .pi-camera-panel { padding: 10px 12px max(12px,env(safe-area-inset-bottom)); background: rgba(10,14,17,.98); }
+    #pi-pairing { margin: 4px 0 8px; overflow-wrap: anywhere; color: #ffd6f6; font-weight: 800; }
+    .pi-camera-actions { display: grid; grid-template-columns: 1fr 1fr 2fr; gap: 8px; }
+    #pi-capture { background: #176c42; border-color: #55e58b; }
     @media (hover:hover) { button:hover::after { content: attr(data-tip); position: absolute; transform: translate(-75%, 40px);
       background: #000; padding: 5px 8px; border-radius: 6px; font-size: .75rem; white-space: nowrap; z-index: 10; } }
   </style>
@@ -136,6 +147,7 @@
         <button id="mode-translate" aria-label="Language: Kannada. Touch for English" data-tip="Language: Kannada"><small>ಕ</small></button>
         <button id="photos" aria-label="Choose a photo" data-tip="Choose a photo">🖼️</button>
         <button id="camera" aria-label="Take a picture" data-tip="Take a picture">📷</button>
+        <button id="pi-camera" aria-label="Use paired Pi camera" data-tip="Pi camera" hidden>🥧📷</button>
       </nav>
       <nav class="toolbar action-toolbar" aria-label="Reading actions">
         <button id="play-words" aria-label="Read words continuously" data-tip="Read words">▶ ಅ</button>
@@ -223,9 +235,23 @@
     </div>
     <canvas id="camera-analysis" width="192" height="144" hidden></canvas>
   </section>
+  <section id="pi-camera-guide" hidden role="dialog" aria-modal="true" aria-label="Raspberry Pi camera">
+    <img id="pi-preview" alt="Live preview from the paired Raspberry Pi camera">
+    <div class="pi-camera-panel">
+      <p id="pi-camera-status" role="status" aria-live="assertive">Connect the Pi camera.</p>
+      <p id="pi-pairing" hidden></p>
+      <div class="pi-camera-actions">
+        <button id="pi-close" aria-label="Close Pi camera">✕</button>
+        <button id="pi-preview-start" aria-label="Start a short Pi camera preview">👁️</button>
+        <button id="pi-capture" aria-label="Take a picture with the Pi camera">🥧📷 Capture</button>
+      </div>
+    </div>
+  </section>
   <script>
     const $ = id => document.getElementById(id);
     const initialParameters=new URLSearchParams(location.search);
+    const piLane=location.pathname==='/c/'||location.pathname.startsWith('/c/');
+    const laneRoot=piLane?'/c/':'/a/';
     const languageParameter=(initialParameters.get('lang')||'').toLowerCase();
     let savedLanguage=''; try { savedLanguage=localStorage.getItem('villagelens.output_language.v1')||''; } catch (_) {}
     let savedTester=''; try { savedTester=localStorage.getItem('villagelens.tester.v1')||''; } catch (_) {}
@@ -240,6 +266,8 @@
     const cameraGuide=$('camera-guide'), cameraPreview=$('camera-preview'),cameraFrame=$('camera-frame');
     const cameraGuidance=$('camera-guidance'), cameraMetrics=$('camera-metrics'), cameraCanvas=$('camera-analysis');
     const cameraZoomControls=$('camera-zoom-controls'),cameraZoom=$('camera-zoom');
+    const piCamera=$('pi-camera'),piCameraGuide=$('pi-camera-guide'),piPreview=$('pi-preview');
+    const piCameraStatus=$('pi-camera-status'),piPairing=$('pi-pairing');
     let gallery=[], galleryIndex=0, result=null, mode='word', timerId=0, started=0, timerOwner=null;
     let galleryWaitTimer=0,galleryWaitStarted=0;
     let navigationGeneration=0;
@@ -255,6 +283,8 @@
     let cameraPointers=new Map(),pinchStartDistance=0,pinchStartZoom=1,cameraPinched=false;
     let cameraResizeState=null;
     let nextCaptureSequence=1;
+    let piSession=null,piSocket=null,piPreviewUrl='',piReconnectAttempts=0;
+    const piSessionKey='villagelens.pi_session.v1';
     const speechAudioCache=new Map();
     const translationCache=new Map();
     const controlIds=['mode-word','mode-sentence','mode-translate','photos','camera','play-words','play-sentences',
@@ -272,6 +302,9 @@
     let versionCheckPromise=null,pendingAppVersion='';
     let speechVoices=[];
     const testerId=configureTesterId();
+
+    piCamera.hidden=!piLane;
+    if (piLane) document.body.classList.add('pi-lane');
 
     if (englishMode) {
       document.documentElement.lang='en'; document.title='VillageLens English Reader';
@@ -366,13 +399,13 @@
       const existingView=(new URLSearchParams(location.search).get('view')||'').trim();
       if ($('welcome').hidden&&item&&item.id) parameters.set('view',item.id);
       else if ($('welcome').hidden&&/^[0-9a-f]{32}$/.test(existingView)) parameters.set('view',existingView);
-      return `/a/?${parameters.toString()}`;
+      return `${laneRoot}?${parameters.toString()}`;
     }
     function homeUrl() {
       const parameters=new URLSearchParams();
       if (testerId) parameters.set('tester',testerId);
       if (testerId!=='a3') parameters.set('lang',outputLanguage);
-      return `/a/?${parameters.toString()}`;
+      return `${laneRoot}?${parameters.toString()}`;
     }
     function saveLanguageSwitchView(language) {
       const item=gallery[galleryIndex];
@@ -1850,6 +1883,111 @@
       }
       finally { input.value=''; photoInput.value=''; if (image.src!==objectUrl) URL.revokeObjectURL(objectUrl); }
     }
+
+    async function sendPiCommand(action) {
+      if (!piSession) throw new Error('PI_SESSION_REQUIRED');
+      const response=await fetch(`/api/pi/v1/sessions/${piSession.session_id}/commands`,{
+        method:'POST',credentials:'same-origin',headers:testerHeaders({'Content-Type':'application/json'}),
+        body:JSON.stringify({action}),
+      });
+      const value=await response.json();
+      if (!response.ok) throw new Error(value.error||'PI_COMMAND_FAILED');
+      return value;
+    }
+    function connectPiSocket() {
+      if (!piSession||piSocket) return;
+      const protocol=location.protocol==='https:'?'wss:':'ws:';
+      const path=piSession.browser_socket_path;
+      piSocket=new WebSocket(`${protocol}//${location.host}${path}?tester=${encodeURIComponent(testerId)}`);
+      piSocket.binaryType='blob';
+      piSocket.onopen=()=>{ piReconnectAttempts=0; piCameraStatus.textContent=englishMode?'Waiting for the paired Pi…':'ಜೋಡಿಸಿದ ಪೈಗಾಗಿ ಕಾಯುತ್ತಿದೆ…'; };
+      piSocket.onmessage=async event=>{
+        if (event.data instanceof Blob) {
+          if (piPreviewUrl) URL.revokeObjectURL(piPreviewUrl);
+          piPreviewUrl=URL.createObjectURL(event.data); piPreview.src=piPreviewUrl;
+          piCameraStatus.textContent=englishMode?'Pi preview active. Point it at the object.':'ಪೈ ಮುನ್ನೋಟ ಸಕ್ರಿಯವಾಗಿದೆ. ವಸ್ತುವಿನ ಕಡೆ ತೋರಿಸಿ.';
+          return;
+        }
+        let message=null; try { message=JSON.parse(event.data); } catch (_) { return; }
+        if (message.type==='device_paired') {
+          try { sessionStorage.setItem(piSessionKey,piSession.session_id); } catch (_) {}
+          piPairing.hidden=true;
+          piCameraStatus.textContent=englishMode?'Pi paired. Starting a short preview…':'ಪೈ ಜೋಡಿಸಲಾಗಿದೆ. ಚಿಕ್ಕ ಮುನ್ನೋಟ ಆರಂಭವಾಗುತ್ತಿದೆ…';
+          try { await sendPiCommand('preview_start'); } catch (_) {}
+        } else if (message.type==='device_connection'&&message.state==='connected') {
+          piCameraStatus.textContent=englishMode?'Pi connected. Starting preview…':'ಪೈ ಸಂಪರ್ಕವಾಗಿದೆ. ಮುನ್ನೋಟ ಆರಂಭವಾಗುತ್ತಿದೆ…';
+          try { await sendPiCommand('preview_start'); } catch (_) {}
+        } else if (message.type==='capture_state') {
+          const labels={capture_active:'Camera active—hold the object steady.',capture_inactive:'Camera inactive. Selecting the clearest picture…',
+            uploading:'Uploading the selected picture…',complete:'Picture accepted.',failed:'Pi capture failed. Please try again.'};
+          piCameraStatus.textContent=labels[message.state]||'Pi camera working…';
+        } else if (message.type==='capture_complete') {
+          piCameraStatus.textContent=englishMode?'Picture is in the gallery. Preparing its reading…':'ಚಿತ್ರ ಗ್ಯಾಲರಿಯಲ್ಲಿದೆ. ಓದುವಿಕೆಯನ್ನು ಸಿದ್ಧಪಡಿಸುತ್ತಿದೆ…';
+          piCameraGuide.hidden=true;
+          if (piPreviewUrl) { URL.revokeObjectURL(piPreviewUrl); piPreviewUrl=''; piPreview.removeAttribute('src'); }
+          const ready=await loadGallery();
+          const index=gallery.findIndex(item=>item.id===message.capture_id);
+          if (ready&&index>=0) await showGallery(index);
+        }
+      };
+      piSocket.onclose=()=>{
+        piSocket=null;
+        if (!piCameraGuide.hidden&&piSession&&piReconnectAttempts<3) {
+          piReconnectAttempts++; piCameraStatus.textContent=englishMode?'Reconnecting to the Pi session…':'ಪೈ ಸಂಪರ್ಕವನ್ನು ಮತ್ತೆ ತೆರೆಯುತ್ತಿದೆ…';
+          setTimeout(connectPiSocket,1000); return;
+        }
+        if (!piCameraGuide.hidden) piCameraStatus.textContent=englishMode?
+          'Pi connection closed. Close and open Pi Camera to reconnect.':'ಪೈ ಸಂಪರ್ಕ ಮುಚ್ಚಿದೆ. ಮತ್ತೆ ಪೈ ಕ್ಯಾಮೆರಾ ತೆರೆಯಿರಿ.';
+      };
+    }
+    async function restorePiSession() {
+      let sessionId=''; try { sessionId=sessionStorage.getItem(piSessionKey)||''; } catch (_) {}
+      if (!/^[0-9a-f]{32}$/.test(sessionId)) return false;
+      try {
+        const response=await fetch(`/api/pi/v1/sessions/${sessionId}`,{headers:testerHeaders(),credentials:'same-origin'});
+        const value=await response.json();
+        if (!response.ok||!value.paired) throw new Error('PI_SESSION_UNAVAILABLE');
+        piSession={...value,browser_socket_path:`/api/pi/v1/browser/socket/${sessionId}`};
+        piPairing.hidden=true; return true;
+      } catch (_) {
+        try { sessionStorage.removeItem(piSessionKey); } catch (_) {}
+        return false;
+      }
+    }
+    async function openPiCamera() {
+      if (!piLane) return;
+      stop(); closeGuidedCamera(); piCameraGuide.hidden=false;
+      piCameraStatus.textContent=englishMode?'Creating a private Pi camera session…':'ಖಾಸಗಿ ಪೈ ಕ್ಯಾಮೆರಾ ಸಂಪರ್ಕ ಸಿದ್ಧವಾಗುತ್ತಿದೆ…';
+      if (piSession) { connectPiSocket(); return; }
+      try {
+        if (await restorePiSession()) { connectPiSocket(); return; }
+        const response=await fetch('/api/pi/v1/sessions',{
+          method:'POST',credentials:'same-origin',headers:testerHeaders({'Content-Type':'application/json'}),
+          body:JSON.stringify({output_language:outputLanguage}),
+        });
+        const value=await response.json(); if (!response.ok) throw new Error(value.error||'PI_SESSION_FAILED');
+        piSession=value; piPairing.hidden=false;
+        piPairing.textContent=`Pairing code: ${value.pairing_code}`;
+        piCameraStatus.textContent=englishMode?'Connect the Pi with this one-time code.':'ಈ ಒಂದು ಬಾರಿ ಕೋಡ್‌ನಿಂದ ಪೈ ಅನ್ನು ಸಂಪರ್ಕಿಸಿ.';
+        connectPiSocket();
+      } catch (_) {
+        piCameraStatus.textContent=englishMode?'Could not create the Pi camera session.':'ಪೈ ಕ್ಯಾಮೆರಾ ಸಂಪರ್ಕ ಸಿದ್ಧವಾಗಲಿಲ್ಲ.';
+      }
+    }
+    async function startPiPreview() {
+      try { await sendPiCommand('preview_start'); piCameraStatus.textContent=englishMode?'Starting a 30-second preview…':'30 ಸೆಕೆಂಡಿನ ಮುನ್ನೋಟ ಆರಂಭವಾಗುತ್ತಿದೆ…'; }
+      catch (_) { piCameraStatus.textContent=englishMode?'Pair or reconnect the Pi first.':'ಮೊದಲು ಪೈ ಅನ್ನು ಜೋಡಿಸಿ.'; }
+    }
+    async function captureWithPi() {
+      try { await sendPiCommand('capture'); piCameraStatus.textContent=englishMode?'Capture requested. Hold the object steady.':'ಚಿತ್ರ ಕೇಳಲಾಗಿದೆ. ವಸ್ತುವನ್ನು ಸ್ಥಿರವಾಗಿ ಹಿಡಿಯಿರಿ.'; }
+      catch (_) { piCameraStatus.textContent=englishMode?'Pair or reconnect the Pi first.':'ಮೊದಲು ಪೈ ಅನ್ನು ಜೋಡಿಸಿ.'; }
+    }
+    function closePiCamera() {
+      if (piSession) sendPiCommand('preview_stop').catch(()=>{});
+      piCameraGuide.hidden=true;
+      if (piSocket) { const socket=piSocket; piSocket=null; socket.close(); }
+      if (piPreviewUrl) { URL.revokeObjectURL(piPreviewUrl); piPreviewUrl=''; piPreview.removeAttribute('src'); }
+    }
     async function askImageQuestion() {
       if (activeRecorder&&activeRecorder.state!=='inactive') {
         unlockAudioPlayback();
@@ -1970,6 +2108,10 @@
     };
     $('photos').onclick=openPhotoLibrary;
     $('camera').onclick=openGuidedCamera;
+    piCamera.onclick=openPiCamera;
+    $('pi-preview-start').onclick=startPiPreview;
+    $('pi-capture').onclick=captureWithPi;
+    $('pi-close').onclick=closePiCamera;
     $('quality-4').onclick=requestStrongestReading;
     $('play-words').onclick=()=>result&&play(readingWords(),'play-words','word');
     $('play-sentences').onclick=()=>result&&play(readingLines(),'play-sentences','line');
@@ -2004,7 +2146,7 @@
     };
     document.addEventListener('pointerdown',unlockAudioPlayback,{passive:true});
     document.addEventListener('visibilitychange',async()=>{
-      if (document.hidden) { stop(); return; }
+      if (document.hidden) { stop(); closePiCamera(); return; }
       if (audioContext) discardAudioContext();
       if (!await ensureCurrentApp()) return;
       status.textContent=englishMode?'Ready. Tap a reading button to continue.':'ಸಿದ್ಧವಾಗಿದೆ. ಮುಂದುವರಿಸಲು ಓದುವ ಬಟನ್ ಒತ್ತಿ.';
@@ -2038,7 +2180,7 @@
       finishAction('install');
     };
     window.addEventListener('appinstalled',()=>{ $('install').hidden=true; installPrompt=null; });
-    window.addEventListener('pagehide',closeGuidedCamera);
+    window.addEventListener('pagehide',()=>{ closeGuidedCamera(); closePiCamera(); if (piSocket) piSocket.close(); });
 
     async function loadSharedImage() {
       if (new URLSearchParams(location.search).get('shared')!=='1') return false;
@@ -2061,7 +2203,8 @@
       const pendingView=pendingLanguageSwitchView();
       const markedSwitch=parameters.get('switch')==='1'&&/^[0-9a-f]{32}$/.test(parameters.get('view')||'');
       if (!shared&&testerId==='a3'&&languageParameter==='kn'&&!pendingView&&!markedSwitch) {
-        location.replace('/a/?tester=a3'); return;
+        if (piLane) location.replace(homeUrl());
+        else location.replace('/a/?tester=a3'); return;
       }
       if (!shared&&parameters.get('view')&&!pendingView&&!markedSwitch) {
         location.replace(homeUrl()); return;
@@ -2073,7 +2216,7 @@
       if (!shared&&/^[0-9a-f]{32}$/.test(requestedView)) showLanguageSwitchLoading(pendingView||{
         id:requestedView,image_url:`/api/captures/${requestedView}/image`,
       });
-      if ('serviceWorker' in navigator) {
+      if (!piLane&&'serviceWorker' in navigator) {
         try {
           const registration=await navigator.serviceWorker.register('/a/sw.js',{
             scope:'/a/',updateViaCache:'none'
