@@ -3,8 +3,9 @@
 ## Status
 
 Implemented and tested on isolated branch `codex/pi-persistent-enrollment`.
-Nothing from this checkpoint has been deployed, and no new paid service was
-enabled.
+The later production outcome is recorded in
+`PI_PERSISTENT_ENROLLMENT_DEPLOYMENT_20260924.md`. No new service or paid
+provider was enabled.
 
 ## Contract
 
