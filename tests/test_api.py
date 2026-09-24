@@ -66,7 +66,7 @@ class ApiTests(unittest.TestCase):
         self.assertIn(b'id="quality-4" aria-label="Request strongest reading"', response.data)
         self.assertIn(b'id="owner-badge"', response.data)
         self.assertIn(b'id="app-version"', response.data)
-        self.assertIn(b'v2026-09-24.2', response.data)
+        self.assertIn(b'v2026-09-24.3', response.data)
         self.assertIn(b"const appVersion=$('app-version').textContent.replace(/^v/,'')", response.data)
         self.assertNotIn(b"const appVersion='2026-09-15.1'", response.data)
         self.assertIn(b"'UNASSIGNED \xc2\xb7 OLDER CAPTURE'", response.data)
@@ -311,10 +311,10 @@ class ApiTests(unittest.TestCase):
             "stage_4": "gpt-5.6-sol",
         })
         self.assertEqual(response.get_json()["stage_4"], "manual")
-        self.assertEqual(response.get_json()["app_version"], "2026-09-24.2")
+        self.assertEqual(response.get_json()["app_version"], "2026-09-24.3")
         page = self.client.get("/a/?tester=a3")
         self.addCleanup(page.close)
-        self.assertIn(b'v2026-09-24.2', page.data)
+        self.assertIn(b'v2026-09-24.3', page.data)
 
     def test_old_sol_and_astra_evidence_is_not_current(self) -> None:
         self.assertTrue(_current_reader_stage({
@@ -442,7 +442,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(value["start_url"], "/a/")
         self.assertEqual(value["display"], "standalone")
         self.assertEqual(value["share_target"]["action"], "/a/share-target")
-        self.assertIn(b"const APP_VERSION = '2026-09-24.2'", worker.data)
+        self.assertIn(b"const APP_VERSION = '2026-09-24.3'", worker.data)
         self.assertEqual(value["share_target"]["params"]["files"][0]["name"], "image")
         self.assertEqual(worker.status_code, 200)
         self.assertEqual(manifest.headers["Cache-Control"], "no-cache, max-age=0")

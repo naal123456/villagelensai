@@ -196,6 +196,9 @@ class PiBridgeApiTests(unittest.TestCase):
         self.assertIn(b"Pi enrolled. Waiting for it to connect", pi_page.data)
         self.assertIn(b"if (piSession&&piSession.paired) startPiPreview()", pi_page.data)
         self.assertIn(b"piSocket.readyState===WebSocket.OPEN", pi_page.data)
+        self.assertIn(b"function beginPiCaptureTimer()", pi_page.data)
+        self.assertIn(b"Picture saved. Gallery is still loading", pi_page.data)
+        self.assertIn(b"await showGallery(index);", pi_page.data)
 
     def test_access_gate_protects_c_but_allows_one_time_device_pairing(self) -> None:
         app.config.update(

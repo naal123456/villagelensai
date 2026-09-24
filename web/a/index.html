@@ -161,7 +161,7 @@
         <span class="bar" id="quality-1"></span><span class="bar" id="quality-2"></span>
         <span class="bar" id="quality-3"></span><button class="bar" id="quality-4" aria-label="Request strongest reading" data-tip="Request strongest reading"></button>
         <span id="quality-timer">—</span>
-        <span id="app-version" aria-label="App version">v2026-09-24.2</span>
+        <span id="app-version" aria-label="App version">v2026-09-24.3</span>
       </div>
       <p id="mic-status" role="status" aria-live="assertive" hidden></p>
     </section>
@@ -284,6 +284,7 @@
     let cameraResizeState=null;
     let nextCaptureSequence=1;
     let piSession=null,piSocket=null,piPreviewUrl='',piReconnectAttempts=0;
+    let piCaptureStartedAt=0,piCaptureTimer=0,piCaptureProgressText='';
     const piSessionKey='villagelens.pi_session.v1';
     const speechAudioCache=new Map();
     const translationCache=new Map();
@@ -1898,6 +1899,25 @@
       if (!response.ok) throw new Error(value.error||'PI_COMMAND_FAILED');
       return value;
     }
+    function updatePiCaptureTimer() {
+      if (!piCaptureStartedAt) return;
+      const seconds=Math.max(0,Math.floor((Date.now()-piCaptureStartedAt)/1000));
+      piCameraStatus.textContent=`${piCaptureProgressText} ${seconds}s`;
+    }
+    function setPiCaptureProgress(english,kannada) {
+      piCaptureProgressText=englishMode?english:kannada;
+      updatePiCaptureTimer();
+    }
+    function beginPiCaptureTimer() {
+      if (piCaptureTimer) clearInterval(piCaptureTimer);
+      piCaptureStartedAt=Date.now();
+      setPiCaptureProgress('Capture requested—hold the object steady.','ಚಿತ್ರ ಕೇಳಲಾಗಿದೆ—ವಸ್ತುವನ್ನು ಸ್ಥಿರವಾಗಿ ಹಿಡಿಯಿರಿ.');
+      piCaptureTimer=setInterval(updatePiCaptureTimer,1000);
+    }
+    function endPiCaptureTimer() {
+      if (piCaptureTimer) clearInterval(piCaptureTimer);
+      piCaptureTimer=0; piCaptureStartedAt=0; piCaptureProgressText='';
+    }
     function connectPiSocket() {
       if (!piSession||piSocket) return;
       const protocol=location.protocol==='https:'?'wss:':'ws:';
@@ -1913,7 +1933,7 @@
         if (event.data instanceof Blob) {
           if (piPreviewUrl) URL.revokeObjectURL(piPreviewUrl);
           piPreviewUrl=URL.createObjectURL(event.data); piPreview.src=piPreviewUrl;
-          piCameraStatus.textContent=englishMode?'Pi preview active. Point it at the object.':'ಪೈ ಮುನ್ನೋಟ ಸಕ್ರಿಯವಾಗಿದೆ. ವಸ್ತುವಿನ ಕಡೆ ತೋರಿಸಿ.';
+          if (!piCaptureStartedAt) piCameraStatus.textContent=englishMode?'Pi preview active. Point it at the object.':'ಪೈ ಮುನ್ನೋಟ ಸಕ್ರಿಯವಾಗಿದೆ. ವಸ್ತುವಿನ ಕಡೆ ತೋರಿಸಿ.';
           return;
         }
         let message=null; try { message=JSON.parse(event.data); } catch (_) { return; }
@@ -1929,16 +1949,26 @@
           piPairing.hidden=true; piSession=null;
           piCameraStatus.textContent=englishMode?'Pi enrollment was revoked.':'ಪೈ ನೋಂದಣಿಯನ್ನು ರದ್ದು ಮಾಡಲಾಗಿದೆ.';
         } else if (message.type==='capture_state') {
-          const labels={capture_active:'Camera active—hold the object steady.',capture_inactive:'Camera inactive. Selecting the clearest picture…',
-            uploading:'Uploading the selected picture…',complete:'Picture accepted.',failed:'Pi capture failed. Please try again.'};
-          piCameraStatus.textContent=labels[message.state]||'Pi camera working…';
+          const labels={capture_active:['Camera active—hold the object steady.','ಕ್ಯಾಮೆರಾ ಸಕ್ರಿಯವಾಗಿದೆ—ವಸ್ತುವನ್ನು ಸ್ಥಿರವಾಗಿ ಹಿಡಿಯಿರಿ.'],
+            capture_inactive:['Camera finished. Selecting the clearest picture…','ಚಿತ್ರ ತೆಗೆದಿದೆ. ಸ್ಪಷ್ಟವಾದ ಚಿತ್ರವನ್ನು ಆಯ್ಕೆ ಮಾಡುತ್ತಿದೆ…'],
+            uploading:['Uploading the selected picture…','ಆಯ್ಕೆ ಮಾಡಿದ ಚಿತ್ರವನ್ನು ಅಪ್‌ಲೋಡ್ ಮಾಡುತ್ತಿದೆ…'],
+            complete:['Picture accepted. Opening the gallery…','ಚಿತ್ರ ಸ್ವೀಕರಿಸಲಾಗಿದೆ. ಗ್ಯಾಲರಿ ತೆರೆಯುತ್ತಿದೆ…'],
+            failed:['Pi capture failed. Please try again.','ಪೈ ಚಿತ್ರ ವಿಫಲವಾಗಿದೆ. ಮತ್ತೊಮ್ಮೆ ಪ್ರಯತ್ನಿಸಿ.']};
+          const label=labels[message.state]||['Pi camera working…','ಪೈ ಕ್ಯಾಮೆರಾ ಕೆಲಸ ಮಾಡುತ್ತಿದೆ…'];
+          setPiCaptureProgress(label[0],label[1]);
+          if (message.state==='failed') endPiCaptureTimer();
         } else if (message.type==='capture_complete') {
-          piCameraStatus.textContent=englishMode?'Picture is in the gallery. Preparing its reading…':'ಚಿತ್ರ ಗ್ಯಾಲರಿಯಲ್ಲಿದೆ. ಓದುವಿಕೆಯನ್ನು ಸಿದ್ಧಪಡಿಸುತ್ತಿದೆ…';
-          piCameraGuide.hidden=true;
+          setPiCaptureProgress('Picture is in the gallery. Preparing its reading…','ಚಿತ್ರ ಗ್ಯಾಲರಿಯಲ್ಲಿದೆ. ಓದುವಿಕೆಯನ್ನು ಸಿದ್ಧಪಡಿಸುತ್ತಿದೆ…');
           if (piPreviewUrl) { URL.revokeObjectURL(piPreviewUrl); piPreviewUrl=''; piPreview.removeAttribute('src'); }
           const ready=await loadGallery();
           const index=gallery.findIndex(item=>item.id===message.capture_id);
-          if (ready&&index>=0) await showGallery(index);
+          if (ready&&index>=0) {
+            await showGallery(index);
+            piCameraGuide.hidden=true;
+            endPiCaptureTimer();
+          } else {
+            setPiCaptureProgress('Picture saved. Gallery is still loading…','ಚಿತ್ರ ಉಳಿಸಲಾಗಿದೆ. ಗ್ಯಾಲರಿ ಇನ್ನೂ ಲೋಡ್ ಆಗುತ್ತಿದೆ…');
+          }
         }
       };
       piSocket.onclose=()=>{
@@ -2002,12 +2032,14 @@
       catch (_) { piCameraStatus.textContent=englishMode?'Pair or reconnect the Pi first.':'ಮೊದಲು ಪೈ ಅನ್ನು ಜೋಡಿಸಿ.'; }
     }
     async function captureWithPi() {
-      try { await sendPiCommand('capture'); piCameraStatus.textContent=englishMode?'Capture requested. Hold the object steady.':'ಚಿತ್ರ ಕೇಳಲಾಗಿದೆ. ವಸ್ತುವನ್ನು ಸ್ಥಿರವಾಗಿ ಹಿಡಿಯಿರಿ.'; }
-      catch (_) { piCameraStatus.textContent=englishMode?'Pair or reconnect the Pi first.':'ಮೊದಲು ಪೈ ಅನ್ನು ಜೋಡಿಸಿ.'; }
+      beginPiCaptureTimer();
+      try { await sendPiCommand('capture'); }
+      catch (_) { endPiCaptureTimer(); piCameraStatus.textContent=englishMode?'Pair or reconnect the Pi first.':'ಮೊದಲು ಪೈ ಅನ್ನು ಜೋಡಿಸಿ.'; }
     }
     function closePiCamera() {
       if (piSession) sendPiCommand('preview_stop').catch(()=>{});
       piCameraGuide.hidden=true;
+      endPiCaptureTimer();
       if (piSocket) { const socket=piSocket; piSocket=null; socket.close(); }
       if (piPreviewUrl) { URL.revokeObjectURL(piPreviewUrl); piPreviewUrl=''; piPreview.removeAttribute('src'); }
     }
