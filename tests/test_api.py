@@ -62,7 +62,7 @@ class ApiTests(unittest.TestCase):
         self.assertIn(b'id="quality-4" aria-label="Request strongest reading"', response.data)
         self.assertIn(b'id="owner-badge"', response.data)
         self.assertIn(b'id="app-version"', response.data)
-        self.assertIn(b'v2026-09-17.2', response.data)
+        self.assertIn(b'v2026-09-23.1', response.data)
         self.assertIn(b"const appVersion=$('app-version').textContent.replace(/^v/,'')", response.data)
         self.assertNotIn(b"const appVersion='2026-09-15.1'", response.data)
         self.assertIn(b"'UNASSIGNED \xc2\xb7 OLDER CAPTURE'", response.data)
@@ -74,6 +74,7 @@ class ApiTests(unittest.TestCase):
         self.assertIn(b'X-VillageLens-Tester-ID', response.data)
         self.assertIn(b'function speechSegments', response.data)
         self.assertIn(b"return 'ur-IN'", response.data)
+        self.assertIn(b"return 'cmn-CN'", response.data)
         self.assertIn(b'cameraReadyUntil=Date.now()+1800', response.data)
         self.assertIn(b'completed_stages:enabledStages.filter', response.data)
         self.assertIn(b'function sourceLanguageInfo', response.data)
@@ -81,6 +82,14 @@ class ApiTests(unittest.TestCase):
         self.assertIn(b"window.addEventListener('resize',alignOverlayToImage)", response.data)
         self.assertIn(b"const markedSwitch=parameters.get('switch')==='1'", response.data)
         self.assertIn(b"name:'Malayalam'", response.data)
+        self.assertIn(b"name:'Chinese / Han script'", response.data)
+        self.assertIn(b"name:'Chinese / Han script and English'", response.data)
+        self.assertIn(b"code:'cmn-CN+en-IN'", response.data)
+        self.assertIn(b"'cmn-CN','en-IN'", response.data)
+        self.assertIn(
+            b"\\u3400-\\u4dbf\\u4e00-\\u9fff\\uf900-\\ufaff",
+            response.data,
+        )
         self.assertIn(b'languageSwitchViewKey', response.data)
         self.assertIn(b'function showLanguageSwitchLoading', response.data)
         self.assertIn(b'function speechChunks', response.data)
@@ -298,10 +307,10 @@ class ApiTests(unittest.TestCase):
             "stage_4": "gpt-5.6-sol",
         })
         self.assertEqual(response.get_json()["stage_4"], "manual")
-        self.assertEqual(response.get_json()["app_version"], "2026-09-17.2")
+        self.assertEqual(response.get_json()["app_version"], "2026-09-23.1")
         page = self.client.get("/a/?tester=a3")
         self.addCleanup(page.close)
-        self.assertIn(b'v2026-09-17.2', page.data)
+        self.assertIn(b'v2026-09-23.1', page.data)
 
     def test_old_sol_and_astra_evidence_is_not_current(self) -> None:
         self.assertTrue(_current_reader_stage({
@@ -429,7 +438,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(value["start_url"], "/a/")
         self.assertEqual(value["display"], "standalone")
         self.assertEqual(value["share_target"]["action"], "/a/share-target")
-        self.assertIn(b"const APP_VERSION = '2026-09-17.2'", worker.data)
+        self.assertIn(b"const APP_VERSION = '2026-09-23.1'", worker.data)
         self.assertEqual(value["share_target"]["params"]["files"][0]["name"], "image")
         self.assertEqual(worker.status_code, 200)
         self.assertEqual(manifest.headers["Cache-Control"], "no-cache, max-age=0")
@@ -518,6 +527,32 @@ class ApiTests(unittest.TestCase):
             [call.args for call in synthesize.call_args_list],
             [(text, language) for language, text in examples.items()],
         )
+
+    @patch("api.app._storage_bucket", return_value=None)
+    @patch("api.app._synthesize_speech", return_value=b"chinese-audio")
+    def test_speech_supports_han_text_with_server_mandarin_voice(
+        self, synthesize: object, storage_bucket: object,
+    ) -> None:
+        response = self.client.post(
+            "/api/speech", json={"text": "香港美心月餅", "language": "cmn-CN"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, b"chinese-audio")
+        synthesize.assert_called_once_with("香港美心月餅", "cmn-CN")
+
+    @patch("api.app._openai_translate", return_value={"translation_kn": "Mooncake", "output_language": "en"})
+    def test_english_translation_does_not_treat_mixed_han_and_latin_as_english(
+        self, translate: object,
+    ) -> None:
+        response = self.client.post(
+            "/api/translate",
+            json={"text": "美心 MOONCAKES"},
+            headers={"X-VillageLens-Output-Language": "en"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        translate.assert_called_once_with("美心 MOONCAKES", "en")
 
     def test_stage_one_ocr_storage_is_shared_across_output_languages(self) -> None:
         capture_id = "a" * 32

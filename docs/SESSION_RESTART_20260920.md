@@ -37,6 +37,21 @@ VillageLensAI has become a practical multilingual reading and learning tool:
   English.
 - The owner physically tested the new Photos flow and described it as
   “excellent.” This is the latest product acceptance signal.
+- On 2026-09-22, the owner reported that icon-only capture A3-49 correctly
+  identified the windshield-washer-fluid reservoir cap in the frunk of their
+  Tesla Model 3 Standard. The result gave the owner enough context to locate
+  the washer-fluid refill point after unrelated online videos had been
+  misleading. This is qualitative field evidence, not a general accuracy or
+  vehicle-maintenance safety claim; the source photograph remains private.
+- On 2026-09-23, the owner reported that A3-50, a mixed Chinese/English mooncake
+  package, was understood correctly by contextual inference while the word and
+  sentence controls misidentified Han text as English and did not pronounce it.
+  The authorized diagnosis found that cloud OCR retained Chinese regions and
+  stage 3 covered the primary text, but the browser and speech API lacked a Han
+  script route. A local `2026-09-23.1` repair adds conservative “Chinese / Han
+  script” identification, mixed Chinese/English segmentation, Mandarin server
+  speech, and translation routing tests. It has passed 78 tests and static
+  checks but is not committed, pushed, or deployed.
 - Imported WhatsApp screenshots and saved document photographs use the same
   retained OCR, inference, language, audio, gallery, and question pipeline as
   camera captures.
