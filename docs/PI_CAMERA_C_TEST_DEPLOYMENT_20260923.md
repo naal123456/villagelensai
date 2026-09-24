@@ -65,6 +65,21 @@ This proves the deployed pairing and preview transport, not real Pi capture,
 gallery retention, OCR/inference, mobile Safari behavior, reconnect behavior,
 or long-lived/concurrent WebSocket operation.
 
+## Physical Pi pairing checkpoint
+
+An authenticated phone browser subsequently created a one-time code on the
+deployed `/c` route. The owner entered it through the Mac's hidden SSH prompt,
+and the physical Raspberry Pi exchanged it for a profile-bound credential. The
+Pi then authenticated successfully to the public WSS device endpoint as
+`rpi5-4gb-cam3-bench-01`; its private credential file was confirmed as mode
+`0600` and the authentication probe disconnected immediately.
+
+The browser queued a bounded preview request, but the Pi did not acquire or
+transmit a frame because its received-hardware profile remains intentionally
+unverified. No still, gallery object, OCR/inference job, or paid-provider call
+was produced. This is evidence for real phone-to-Pi pairing and authentication,
+not camera or gallery completion.
+
 ## Rollback
 
 Delete only the isolated test service:
