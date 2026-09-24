@@ -45,9 +45,12 @@ An isolated English-output experiment is served at `/b/?tester=a3`. It reuses
 the reviewer gallery and reading pipeline but stores browser and cloud evidence
 separately from the Kannada-first `/a/` experience.
 
-An undeployed `/c/` branch experiment adds a Raspberry Pi Camera control while
-reusing the same gallery and reading pipeline. Pairing, preview, and capture are
-session-scoped and bounded; `/a/` and `/b/` do not activate the Pi control.
+An isolated `/c/` branch experiment adds a Raspberry Pi Camera control while
+reusing the same gallery and reading pipeline. It is deployed only to the
+separate `vlens-pi-c-test` Cloud Run service; the production `vlens-a` service
+and `villagelensai.com/a/` and `/b/` routes were not changed. Pairing, preview,
+and capture are session-scoped and bounded; `/a/` and `/b/` do not activate the
+Pi control.
 
 See [the Google Cloud POC architecture](docs/GOOGLE_CLOUD_POC.md).
 

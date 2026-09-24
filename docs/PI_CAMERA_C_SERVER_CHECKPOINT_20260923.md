@@ -1,7 +1,8 @@
 # `/c` Pi-camera server checkpoint — 2026-09-23
 
-Status: implemented and locally tested on isolated branch
-`codex/pi-camera-c`; not deployed and not physically validated.
+Status: implemented on isolated branch `codex/pi-camera-c`, locally tested, and
+deployed to the separate `vlens-pi-c-test` service. It is not merged into or
+deployed over production and is not physically end-to-end validated.
 
 ## Outcome
 
@@ -94,19 +95,17 @@ code and device credential.
 - Session routing is intentionally in memory for the one-instance POC. A
   restart requires re-pairing. Multiple Cloud Run instances would require a
   separately authorized shared session service; none was enabled.
-- WebSocket duration, reconnect behavior, concurrency, and Cloud Run request
-  timeout have not been deployment-tested.
-- The Pi-side WebSocket/preview/upload adapter is not yet implemented against
-  this server contract. The Pi remains powered off.
-- No real camera frame, private gallery item, provider request, public URL, or
-  iPhone Safari session was used for this checkpoint.
+- Public HTTPS and WSS routing passed with a short synthetic preview. Long
+  WebSocket duration, reconnect behavior, and concurrent-user behavior have not
+  been deployment-tested.
+- The matching Pi-side adapter is implemented, installed, and tested separately,
+  but its received-hardware profile remains intentionally unverified.
+- No real camera frame, private gallery item, provider request, or iPhone Safari
+  session was used for this checkpoint.
 - Physical end-to-end testing may begin only after the Pi client passes local
   fake-server tests and the received hardware profile is signed off.
 
-## Rollback
-
-Before deployment, discard or do not merge branch `codex/pi-camera-c`. After a
-future merge, revert the checkpoint commit to remove `/c`, the Pi bridge module,
-`flask-sock`, and the gated Pi controls. Existing `/a` and `/b` routes need no
-data or configuration rollback because this change neither migrates storage nor
-changes their URLs.
+Deployment evidence and rollback are recorded in
+[PI_CAMERA_C_TEST_DEPLOYMENT_20260923.md](PI_CAMERA_C_TEST_DEPLOYMENT_20260923.md).
+Existing `/a` and `/b` routes need no data or configuration rollback because
+the experiment uses a separate Cloud Run service and URL.
