@@ -61,7 +61,7 @@ OPENAI_TRANSLATION_MODEL = os.environ.get("VILLAGELENS_TRANSLATION_MODEL", "gpt-
 OPENAI_STAGE_TWO_ANALYSIS_VERSION = "luna-compact-v1"
 OPENAI_STAGE_THREE_ANALYSIS_VERSION = "terra-ocr-grounded-v4"
 OPENAI_STAGE_FOUR_ANALYSIS_VERSION = "sol-ocr-review-v4"
-APP_VERSION = "2026-09-23.1"
+APP_VERSION = "2026-09-23.2"
 SPEECH_VOICES = {
     "kn-IN": os.environ.get("VILLAGELENS_KANNADA_TTS_VOICE", "kn-IN-Wavenet-A"),
     "ta-IN": os.environ.get("VILLAGELENS_TAMIL_TTS_VOICE", "ta-IN-Wavenet-A"),
@@ -375,7 +375,10 @@ def access_link() -> Response | tuple[Response, int]:
     tester_id = _tester_from_link(request.form.get("token", "").strip())
     if not tester_id:
         return jsonify(error="ACCESS_LINK_INVALID"), 401
-    return _with_access_cookie(jsonify(destination=f"/a/?tester={tester_id}"), tester_id)
+    next_lane = "c" if request.form.get("next", "").strip().lower() == "c" else "a"
+    return _with_access_cookie(
+        jsonify(destination=f"/{next_lane}/?tester={tester_id}"), tester_id,
+    )
 
 
 @app.route("/access", methods=["GET", "POST"])
@@ -424,13 +427,14 @@ required aria-label="Access code"><button type="submit">🔓</button></form>
 <script>(async()=>{{
   const token=new URLSearchParams(location.hash.slice(1)).get('enroll');
   if (!token) return;
+  const nextLane=new URLSearchParams(location.search).get('next')==='c'?'c':'a';
   history.replaceState(null,'','/access');
   const form=document.querySelector('form'),message=document.querySelector('p');
   form.hidden=true; message.textContent='ತೆರೆಯಲಾಗುತ್ತಿದೆ…';
   try {{
     const response=await fetch('/access/link',{{method:'POST',credentials:'same-origin',
       headers:{{'Content-Type':'application/x-www-form-urlencoded'}},
-      body:new URLSearchParams({{token}})}});
+      body:new URLSearchParams({{token,next:nextLane}})}});
     const value=await response.json();
     if (!response.ok) throw new Error('LINK_FAILED');
     location.replace(value.destination);

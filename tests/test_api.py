@@ -62,7 +62,7 @@ class ApiTests(unittest.TestCase):
         self.assertIn(b'id="quality-4" aria-label="Request strongest reading"', response.data)
         self.assertIn(b'id="owner-badge"', response.data)
         self.assertIn(b'id="app-version"', response.data)
-        self.assertIn(b'v2026-09-23.1', response.data)
+        self.assertIn(b'v2026-09-23.2', response.data)
         self.assertIn(b"const appVersion=$('app-version').textContent.replace(/^v/,'')", response.data)
         self.assertNotIn(b"const appVersion='2026-09-15.1'", response.data)
         self.assertIn(b"'UNASSIGNED \xc2\xb7 OLDER CAPTURE'", response.data)
@@ -307,10 +307,10 @@ class ApiTests(unittest.TestCase):
             "stage_4": "gpt-5.6-sol",
         })
         self.assertEqual(response.get_json()["stage_4"], "manual")
-        self.assertEqual(response.get_json()["app_version"], "2026-09-23.1")
+        self.assertEqual(response.get_json()["app_version"], "2026-09-23.2")
         page = self.client.get("/a/?tester=a3")
         self.addCleanup(page.close)
-        self.assertIn(b'v2026-09-23.1', page.data)
+        self.assertIn(b'v2026-09-23.2', page.data)
 
     def test_old_sol_and_astra_evidence_is_not_current(self) -> None:
         self.assertTrue(_current_reader_stage({
@@ -438,7 +438,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(value["start_url"], "/a/")
         self.assertEqual(value["display"], "standalone")
         self.assertEqual(value["share_target"]["action"], "/a/share-target")
-        self.assertIn(b"const APP_VERSION = '2026-09-23.1'", worker.data)
+        self.assertIn(b"const APP_VERSION = '2026-09-23.2'", worker.data)
         self.assertEqual(value["share_target"]["params"]["files"][0]["name"], "image")
         self.assertEqual(worker.status_code, 200)
         self.assertEqual(manifest.headers["Cache-Control"], "no-cache, max-age=0")
@@ -919,6 +919,22 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(installed.status_code, 302)
         self.assertEqual(installed.headers["Location"], "/a/?tester=a4&shared=1")
 
+    def test_signed_tester_link_can_enter_pi_lane_without_password(self) -> None:
+        self.enable_access_gate()
+        with app.test_request_context("/"):
+            token = _tester_link_token("a5")
+
+        response = self.client.post(
+            "/access/link", data={"token": token, "next": "c"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["destination"], "/c/?tester=a5")
+        page = self.client.get("/c/?tester=a5", base_url="https://localhost")
+        self.addCleanup(page.close)
+        self.assertEqual(page.status_code, 200)
+        self.assertIn(b'id="pi-camera"', page.data)
+
     def test_invalid_tester_link_is_rejected(self) -> None:
         self.enable_access_gate()
         response = self.client.post("/access/link", data={"token": "a4.not-valid"})
@@ -933,6 +949,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn(b"location.hash.slice(1)", response.data)
         self.assertIn(b"fetch('/access/link'", response.data)
+        self.assertIn(b"token,next:nextLane", response.data)
         self.assertIn(b"history.replaceState", response.data)
 
     def test_valid_legacy_cookie_remains_accepted(self) -> None:
