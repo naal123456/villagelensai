@@ -161,7 +161,7 @@
         <span class="bar" id="quality-1"></span><span class="bar" id="quality-2"></span>
         <span class="bar" id="quality-3"></span><button class="bar" id="quality-4" aria-label="Request strongest reading" data-tip="Request strongest reading"></button>
         <span id="quality-timer">—</span>
-        <span id="app-version" aria-label="App version">v2026-09-24.1</span>
+        <span id="app-version" aria-label="App version">v2026-09-24.2</span>
       </div>
       <p id="mic-status" role="status" aria-live="assertive" hidden></p>
     </section>
@@ -1904,7 +1904,11 @@
       const path=piSession.browser_socket_path;
       piSocket=new WebSocket(`${protocol}//${location.host}${path}?tester=${encodeURIComponent(testerId)}`);
       piSocket.binaryType='blob';
-      piSocket.onopen=()=>{ piReconnectAttempts=0; piCameraStatus.textContent=englishMode?'Waiting for the paired Pi…':'ಜೋಡಿಸಿದ ಪೈಗಾಗಿ ಕಾಯುತ್ತಿದೆ…'; };
+      piSocket.onopen=()=>{
+        piReconnectAttempts=0;
+        piCameraStatus.textContent=englishMode?'Waiting for the paired Pi…':'ಜೋಡಿಸಿದ ಪೈಗಾಗಿ ಕಾಯುತ್ತಿದೆ…';
+        if (piSession&&piSession.paired) startPiPreview();
+      };
       piSocket.onmessage=async event=>{
         if (event.data instanceof Blob) {
           if (piPreviewUrl) URL.revokeObjectURL(piPreviewUrl);
@@ -1965,7 +1969,11 @@
       if (!piLane) return;
       stop(); closeGuidedCamera(); piCameraGuide.hidden=false;
       piCameraStatus.textContent=englishMode?'Creating a private Pi camera session…':'ಖಾಸಗಿ ಪೈ ಕ್ಯಾಮೆರಾ ಸಂಪರ್ಕ ಸಿದ್ಧವಾಗುತ್ತಿದೆ…';
-      if (piSession) { connectPiSocket(); return; }
+      if (piSession) {
+        if (piSocket&&piSocket.readyState===WebSocket.OPEN) startPiPreview();
+        else connectPiSocket();
+        return;
+      }
       try {
         if (await restorePiSession()) { connectPiSocket(); return; }
         const response=await fetch('/api/pi/v1/sessions',{
