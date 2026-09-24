@@ -57,7 +57,7 @@ OPENAI_TRANSLATION_MODEL = os.environ.get("VILLAGELENS_TRANSLATION_MODEL", "gpt-
 OPENAI_STAGE_TWO_ANALYSIS_VERSION = "luna-compact-v1"
 OPENAI_STAGE_THREE_ANALYSIS_VERSION = "terra-ocr-grounded-v4"
 OPENAI_STAGE_FOUR_ANALYSIS_VERSION = "sol-ocr-review-v4"
-APP_VERSION = "2026-09-17.2"
+APP_VERSION = "2026-09-23.1"
 SPEECH_VOICES = {
     "kn-IN": os.environ.get("VILLAGELENS_KANNADA_TTS_VOICE", "kn-IN-Wavenet-A"),
     "ta-IN": os.environ.get("VILLAGELENS_TAMIL_TTS_VOICE", "ta-IN-Wavenet-A"),
@@ -65,6 +65,7 @@ SPEECH_VOICES = {
     "ml-IN": os.environ.get("VILLAGELENS_MALAYALAM_TTS_VOICE", "ml-IN-Chirp3-HD-Achernar"),
     "hi-IN": os.environ.get("VILLAGELENS_HINDI_TTS_VOICE", "hi-IN-Wavenet-A"),
     "ur-IN": os.environ.get("VILLAGELENS_URDU_TTS_VOICE", "ur-IN-Wavenet-A"),
+    "cmn-CN": os.environ.get("VILLAGELENS_CHINESE_TTS_VOICE", "cmn-CN-Standard-A"),
     "en-IN": os.environ.get("VILLAGELENS_ENGLISH_TTS_VOICE", "en-IN-Wavenet-A"),
 }
 SPEECH_LANGUAGE_PATTERNS = {
@@ -74,6 +75,7 @@ SPEECH_LANGUAGE_PATTERNS = {
     "ml-IN": re.compile(r"[\u0d00-\u0d7f]"),
     "hi-IN": re.compile(r"[\u0900-\u097f]"),
     "ur-IN": re.compile(r"[\u0600-\u06ff]"),
+    "cmn-CN": re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]"),
     "en-IN": re.compile(r"[A-Za-z]"),
 }
 ACCESS_COOKIE_NAME = "villagelens_access_v2"
@@ -1989,7 +1991,11 @@ def translate() -> Response | tuple[Response, int]:
         output_language == "kn" and bool(re.search(r"[\u0c80-\u0cff]", text))
     ) or (
         output_language == "en" and bool(re.search(r"[A-Za-z]", text))
-        and not re.search(r"[\u0900-\u097f\u0b80-\u0cff\u0d00-\u0d7f]", text)
+        and not re.search(
+            r"[\u0900-\u097f\u0b80-\u0cff\u0d00-\u0d7f"
+            r"\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]",
+            text,
+        )
     )
     if not has_letters or already_target:
         return jsonify(error="TRANSLATION_LANGUAGE_UNSUPPORTED"), 400

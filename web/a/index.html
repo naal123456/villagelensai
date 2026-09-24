@@ -149,7 +149,7 @@
         <span class="bar" id="quality-1"></span><span class="bar" id="quality-2"></span>
         <span class="bar" id="quality-3"></span><button class="bar" id="quality-4" aria-label="Request strongest reading" data-tip="Request strongest reading"></button>
         <span id="quality-timer">—</span>
-        <span id="app-version" aria-label="App version">v2026-09-17.2</span>
+        <span id="app-version" aria-label="App version">v2026-09-23.1</span>
       </div>
       <p id="mic-status" role="status" aria-live="assertive" hidden></p>
     </section>
@@ -665,6 +665,7 @@
     }
     function scriptLanguage(text) {
       if (/[\u0600-\u06ff]/.test(text)) return 'ur-IN';
+      if (/[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/.test(text)) return 'cmn-CN';
       if (/[\u0c80-\u0cff]/.test(text)) return 'kn-IN';
       if (/[\u0b80-\u0bff]/.test(text)) return 'ta-IN';
       if (/[\u0c00-\u0c7f]/.test(text)) return 'te-IN';
@@ -676,6 +677,7 @@
       const source=String(text||'');
       const candidates=[
         {code:'ur-IN',pattern:/[\u0600-\u06ff]/g,name:'Urdu / Arabic script',kn:'ಉರ್ದು ಅಥವಾ ಅರೇಬಿಕ್ ಲಿಪಿ'},
+        {code:'cmn-CN',pattern:/[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/g,name:'Chinese / Han script',kn:'ಚೈನೀಸ್ ಅಥವಾ ಹಾನ್ ಲಿಪಿ'},
         {code:'kn-IN',pattern:/[\u0c80-\u0cff]/g,name:'Kannada',kn:'ಕನ್ನಡ'},
         {code:'ta-IN',pattern:/[\u0b80-\u0bff]/g,name:'Tamil',kn:'ತಮಿಳು'},
         {code:'te-IN',pattern:/[\u0c00-\u0c7f]/g,name:'Telugu',kn:'ತೆಲುಗು'},
@@ -683,6 +685,8 @@
         {code:'hi-IN',pattern:/[\u0900-\u097f]/g,name:'Hindi / Devanagari',kn:'ಹಿಂದಿ ಅಥವಾ ದೇವನಾಗರಿ'},
         {code:'en-IN',pattern:/[A-Za-z]/g,name:'English',kn:'ಇಂಗ್ಲಿಷ್'},
       ].map(item=>({...item,count:(source.match(item.pattern)||[]).length}));
+      const chinese=candidates.find(item=>item.code==='cmn-CN'),english=candidates.find(item=>item.code==='en-IN');
+      if (chinese.count&&english.count) return {code:'cmn-CN+en-IN',name:'Chinese / Han script and English',kn:'ಚೈನೀಸ್ ಅಥವಾ ಹಾನ್ ಲಿಪಿ ಮತ್ತು ಇಂಗ್ಲಿಷ್'};
       return candidates.sort((left,right)=>right.count-left.count).find(item=>item.count)||null;
     }
     function sourceLanguageAnnouncement(text) {
@@ -690,7 +694,7 @@
       return {info,text:englishMode?`This text is in ${info.name}.`:`ಈ ಪಠ್ಯ ${info.kn} ಭಾಷೆಯಲ್ಲಿದೆ.`};
     }
     function speechSegments(text) {
-      const chunks=normalizedSpeech(text).match(/[\u0600-\u06ff]+|[\u0900-\u097f]+|[\u0b80-\u0bff]+|[\u0c00-\u0c7f]+|[\u0c80-\u0cff]+|[\u0d00-\u0d7f]+|[A-Za-z]+|[^A-Za-z\u0600-\u06ff\u0900-\u097f\u0b80-\u0d7f]+/g)||[];
+      const chunks=normalizedSpeech(text).match(/[\u0600-\u06ff]+|[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]+|[\u0900-\u097f]+|[\u0b80-\u0bff]+|[\u0c00-\u0c7f]+|[\u0c80-\u0cff]+|[\u0d00-\u0d7f]+|[A-Za-z]+|[^A-Za-z\u0600-\u06ff\u0900-\u097f\u0b80-\u0d7f\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]+/g)||[];
       const segments=[];
       for (let index=0;index<chunks.length;index++) {
         const chunk=chunks[index];
@@ -698,7 +702,7 @@
         if (!language) {
           language=segments.length?segments[segments.length-1].language:'';
           if (!language) {
-            const next=chunks.slice(index+1).find(value=>/[A-Za-z\u0600-\u06ff\u0900-\u097f\u0b80-\u0d7f]/.test(value))||'';
+            const next=chunks.slice(index+1).find(value=>/[A-Za-z\u0600-\u06ff\u0900-\u097f\u0b80-\u0d7f\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/.test(value))||'';
             language=scriptLanguage(next)||'en-IN';
           }
         }
@@ -788,7 +792,7 @@
       for (const prepared of speechChunks(text)) {
         for (const segment of speechSegments(prepared)) {
         if (generation!==speechGeneration) return false;
-        if (['kn-IN','ta-IN','te-IN','ml-IN','hi-IN','ur-IN','en-IN'].includes(segment.language)) {
+        if (['kn-IN','ta-IN','te-IN','ml-IN','hi-IN','ur-IN','cmn-CN','en-IN'].includes(segment.language)) {
           if (await playServerSpeech(segment.text,segment.language,generation)) continue;
           if (generation!==speechGeneration) return false;
         }
@@ -902,7 +906,7 @@
     function needsTargetTranslation(text) {
       const source=String(text||'');
       if (!Array.from(source).some(character=>/\p{L}/u.test(character))) return false;
-      if (englishMode) return /[\u0900-\u097f\u0b80-\u0bff\u0c00-\u0c7f\u0c80-\u0cff\u0d00-\u0d7f]/.test(source);
+      if (englishMode) return /[\u0900-\u097f\u0b80-\u0bff\u0c00-\u0c7f\u0c80-\u0cff\u0d00-\u0d7f\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/.test(source);
       return !/[\u0c80-\u0cff]/.test(source);
     }
     async function translateOnDemand(text) {
