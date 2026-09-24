@@ -4,12 +4,21 @@ import hashlib
 import json
 import unittest
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from unittest.mock import patch
 
 from simple_websocket.errors import ConnectionClosed
 
 from api.app import _pi_hub, _serve_pi_browser_socket, _serve_pi_device_socket, app
 from api.pi_bridge import PiBridgeError, PiSessionHub
+
+
+class PiRuntimeConfigurationTests(unittest.TestCase):
+    def test_gunicorn_timeout_covers_bounded_pi_session(self) -> None:
+        dockerfile = (Path(__file__).parents[1] / "Dockerfile").read_text(encoding="utf-8")
+
+        self.assertIn("--timeout 3600", dockerfile)
+        self.assertNotIn("--timeout 90 ", dockerfile)
 
 
 class MutableClock:
