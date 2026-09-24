@@ -109,3 +109,42 @@ This rollback restores the preceding application revision. Its original
 90-second request timeout would require a separate configuration update because
 the timeout belongs to the service revision template rather than traffic
 routing.
+
+## Long-WebSocket repair and physical gallery checkpoint
+
+The first supervised production Pi burst exposed a second 90-second ceiling in
+the container command: Cloud Run allowed 3,600 seconds, but Gunicorn still used
+`--timeout 90`. The Pi safely preserved all four originals, but the socket
+closed before its inactive acknowledgement and normal upload. The selected
+original was recovered through the existing hash-bound upload contract within
+the job's ten-minute grace window; the owner confirmed that it appeared in the
+phone gallery.
+
+Commit `844487d` changes the Gunicorn timeout to 3,600 seconds and adds a
+regression test that binds the container timeout to the bounded Pi session.
+The combined suite passed 94/94 tests. Cloud Build
+`83e475f4-b370-48bf-992d-1fa7cbf10a89` produced immutable image digest:
+
+`sha256:aa14ec4cff763353e0c77c76b68d25adcc31e13898bd285c5a69be350bc73741`
+
+The image was deployed first to staging revision
+`vlens-pi-c-test-00004-wts`. A synthetic device WebSocket remained
+authenticated for 95.3 seconds, then received a fresh `preview_start` command;
+no image, upload, or provider was used, and the temporary session was revoked.
+
+The exact digest was promoted to production revision `vlens-a-00078-v8p`,
+which serves 100 percent of traffic with minimum instances zero, maximum one,
+concurrency eight, and both Cloud Run and Gunicorn request ceilings at 3,600
+seconds. Public health returned application version `2026-09-23.2`, and
+error-level logs for the new revision were empty. The prior working application
+revision `vlens-a-00077-b22` remains available for emergency rollback:
+
+```sh
+gcloud run services update-traffic vlens-a \
+  --project villagelensai --region us-central1 \
+  --to-revisions vlens-a-00077-b22=100
+```
+
+That rollback reintroduces the 90-second Gunicorn limit. The production
+revision restart invalidated the temporary in-memory Pi pairing session but did
+not remove the accepted gallery object or any Pi-local original.
