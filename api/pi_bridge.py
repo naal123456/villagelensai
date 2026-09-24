@@ -86,6 +86,9 @@ class PiSessionHub:
         self._sessions: dict[str, PiBrowserSession] = {}
         self._pairings: dict[str, str] = {}
         self._tokens: dict[str, str] = {}
+        self._persistent_tokens: dict[str, str] = {}
+        self._connected_profiles: set[str] = set()
+        self._active_profile_sessions: dict[str, str] = {}
         self._lock = threading.RLock()
 
     def reset(self) -> None:
@@ -93,6 +96,9 @@ class PiSessionHub:
             self._sessions.clear()
             self._pairings.clear()
             self._tokens.clear()
+            self._persistent_tokens.clear()
+            self._connected_profiles.clear()
+            self._active_profile_sessions.clear()
 
     def _purge(self) -> None:
         now = self._now()
@@ -102,16 +108,37 @@ class PiSessionHub:
             self._pairings.pop(session.pairing_hash, None)
             if session.device_token_hash:
                 self._tokens.pop(session.device_token_hash, None)
+            if self._active_profile_sessions.get(session.device_profile_id) == session_id:
+                self._active_profile_sessions.pop(session.device_profile_id, None)
 
-    def create_session(self, tester_id: str, output_language: str) -> dict[str, str]:
+    def _has_live_work(self, session: PiBrowserSession, now: datetime) -> bool:
+        if session.preview_until is not None and session.preview_until > now:
+            return True
+        return any(not job.uploaded and job.upload_deadline > now for job in session.jobs.values())
+
+    def _claim_profile(self, session: PiBrowserSession) -> None:
+        profile_id = session.device_profile_id
+        if not profile_id:
+            return
+        prior_id = self._active_profile_sessions.get(profile_id, "")
+        prior = self._sessions.get(prior_id)
+        if prior is not None and prior is not session and self._has_live_work(prior, self._now()):
+            raise PiBridgeError("PI_DEVICE_BUSY", 409)
+        self._active_profile_sessions[profile_id] = session.session_id
+
+    def create_session(
+        self, tester_id: str, output_language: str, device_profile_id: str = "",
+    ) -> dict[str, Any]:
         if not re.fullmatch(r"a(?:10|[1-9])", tester_id):
             raise PiBridgeError("PI_TESTER_REQUIRED", 400)
         if output_language not in {"kn", "en"}:
             raise PiBridgeError("PI_LANGUAGE_INVALID", 400)
+        if device_profile_id and not DEVICE_PROFILE_PATTERN.fullmatch(device_profile_id):
+            raise PiBridgeError("PI_DEVICE_PROFILE_INVALID", 400)
         now = self._now()
         session_id = secrets.token_hex(16)
-        pairing_code = secrets.token_urlsafe(12)
-        pairing_hash = _secret_hash(pairing_code)
+        pairing_code = "" if device_profile_id else secrets.token_urlsafe(12)
+        pairing_hash = _secret_hash(pairing_code) if pairing_code else ""
         session = PiBrowserSession(
             session_id=session_id,
             tester_id=tester_id,
@@ -119,18 +146,37 @@ class PiSessionHub:
             created_at=now,
             expires_at=now + SESSION_TTL,
             pairing_hash=pairing_hash,
+            paired=bool(device_profile_id),
+            device_profile_id=device_profile_id,
         )
         with self._lock:
             self._purge()
             self._sessions[session_id] = session
-            self._pairings[pairing_hash] = session_id
-        return {
+            try:
+                self._claim_profile(session)
+            except PiBridgeError:
+                self._sessions.pop(session_id, None)
+                raise
+            if pairing_hash:
+                self._pairings[pairing_hash] = session_id
+            if device_profile_id in self._connected_profiles:
+                session.events.append({
+                    "type": "device_connection",
+                    "state": "connected",
+                    "device_profile_id": device_profile_id,
+                })
+        value: dict[str, Any] = {
             "schema": SESSION_SCHEMA,
             "session_id": session_id,
-            "pairing_code": pairing_code,
-            "pairing_expires_at": _timestamp(now + PAIRING_TTL),
+            "paired": session.paired,
+            "device_profile_id": device_profile_id,
+            "device_connected": device_profile_id in self._connected_profiles,
             "expires_at": _timestamp(session.expires_at),
         }
+        if pairing_code:
+            value["pairing_code"] = pairing_code
+            value["pairing_expires_at"] = _timestamp(now + PAIRING_TTL)
+        return value
 
     def session_for_browser(self, session_id: str, tester_id: str) -> PiBrowserSession:
         with self._lock:
@@ -147,6 +193,7 @@ class PiSessionHub:
             "session_id": session.session_id,
             "paired": session.paired,
             "device_profile_id": session.device_profile_id if session.paired else "",
+            "device_connected": session.device_profile_id in self._connected_profiles,
             "expires_at": _timestamp(session.expires_at),
         }
 
@@ -157,6 +204,8 @@ class PiSessionHub:
             self._pairings.pop(session.pairing_hash, None)
             if session.device_token_hash:
                 self._tokens.pop(session.device_token_hash, None)
+            if self._active_profile_sessions.get(session.device_profile_id) == session.session_id:
+                self._active_profile_sessions.pop(session.device_profile_id, None)
             session.commands.clear()
             session.events.clear()
 
@@ -179,6 +228,7 @@ class PiSessionHub:
             session.device_profile_id = device_profile_id
             session.device_token_hash = token_hash
             self._tokens[token_hash] = session.session_id
+            self._claim_profile(session)
             session.events.append({
                 "type": "device_paired",
                 "device_profile_id": device_profile_id,
@@ -191,14 +241,75 @@ class PiSessionHub:
             "expires_at": _timestamp(session.expires_at),
         }
 
+    def rollback_pairing(self, token: str) -> None:
+        token_hash = _secret_hash(token)
+        with self._lock:
+            session_id = self._tokens.pop(token_hash, "")
+            session = self._sessions.get(session_id)
+            if session is None:
+                return
+            if self._active_profile_sessions.get(session.device_profile_id) == session_id:
+                self._active_profile_sessions.pop(session.device_profile_id, None)
+            session.paired = False
+            session.device_profile_id = ""
+            session.device_token_hash = ""
+            session.commands.clear()
+            session.events.clear()
+
+    def register_persistent_token(self, token: str, device_profile_id: str) -> None:
+        if not DEVICE_PROFILE_PATTERN.fullmatch(device_profile_id):
+            raise PiBridgeError("PI_DEVICE_PROFILE_INVALID", 400)
+        if not token or len(token) > 128:
+            raise PiBridgeError("PI_DEVICE_AUTH_REQUIRED", 401)
+        with self._lock:
+            self._persistent_tokens[_secret_hash(token)] = device_profile_id
+
+    def revoke_profile(self, device_profile_id: str) -> None:
+        with self._lock:
+            hashes = [
+                token_hash for token_hash, profile_id in self._persistent_tokens.items()
+                if profile_id == device_profile_id
+            ]
+            for token_hash in hashes:
+                self._persistent_tokens.pop(token_hash, None)
+            self._connected_profiles.discard(device_profile_id)
+            self._active_profile_sessions.pop(device_profile_id, None)
+            for session in self._sessions.values():
+                if session.device_profile_id == device_profile_id:
+                    if session.device_token_hash:
+                        self._tokens.pop(session.device_token_hash, None)
+                    session.device_token_hash = ""
+                    session.paired = False
+                    session.commands.clear()
+                    session.events.append({"type": "device_revoked"})
+
+    def _profile_for_token(self, token: str) -> str:
+        if not token or len(token) > 128:
+            raise PiBridgeError("PI_DEVICE_AUTH_REQUIRED", 401)
+        token_hash = _secret_hash(token)
+        session_id = self._tokens.get(token_hash, "")
+        session = self._sessions.get(session_id)
+        if session is not None:
+            return session.device_profile_id
+        profile_id = self._persistent_tokens.get(token_hash, "")
+        if not profile_id:
+            raise PiBridgeError("PI_DEVICE_AUTH_INVALID", 401)
+        return profile_id
+
     def session_for_token(self, token: str) -> PiBrowserSession:
         if not token or len(token) > 128:
             raise PiBridgeError("PI_DEVICE_AUTH_REQUIRED", 401)
         with self._lock:
             self._purge()
-            session_id = self._tokens.get(_secret_hash(token), "")
+            token_hash = _secret_hash(token)
+            session_id = self._tokens.get(token_hash, "")
+            if not session_id:
+                profile_id = self._persistent_tokens.get(token_hash, "")
+                session_id = self._active_profile_sessions.get(profile_id, "")
             session = self._sessions.get(session_id)
             if session is None:
+                if token_hash in self._persistent_tokens:
+                    raise PiBridgeError("PI_DEVICE_SESSION_WAITING", 409)
                 raise PiBridgeError("PI_DEVICE_AUTH_INVALID", 401)
             return session
 
@@ -215,6 +326,7 @@ class PiSessionHub:
             session = self.session_for_browser(session_id, tester_id)
             if not session.paired:
                 raise PiBridgeError("PI_DEVICE_NOT_PAIRED", 409)
+            self._claim_profile(session)
             now = self._now()
             if action == "capture":
                 session.preview_until = None
@@ -263,17 +375,29 @@ class PiSessionHub:
 
     def next_command(self, token: str) -> dict[str, Any] | None:
         with self._lock:
-            session = self.session_for_token(token)
+            try:
+                session = self.session_for_token(token)
+            except PiBridgeError as error:
+                if error.code == "PI_DEVICE_SESSION_WAITING":
+                    return None
+                raise
             return session.commands.popleft() if session.commands else None
 
     def publish_device_connection(self, token: str, connected: bool) -> None:
         with self._lock:
-            session = self.session_for_token(token)
-            session.events.append({
-                "type": "device_connection",
-                "state": "connected" if connected else "disconnected",
-                "device_profile_id": session.device_profile_id,
-            })
+            profile_id = self._profile_for_token(token)
+            if connected:
+                self._connected_profiles.add(profile_id)
+            else:
+                self._connected_profiles.discard(profile_id)
+            session_id = self._active_profile_sessions.get(profile_id, "")
+            session = self._sessions.get(session_id)
+            if session is not None:
+                session.events.append({
+                    "type": "device_connection",
+                    "state": "connected" if connected else "disconnected",
+                    "device_profile_id": profile_id,
+                })
 
     def next_browser_event(
         self, session_id: str, tester_id: str,

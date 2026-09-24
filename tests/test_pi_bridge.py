@@ -9,7 +9,13 @@ from unittest.mock import patch
 
 from simple_websocket.errors import ConnectionClosed
 
-from api.app import _pi_hub, _serve_pi_browser_socket, _serve_pi_device_socket, app
+from api.app import (
+    _authenticate_pi_device,
+    _pi_hub,
+    _serve_pi_browser_socket,
+    _serve_pi_device_socket,
+    app,
+)
 from api.pi_bridge import PiBridgeError, PiSessionHub
 
 
@@ -104,6 +110,46 @@ class PiSessionHubTests(unittest.TestCase):
         with self.assertRaisesRegex(PiBridgeError, "PI_CAPTURE_SOURCE_CONFLICT"):
             self.hub.existing_acceptance(device["device_token"], request_id, "b" * 64)
 
+    def test_persistent_device_waits_inactive_then_routes_after_browser_press(self) -> None:
+        token = "persistent-device-token-with-enough-entropy-012345"
+        self.hub.register_persistent_token(token, "rpi5-bench-01")
+        self.hub.publish_device_connection(token, True)
+
+        self.assertIsNone(self.hub.next_command(token))
+        browser = self.hub.create_session("a1", "kn", "rpi5-bench-01")
+        self.assertTrue(browser["paired"])
+        self.assertTrue(browser["device_connected"])
+        self.assertNotIn("pairing_code", browser)
+
+        command = self.hub.create_command(browser["session_id"], "a1", "preview_start")
+        self.assertEqual(self.hub.next_command(token), command)
+        self.hub.revoke_profile("rpi5-bench-01")
+        with self.assertRaisesRegex(PiBridgeError, "PI_DEVICE_AUTH_INVALID"):
+            self.hub.next_command(token)
+
+    def test_revocation_removes_both_enrollment_and_original_pairing_token(self) -> None:
+        _browser, device = self.pair()
+        token = device["device_token"]
+        self.hub.register_persistent_token(token, "rpi5-bench-01")
+
+        self.hub.revoke_profile("rpi5-bench-01")
+
+        with self.assertRaisesRegex(PiBridgeError, "PI_DEVICE_AUTH_INVALID"):
+            self.hub.session_for_token(token)
+
+    def test_persistent_device_cannot_be_taken_over_during_live_work(self) -> None:
+        token = "persistent-device-token-with-enough-entropy-012345"
+        self.hub.register_persistent_token(token, "rpi5-bench-01")
+        first = self.hub.create_session("a1", "kn", "rpi5-bench-01")
+        self.hub.create_command(first["session_id"], "a1", "preview_start")
+
+        with self.assertRaisesRegex(PiBridgeError, "PI_DEVICE_BUSY"):
+            self.hub.create_session("a2", "en", "rpi5-bench-01")
+
+        self.clock.value += timedelta(seconds=31)
+        second = self.hub.create_session("a2", "en", "rpi5-bench-01")
+        self.assertTrue(second["paired"])
+
 
 class PiBridgeApiTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -146,6 +192,8 @@ class PiBridgeApiTests(unittest.TestCase):
         self.assertIn(b"piCamera.hidden=!piLane", pi_page.data)
         self.assertIn(b"new WebSocket", pi_page.data)
         self.assertIn(b"if (!piLane) return", pi_page.data)
+        self.assertIn(b"if (value.paired)", pi_page.data)
+        self.assertIn(b"Pi enrolled. Waiting for it to connect", pi_page.data)
 
     def test_access_gate_protects_c_but_allows_one_time_device_pairing(self) -> None:
         app.config.update(
@@ -189,6 +237,57 @@ class PiBridgeApiTests(unittest.TestCase):
         self.assertEqual(missing.status_code, 400)
         self.assertEqual(other.status_code, 404)
 
+    @patch("api.app.CAPTURE_BUCKET", "existing-private-bucket")
+    @patch("api.app._pi_enrollment_store")
+    def test_enrollment_survives_hub_restart_and_reviewer_can_revoke(self, store: object) -> None:
+        state = {"profile": ""}
+
+        def active_profile_id() -> str:
+            return state["profile"]
+
+        def enroll(profile_id: str, _token: str) -> dict[str, str]:
+            state["profile"] = profile_id
+            return {
+                "schema": "villagelens.pi-device-enrollment.v1",
+                "device_profile_id": profile_id,
+                "enrolled_at": "2026-09-24T18:00:00Z",
+                "status": "active",
+            }
+
+        store.return_value.active_profile_id.side_effect = active_profile_id
+        store.return_value.enroll.side_effect = enroll
+        store.return_value.revoke.return_value = {
+            "schema": "villagelens.pi-device-enrollment.v1",
+            "device_profile_id": "rpi5-bench-01",
+            "status": "revoked",
+            "revoked_at": "2026-09-24T18:01:00Z",
+        }
+        session, device = self.create_and_pair()
+        self.assertEqual(device["schema"], "villagelens.pi-device-enrollment.v1")
+        self.assertNotIn("session_id", device)
+        self.assertNotIn("expires_at", device)
+
+        _pi_hub.reset()
+        restored = self.client.post(
+            "/api/pi/v1/sessions",
+            headers={"X-VillageLens-Tester-ID": "a2"},
+            json={"output_language": "en"},
+        ).get_json()
+        self.assertTrue(restored["paired"])
+        self.assertNotIn("pairing_code", restored)
+
+        forbidden = self.client.delete(
+            "/api/pi/v1/devices/rpi5-bench-01",
+            headers={"X-VillageLens-Tester-ID": "a1"},
+        )
+        revoked = self.client.delete(
+            "/api/pi/v1/devices/rpi5-bench-01",
+            headers={"X-VillageLens-Tester-ID": "a3"},
+        )
+        self.assertEqual(forbidden.status_code, 403)
+        self.assertEqual(revoked.status_code, 200)
+        store.return_value.revoke.assert_called_once_with("rpi5-bench-01")
+
     def test_browser_can_revoke_its_device_session(self) -> None:
         session, device = self.create_and_pair()
         revoked = self.client.delete(
@@ -199,6 +298,19 @@ class PiBridgeApiTests(unittest.TestCase):
         self.assertEqual(revoked.status_code, 200)
         with self.assertRaisesRegex(PiBridgeError, "PI_DEVICE_AUTH_INVALID"):
             _pi_hub.session_for_token(device["device_token"])
+
+    def test_persistent_authentication_fails_closed_when_storage_fails(self) -> None:
+        _session, device = self.create_and_pair()
+        with (
+            patch("api.app.CAPTURE_BUCKET", "existing-private-bucket"),
+            patch("api.app._pi_enrollment_store") as store,
+        ):
+            store.return_value.authenticate.side_effect = PiBridgeError(
+                "PI_ENROLLMENT_STORAGE_UNAVAILABLE", 503,
+            )
+
+            with self.assertRaisesRegex(PiBridgeError, "PI_ENROLLMENT_STORAGE_UNAVAILABLE"):
+                _authenticate_pi_device(device["device_token"])
 
     def test_command_reaches_only_paired_device(self) -> None:
         session, device = self.create_and_pair()

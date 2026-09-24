@@ -1921,6 +1921,9 @@
         } else if (message.type==='device_connection'&&message.state==='connected') {
           piCameraStatus.textContent=englishMode?'Pi connected. Starting preview…':'ಪೈ ಸಂಪರ್ಕವಾಗಿದೆ. ಮುನ್ನೋಟ ಆರಂಭವಾಗುತ್ತಿದೆ…';
           try { await sendPiCommand('preview_start'); } catch (_) {}
+        } else if (message.type==='device_revoked') {
+          piPairing.hidden=true; piSession=null;
+          piCameraStatus.textContent=englishMode?'Pi enrollment was revoked.':'ಪೈ ನೋಂದಣಿಯನ್ನು ರದ್ದು ಮಾಡಲಾಗಿದೆ.';
         } else if (message.type==='capture_state') {
           const labels={capture_active:'Camera active—hold the object steady.',capture_inactive:'Camera inactive. Selecting the clearest picture…',
             uploading:'Uploading the selected picture…',complete:'Picture accepted.',failed:'Pi capture failed. Please try again.'};
@@ -1970,9 +1973,17 @@
           body:JSON.stringify({output_language:outputLanguage}),
         });
         const value=await response.json(); if (!response.ok) throw new Error(value.error||'PI_SESSION_FAILED');
-        piSession=value; piPairing.hidden=false;
-        piPairing.textContent=`Pairing code: ${value.pairing_code}`;
-        piCameraStatus.textContent=englishMode?'Connect the Pi with this one-time code.':'ಈ ಒಂದು ಬಾರಿ ಕೋಡ್‌ನಿಂದ ಪೈ ಅನ್ನು ಸಂಪರ್ಕಿಸಿ.';
+        piSession=value;
+        if (value.paired) {
+          piPairing.hidden=true;
+          piCameraStatus.textContent=value.device_connected?
+            (englishMode?'Pi enrolled. Starting a short preview…':'ಪೈ ನೋಂದಾಯಿಸಲಾಗಿದೆ. ಚಿಕ್ಕ ಮುನ್ನೋಟ ಆರಂಭವಾಗುತ್ತಿದೆ…'):
+            (englishMode?'Pi enrolled. Waiting for it to connect…':'ಪೈ ನೋಂದಾಯಿಸಲಾಗಿದೆ. ಸಂಪರ್ಕಕ್ಕಾಗಿ ಕಾಯಲಾಗುತ್ತಿದೆ…');
+        } else {
+          piPairing.hidden=false;
+          piPairing.textContent=`Pairing code: ${value.pairing_code}`;
+          piCameraStatus.textContent=englishMode?'Connect the Pi with this one-time code.':'ಈ ಒಂದು ಬಾರಿ ಕೋಡ್‌ನಿಂದ ಪೈ ಅನ್ನು ಸಂಪರ್ಕಿಸಿ.';
+        }
         connectPiSocket();
       } catch (_) {
         piCameraStatus.textContent=englishMode?'Could not create the Pi camera session.':'ಪೈ ಕ್ಯಾಮೆರಾ ಸಂಪರ್ಕ ಸಿದ್ಧವಾಗಲಿಲ್ಲ.';

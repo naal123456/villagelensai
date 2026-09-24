@@ -27,6 +27,7 @@ from flask_sock import Sock
 from PIL import Image, ImageOps, UnidentifiedImageError
 from simple_websocket.errors import ConnectionClosed
 
+from .pi_enrollment import ENROLLMENT_SCHEMA, PiEnrollmentStore
 from .pi_bridge import PiBridgeError, PiSessionHub
 
 
@@ -2504,6 +2505,22 @@ def _pi_capture_provenance(
     }
 
 
+def _pi_enrollment_store() -> PiEnrollmentStore:
+    return PiEnrollmentStore(_storage_bucket)
+
+
+def _persistent_pi_profile() -> str:
+    return _pi_enrollment_store().active_profile_id() if CAPTURE_BUCKET else ""
+
+
+def _authenticate_pi_device(token: str) -> str:
+    if CAPTURE_BUCKET:
+        profile_id = _pi_enrollment_store().authenticate(token)
+        _pi_hub.register_persistent_token(token, profile_id)
+        return profile_id
+    return _pi_hub.session_for_token(token).device_profile_id
+
+
 @app.post("/api/pi/v1/sessions")
 def create_pi_session() -> tuple[Response, int]:
     payload = request.get_json(silent=True)
@@ -2512,7 +2529,9 @@ def create_pi_session() -> tuple[Response, int]:
         if isinstance(payload, dict)
         else ""
     )
-    value = _pi_hub.create_session(_tester_id(), output_language)
+    value = _pi_hub.create_session(
+        _tester_id(), output_language, _persistent_pi_profile(),
+    )
     value["browser_socket_path"] = f"/api/pi/v1/browser/socket/{value['session_id']}"
     return jsonify(value), 201
 
@@ -2546,12 +2565,39 @@ def pair_pi_device() -> tuple[Response, int]:
         str(payload.get("device_profile_id", "")).strip(),
     )
     value["device_socket_path"] = "/api/pi/v1/device/socket"
+    if CAPTURE_BUCKET:
+        try:
+            enrolled = _pi_enrollment_store().enroll(
+                str(value["device_profile_id"]), str(value["device_token"]),
+            )
+        except PiBridgeError:
+            _pi_hub.rollback_pairing(str(value["device_token"]))
+            raise
+        _pi_hub.register_persistent_token(
+            str(value["device_token"]), str(value["device_profile_id"]),
+        )
+        value = {
+            **enrolled,
+            "schema": ENROLLMENT_SCHEMA,
+            "device_token": value["device_token"],
+            "device_socket_path": value["device_socket_path"],
+        }
+    return jsonify(value), 200
+
+
+@app.delete("/api/pi/v1/devices/<device_profile_id>")
+def revoke_pi_device(device_profile_id: str) -> tuple[Response, int]:
+    if not _is_reviewer(_tester_id()):
+        return jsonify(error="PI_DEVICE_REVOCATION_FORBIDDEN"), 403
+    value = _pi_enrollment_store().revoke(device_profile_id)
+    _pi_hub.revoke_profile(device_profile_id)
     return jsonify(value), 200
 
 
 @app.post("/api/pi/v1/device/captures/<request_id>")
 def upload_pi_capture(request_id: str) -> tuple[Response, int]:
     token = _pi_device_token()
+    _authenticate_pi_device(token)
     authenticated_session = _pi_hub.session_for_token(token)
     source = request.get_data(cache=False)
     source_sha256 = hashlib.sha256(source).hexdigest()
@@ -2623,10 +2669,10 @@ def _serve_pi_device_socket(socket: Any) -> None:
         if not isinstance(payload, dict) or payload.get("type") != "authenticate":
             raise PiBridgeError("PI_DEVICE_AUTH_REQUIRED", 401)
         token = str(payload.get("device_token", ""))
-        session = _pi_hub.session_for_token(token)
+        device_profile_id = _authenticate_pi_device(token)
         _pi_hub.publish_device_connection(token, True)
         socket.send(json.dumps({
-            "type": "authenticated", "device_profile_id": session.device_profile_id,
+            "type": "authenticated", "device_profile_id": device_profile_id,
         }))
         while True:
             command = _pi_hub.next_command(token)
