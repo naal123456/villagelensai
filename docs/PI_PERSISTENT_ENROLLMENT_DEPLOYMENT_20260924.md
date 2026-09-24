@@ -3,33 +3,35 @@
 ## Outcome
 
 Persistent Pi enrollment is integrated into `main` and deployed to both the
-isolated Pi staging service and production. Public route and contract checks
-passed without enrolling a synthetic device, uploading a photograph, or
-invoking an OCR, inference, speech, or other paid provider.
+isolated Pi staging service and production. The real Pi was enrolled once,
+reconnected after later Cloud Run deployments without another pairing code,
+provided an explicitly requested preview, and delivered explicitly requested
+captures to the existing gallery and reading pipeline.
 
-The real Pi has not yet been re-enrolled. The persistent enrollment object is
-absent, so the next `/c` session will correctly display a one-time owner pairing
-code. Physical reconnect and camera testing remain pending.
+The latest capture interaction keeps the Pi panel visible, shows an elapsed
+timer through camera acquisition, frame selection, upload, and gallery loading,
+then transitions directly to the captured gallery item. This removes the
+intermediate home-screen flash reported during physical testing.
 
 ## Source and build
 
-- integrated source commit: `4481128`
-- application version: `2026-09-24.1`
-- Cloud Build: `2d6957d9-2b25-45fa-96eb-8345f50f0f92` (`SUCCESS`)
-- image: `gcr.io/villagelensai/vlens-pi-c-test:4481128`
+- latest source commit: `e0e5570`
+- application version: `2026-09-24.3`
+- Cloud Build: `be3e4353-f67e-4e2b-bfce-aa97ea4eff6e` (`SUCCESS`)
+- image: `gcr.io/villagelensai/vlens-pi-c-test:e0e5570`
 - immutable digest:
-  `sha256:3663d12258b05d756fecfe165a87271ae9f0efff4079632e83d1e609c5bc7e36`
+  `sha256:61bafeeba9b467ea979009f08c8888334c92daee9c1ba9ffd74334e53fbbb014`
 
-The pre-deployment suite passed 102 tests. Python compilation, embedded browser
+The latest pre-deployment suite passed 103 tests. Python compilation, embedded browser
 JavaScript parsing, service-worker parsing, dependency checking, and
 `git diff --check` also passed.
 
 ## Staging
 
 - service: `vlens-pi-c-test`
-- revision: `vlens-pi-c-test-00005-vs4`
+- revision: `vlens-pi-c-test-00007-k47`
 - traffic: 100 percent
-- public health: HTTP 200, version `2026-09-24.1`, access gate enabled, no
+- public health: HTTP 200, version `2026-09-24.3`, access gate enabled, no
   missing local OCR models
 - authenticated `/a`: HTTP 200
 - authenticated `/b`: existing HTTP 302 English redirect
@@ -42,10 +44,10 @@ JavaScript parsing, service-worker parsing, dependency checking, and
 
 - service: `vlens-a`
 - region: `us-central1`
-- revision: `vlens-a-00079-nqd`
+- revision: `vlens-a-00081-44t`
 - traffic: 100 percent
 - public domain: `https://villagelensai.com`
-- public health: HTTP 200, version `2026-09-24.1`, access gate enabled, no
+- public health: HTTP 200, version `2026-09-24.3`, access gate enabled, no
   missing local OCR models
 - authenticated `/a`: HTTP 200
 - authenticated `/b`: existing HTTP 302 English redirect
@@ -59,14 +61,29 @@ secret mappings, OpenAI secret and model configuration, one CPU, 2 GiB memory,
 concurrency eight, 3,600-second request timeout, minimum instances zero, and
 maximum instances one. No service or API was newly enabled.
 
+After the production update, the enrolled Pi agent remained running and had an
+established secure connection. Its local credential remained mode `0600`.
+This check did not request preview or capture. Error-level logs for the latest
+production revision were empty at validation time.
+
 ## Enrollment boundary
 
-The server will create only
+The server created
 `gs://villagelensai-captures/pi-enrollments/v1/default.json` during the real
-owner enrollment. That object did not exist during deployment validation. It
-will contain the device profile, state, timestamps, and token SHA-256—not the
+owner enrollment. It contains the device profile, state, timestamps, and token SHA-256—not the
 plaintext token. Browser sessions, commands, preview frames, and capture jobs
 remain memory-only.
+
+## Physical findings and follow-up
+
+- A difficult, small-text target reached the gallery and was parsed after
+  improving lighting. Reading accuracy differed across existing UI actions;
+  the owner retained the private gallery reference for later investigation.
+- An earlier upload returned `LOCAL_OCR_UNAVAILABLE` because local OCR exceeded
+  its 20-second ceiling. Version `2026-09-24.2` raised that ceiling to 45
+  seconds, while Pi upload waits are bounded at 75 seconds.
+- These checks qualify the capture bridge interaction, not the temporary camera
+  mount or the device for field or wearable use.
 
 ## Rollback
 
@@ -75,10 +92,10 @@ Return production traffic to the retained prior revision:
 ```sh
 gcloud run services update-traffic vlens-a \
   --project villagelensai --region us-central1 \
-  --to-revisions vlens-a-00078-v8p=100
+  --to-revisions vlens-a-00080-t6j=100
 ```
 
-For staging, route traffic to `vlens-pi-c-test-00004-wts`. Rollback does not
+For staging, route traffic to `vlens-pi-c-test-00006-j29`. Rollback does not
 delete a future enrollment object. If the persistent credential is suspected
 of exposure, revoke it through the reviewer endpoint before removing the
 Pi-local credential or enrolling a replacement.
