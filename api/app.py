@@ -27,6 +27,7 @@ from flask_sock import Sock
 from PIL import Image, ImageOps, UnidentifiedImageError
 from simple_websocket.errors import ConnectionClosed
 
+from .mentra_bridge import MentraBridgeError, MentraSessionHub
 from .pi_enrollment import ENROLLMENT_SCHEMA, PiEnrollmentStore
 from .pi_bridge import PiBridgeError, PiSessionHub
 
@@ -62,7 +63,7 @@ OPENAI_TRANSLATION_MODEL = os.environ.get("VILLAGELENS_TRANSLATION_MODEL", "gpt-
 OPENAI_STAGE_TWO_ANALYSIS_VERSION = "luna-compact-v1"
 OPENAI_STAGE_THREE_ANALYSIS_VERSION = "terra-ocr-grounded-v4"
 OPENAI_STAGE_FOUR_ANALYSIS_VERSION = "sol-ocr-review-v4"
-APP_VERSION = "2026-09-24.3"
+APP_VERSION = "2026-09-24.4"
 SPEECH_VOICES = {
     "kn-IN": os.environ.get("VILLAGELENS_KANNADA_TTS_VOICE", "kn-IN-Wavenet-A"),
     "ta-IN": os.environ.get("VILLAGELENS_TAMIL_TTS_VOICE", "ta-IN-Wavenet-A"),
@@ -190,6 +191,7 @@ app.config["MAX_CONTENT_LENGTH"] = MAX_CAPTURE_BYTES
 app.config["VILLAGELENS_ACCESS_CODE"] = os.environ.get("VILLAGELENS_ACCESS_CODE", "").strip()
 app.config["VILLAGELENS_SESSION_SECRET"] = os.environ.get("VILLAGELENS_SESSION_SECRET", "")
 _capture_processing_locks: defaultdict[tuple[str, int], threading.Lock] = defaultdict(threading.Lock)
+_mentra_hub = MentraSessionHub()
 _pi_hub = PiSessionHub()
 
 
@@ -267,8 +269,10 @@ def _has_access() -> bool:
 def _require_access() -> Response | tuple[Response, int] | None:
     if request.path in {
         "/access", "/access/link", "/health", "/healthz", "/api/pi/v1/device/pair",
-        "/api/pi/v1/device/socket",
-    } or request.path.startswith("/api/pi/v1/device/captures/") or _has_access():
+        "/api/pi/v1/device/socket", "/api/mentra/v1/device/pair",
+    } or request.path.startswith("/api/pi/v1/device/captures/") or request.path.startswith(
+        "/api/mentra/v1/device/captures/"
+    ) or _has_access():
         return None
     if request.path.startswith("/api/"):
         return jsonify(error="ACCESS_REQUIRED"), 401
@@ -330,6 +334,11 @@ def _capture_too_large(_: Exception) -> tuple[Response, int]:
 
 @app.errorhandler(PiBridgeError)
 def _pi_bridge_error(error: PiBridgeError) -> tuple[Response, int]:
+    return jsonify(error=error.code), error.status
+
+
+@app.errorhandler(MentraBridgeError)
+def _mentra_bridge_error(error: MentraBridgeError) -> tuple[Response, int]:
     return jsonify(error=error.code), error.status
 
 
@@ -2464,6 +2473,102 @@ def usage_events() -> tuple[Response, int]:
     return jsonify(accepted=len(accepted)), 202
 
 
+def _mentra_device_token() -> str:
+    return _mentra_hub.token_from_authorization(request.headers.get("Authorization", ""))
+
+
+@app.post("/api/mentra/v1/sessions")
+def create_mentra_session() -> tuple[Response, int]:
+    payload = request.get_json(silent=True)
+    output_language = (
+        str(payload.get("output_language", "")).strip().lower()
+        if isinstance(payload, dict)
+        else ""
+    )
+    return jsonify(_mentra_hub.create_session(_tester_id(), output_language)), 201
+
+
+@app.get("/api/mentra/v1/sessions/<session_id>")
+def mentra_session_status(session_id: str) -> tuple[Response, int]:
+    return jsonify(_mentra_hub.describe_session(session_id, _tester_id())), 200
+
+
+@app.delete("/api/mentra/v1/sessions/<session_id>")
+def revoke_mentra_session(session_id: str) -> tuple[Response, int]:
+    _mentra_hub.revoke_session(session_id, _tester_id())
+    return jsonify(revoked=True), 200
+
+
+@app.post("/api/mentra/v1/device/pair")
+def pair_mentra_companion() -> tuple[Response, int]:
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        raise MentraBridgeError("MENTRA_PAIRING_REQUEST_INVALID", 400)
+    value = _mentra_hub.pair_companion(str(payload.get("pairing_code", "")))
+    request_id = value["request_id"]
+    value["photo_request"] = {
+        "request_id": request_id,
+        "webhook_url": (
+            f"{request.url_root.rstrip('/')}/api/mentra/v1/device/captures/{request_id}"
+        ),
+        "auth_token": value.pop("device_token"),
+        "sound": True,
+        "exposure": "auto",
+    }
+    return jsonify(value), 200
+
+
+@app.post("/api/mentra/v1/device/captures/<request_id>")
+def upload_mentra_capture(request_id: str) -> tuple[Response, int]:
+    token = _mentra_device_token()
+    session = _mentra_hub.authorize_upload(token, request_id)
+    uploaded = request.files.get("photo")
+    if uploaded is None:
+        raise MentraBridgeError("MENTRA_PHOTO_REQUIRED", 400)
+    supplied_request_id = request.form.get("requestId", "").strip()
+    if supplied_request_id != request_id:
+        raise MentraBridgeError("MENTRA_CAPTURE_REQUEST_MISMATCH", 400)
+    source = uploaded.read(MAX_CAPTURE_BYTES + 1)
+    if not source:
+        raise MentraBridgeError("MENTRA_PHOTO_REQUIRED", 400)
+    if len(source) > MAX_CAPTURE_BYTES:
+        raise MentraBridgeError("MENTRA_PHOTO_TOO_LARGE", 413)
+    media_type = (uploaded.mimetype or "").split(";", 1)[0].lower()
+    if media_type not in ALLOWED_MEDIA_TYPES:
+        raise MentraBridgeError("MENTRA_PHOTO_MEDIA_TYPE_UNSUPPORTED", 415)
+    source_sha256 = hashlib.sha256(source).hexdigest()
+    session = _mentra_hub.validate_upload(token, request_id, source_sha256)
+    existing = _mentra_hub.existing_acceptance(token, request_id, source_sha256)
+    if existing is not None:
+        return jsonify(existing), 200
+    provenance = {
+        "schema": "villagelens.mentra-capture-provenance.v1",
+        "request_id": request_id,
+        "device_model": "mentra-live",
+        "capture_mode": "explicit-still-photo",
+        "transport": "mentra-sdk-photo-webhook",
+        "received_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "source_sha256": source_sha256,
+        "source_bytes": len(source),
+    }
+    result, status = _ingest_capture(
+        source,
+        media_type,
+        tester_id=session.tester_id,
+        requested_id=request_id,
+        capture_source="mentra-live-v1",
+        capture_provenance=provenance,
+    )
+    if status != 200:
+        return jsonify(result), status
+    if not result.get("retained"):
+        return jsonify(error="MENTRA_CAPTURE_NOT_RETAINED"), 503
+    acceptance = _mentra_hub.complete_upload(
+        token, request_id, source_sha256, str(result["capture_id"]),
+    )
+    return jsonify(acceptance), 200
+
+
 def _pi_device_token() -> str:
     return _pi_hub.token_from_authorization(request.headers.get("Authorization", ""))
 
@@ -2750,6 +2855,7 @@ def _ingest_capture(
     capture_id = requested_id if _valid_capture_id(requested_id) else uuid.uuid4().hex
     if capture_source not in {
         "guided-camera-v1", "file-camera", "shared-image", "photo-library-v1", "pi-camera-v1",
+        "mentra-live-v1",
     }:
         capture_source = "file-camera"
     capture_code = f"{(tester_id or 'UN').upper()}-{capture_id[:6].upper()}"

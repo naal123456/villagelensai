@@ -18,10 +18,13 @@ The initial Cloud Run API exposes:
 - `POST /api/captures/<id>/process/4` for a manually requested Sol review of
   the retained image and its Terra result.
 
-The undeployed `/c` experiment adds versioned `/api/pi/v1/` routes for an
-expiring browser session, one-time device pairing, bounded WebSocket control
-and preview, and a hash-bound still upload. A Pi still is passed to the same
-capture helper used by `/api/capture`; no reader or gallery pipeline is copied.
+The `/c` experiment adds versioned `/api/pi/v1/` routes for an expiring browser
+session, device enrollment, bounded WebSocket control and preview, and a
+hash-bound still upload. It also has an undeployed `/api/mentra/v1/` still-photo
+adapter: one explicit browser request creates an expiring companion pairing,
+and the official Mentra SDK can deliver one authenticated multipart photo to a
+hash-bound webhook. Pi and Mentra stills use the same capture helper as
+`/api/capture`; no reader or gallery pipeline is copied.
 See `docs/PI_CAMERA_C_SERVER_CHECKPOINT_20260923.md` for the contract, safety
 limits, current validation, and rollback.
 
