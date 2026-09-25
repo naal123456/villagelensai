@@ -13,6 +13,7 @@ from .mentra_bridge import MentraBridgeError
 ENROLLMENT_SCHEMA = "villagelens.mentra-device-enrollment.v1"
 CREDENTIAL_SCHEMA = "villagelens.mentra-device-credential.v1"
 ENROLLMENT_OBJECT = "mentra-enrollments/v1/default.json"
+NATIVE_ENROLLMENT_OBJECT = "mentra-enrollments/v1/native-ios.json"
 DEVICE_PROFILE_PATTERN = re.compile(r"[a-z0-9][a-z0-9._-]{2,63}")
 
 
@@ -32,16 +33,23 @@ class MentraEnrollmentStore:
     """Persistent single-Mentra registry in the existing private bucket."""
 
     def __init__(
-        self, bucket_provider: Callable[[], Any], *, now: Callable[[], datetime] = _utc_now,
+        self,
+        bucket_provider: Callable[[], Any],
+        *,
+        now: Callable[[], datetime] = _utc_now,
+        object_name: str = ENROLLMENT_OBJECT,
     ) -> None:
+        if not re.fullmatch(r"mentra-enrollments/v1/[a-z0-9._-]+\.json", object_name):
+            raise ValueError("invalid Mentra enrollment object")
         self._bucket_provider = bucket_provider
         self._now = now
+        self._object_name = object_name
 
     def _blob(self) -> Any:
         bucket = self._bucket_provider()
         if bucket is None:
             raise MentraBridgeError("MENTRA_ENROLLMENT_STORAGE_UNAVAILABLE", 503)
-        return bucket.blob(ENROLLMENT_OBJECT)
+        return bucket.blob(self._object_name)
 
     def _read(self) -> dict[str, Any] | None:
         blob = self._blob()

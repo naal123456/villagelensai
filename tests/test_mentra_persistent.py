@@ -1,14 +1,20 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import unittest
 from datetime import datetime, timezone
 from unittest.mock import patch
 
-from api.app import _persistent_mentra_hub, app
+from api.app import _native_mentra_hub, _persistent_mentra_hub, app
 from api.mentra_bridge import MentraBridgeError
-from api.mentra_enrollment import ENROLLMENT_OBJECT, ENROLLMENT_SCHEMA, MentraEnrollmentStore
+from api.mentra_enrollment import (
+    ENROLLMENT_OBJECT,
+    ENROLLMENT_SCHEMA,
+    NATIVE_ENROLLMENT_OBJECT,
+    MentraEnrollmentStore,
+)
 from api.mentra_persistent import PersistentMentraHub
 
 
@@ -55,6 +61,23 @@ class MentraEnrollmentStoreTests(unittest.TestCase):
         self.assertEqual(restarted.revoke("mentra-live-01")["status"], "revoked")
         with self.assertRaisesRegex(MentraBridgeError, "MENTRA_DEVICE_AUTH_INVALID"):
             restarted.authenticate(token)
+
+    def test_native_enrollment_uses_an_independent_record(self) -> None:
+        bucket = FakeBucket()
+        miniapp = MentraEnrollmentStore(lambda: bucket, now=lambda: self.instant)
+        native = MentraEnrollmentStore(
+            lambda: bucket,
+            now=lambda: self.instant,
+            object_name=NATIVE_ENROLLMENT_OBJECT,
+        )
+        miniapp.enroll("mentra-live-01", "m" * 48)
+        native.enroll("mentra-live-01", "n" * 48)
+
+        self.assertNotEqual(
+            bucket.blob(ENROLLMENT_OBJECT).value,
+            bucket.blob(NATIVE_ENROLLMENT_OBJECT).value,
+        )
+        self.assertEqual(native.authenticate("n" * 48), "mentra-live-01")
 
 
 class PersistentMentraHubTests(unittest.TestCase):
@@ -107,6 +130,7 @@ class PersistentMentraApiTests(unittest.TestCase):
             VILLAGELENS_SESSION_SECRET="",
         )
         _persistent_mentra_hub.reset()
+        _native_mentra_hub.reset()
         self.client = app.test_client()
 
     def enroll_and_get_job(self) -> tuple[dict[str, object], dict[str, object], dict[str, object]]:
@@ -218,6 +242,146 @@ class PersistentMentraApiTests(unittest.TestCase):
             )
         self.assertEqual(rejected.status_code, 400)
         self.assertEqual(rejected.get_json()["error"], "MENTRA_PHOTO_SIZE_MISMATCH")
+        ingest.assert_not_called()
+
+
+class NativeMentraApiTests(unittest.TestCase):
+    def setUp(self) -> None:
+        app.config.update(
+            TESTING=True,
+            VILLAGELENS_ACCESS_CODE="",
+            VILLAGELENS_SESSION_SECRET="",
+        )
+        _persistent_mentra_hub.reset()
+        _native_mentra_hub.reset()
+        self.client = app.test_client()
+
+    def enroll_and_get_job(self) -> tuple[dict[str, object], dict[str, object], dict[str, object]]:
+        browser = self.client.post(
+            "/api/mentra/v3/sessions",
+            headers={"X-VillageLens-Tester-ID": "a2"},
+            json={"output_language": "en"},
+        ).get_json()
+        credential = self.client.post("/api/mentra/v3/device/enroll", json={
+            "pairing_code": browser["pairing_code"],
+            "device_profile_id": "mentra-live-01",
+        }).get_json()
+        job = self.client.get(
+            "/api/mentra/v3/device/jobs",
+            headers={"Authorization": f"Bearer {credential['device_token']}"},
+        ).get_json()
+        return browser, credential, job
+
+    def test_native_job_is_bounded_and_excludes_browser_identity(self) -> None:
+        browser, credential, job = self.enroll_and_get_job()
+
+        self.assertEqual(job["schema"], "villagelens.mentra-native-photo-job.v1")
+        self.assertEqual(job["request_id"], browser["request_id"])
+        self.assertEqual(job["camera"], {
+            "fov": 62,
+            "roi_position": "center",
+            "size": "max",
+            "compress": "none",
+            "sound": True,
+            "save": False,
+            "exposure": "auto",
+        })
+        self.assertNotIn("tester_id", job)
+        self.assertNotIn("output_language", job)
+        self.assertNotIn("device_token", job)
+        self.assertEqual(
+            job["webhook_url"],
+            f"http://localhost/api/mentra/v3/device/captures/{browser['request_id']}",
+        )
+        idle = self.client.get(
+            "/api/mentra/v3/device/jobs",
+            headers={"Authorization": f"Bearer {credential['device_token']}"},
+        )
+        self.assertEqual(idle.status_code, 204)
+
+    def test_miniapp_credential_cannot_consume_native_job(self) -> None:
+        miniapp_browser = self.client.post(
+            "/api/mentra/v2/sessions",
+            headers={"X-VillageLens-Tester-ID": "a1"},
+            json={"output_language": "kn"},
+        ).get_json()
+        miniapp_credential = self.client.post("/api/mentra/v2/device/enroll", json={
+            "pairing_code": miniapp_browser["pairing_code"],
+            "device_profile_id": "mentra-live-01",
+        }).get_json()
+        native_browser = self.client.post(
+            "/api/mentra/v3/sessions",
+            headers={"X-VillageLens-Tester-ID": "a2"},
+            json={"output_language": "en"},
+        ).get_json()
+        native_credential = self.client.post("/api/mentra/v3/device/enroll", json={
+            "pairing_code": native_browser["pairing_code"],
+            "device_profile_id": "mentra-live-01",
+        }).get_json()
+
+        rejected = self.client.get(
+            "/api/mentra/v3/device/jobs",
+            headers={"Authorization": f"Bearer {miniapp_credential['device_token']}"},
+        )
+        native_job = self.client.get(
+            "/api/mentra/v3/device/jobs",
+            headers={"Authorization": f"Bearer {native_credential['device_token']}"},
+        ).get_json()
+
+        self.assertEqual(rejected.status_code, 401)
+        self.assertEqual(native_job["request_id"], native_browser["request_id"])
+
+    @patch("api.app._ingest_capture")
+    def test_native_multipart_preserves_hash_and_ingests_once(self, ingest: object) -> None:
+        browser, _credential, job = self.enroll_and_get_job()
+        source = b"\xff\xd8immutable-native-mentra"
+        digest = hashlib.sha256(source).hexdigest()
+        ingest.return_value = ({"capture_id": browser["request_id"], "retained": True}, 200)
+        headers = {"Authorization": f"Bearer {job['auth_token']}"}
+
+        accepted = self.client.post(
+            job["webhook_url"],
+            headers=headers,
+            data={
+                "requestId": browser["request_id"],
+                "photo": (io.BytesIO(source), "capture.jpg", "image/jpeg"),
+            },
+            content_type="multipart/form-data",
+        )
+        repeated = self.client.post(
+            job["webhook_url"],
+            headers=headers,
+            data={
+                "requestId": browser["request_id"],
+                "photo": (io.BytesIO(source), "capture.jpg", "image/jpeg"),
+            },
+            content_type="multipart/form-data",
+        )
+
+        self.assertEqual(accepted.status_code, 200)
+        self.assertEqual(accepted.get_json()["source_sha256"], digest)
+        self.assertEqual(repeated.status_code, 200)
+        ingest.assert_called_once()
+        self.assertEqual(ingest.call_args.kwargs["tester_id"], "a2")
+        provenance = ingest.call_args.kwargs["capture_provenance"]
+        self.assertEqual(provenance["transport"], "mentra-bluetooth-sdk-webhook-v1")
+        self.assertEqual(provenance["source_sha256"], digest)
+        self.assertNotIn("auth_token", provenance)
+
+    @patch("api.app._ingest_capture")
+    def test_native_upload_rejects_wrong_request_id(self, ingest: object) -> None:
+        browser, _credential, job = self.enroll_and_get_job()
+        rejected = self.client.post(
+            job["webhook_url"],
+            headers={"Authorization": f"Bearer {job['auth_token']}"},
+            data={
+                "requestId": "0" * 32,
+                "photo": (io.BytesIO(b"\xff\xd8photo"), "capture.jpg", "image/jpeg"),
+            },
+            content_type="multipart/form-data",
+        )
+        self.assertEqual(rejected.status_code, 400)
+        self.assertEqual(rejected.get_json()["error"], "MENTRA_CAPTURE_REQUEST_MISMATCH")
         ingest.assert_not_called()
 
 
