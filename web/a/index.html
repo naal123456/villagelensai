@@ -172,7 +172,7 @@
         <span class="bar" id="quality-1"></span><span class="bar" id="quality-2"></span>
         <span class="bar" id="quality-3"></span><button class="bar" id="quality-4" aria-label="Request strongest reading" data-tip="Request strongest reading"></button>
         <span id="quality-timer">—</span>
-        <span id="app-version" aria-label="App version">v2026-09-24.4</span>
+        <span id="app-version" aria-label="App version">v2026-09-25.1</span>
       </div>
       <p id="mic-status" role="status" aria-live="assertive" hidden></p>
     </section>
@@ -2097,14 +2097,20 @@
     async function pollMentraSession() {
       if (!mentraSession) return;
       try {
-        const response=await fetch(`/api/mentra/v1/sessions/${mentraSession.session_id}`,{
+        const response=await fetch(`/api/mentra/v2/sessions/${mentraSession.session_id}`,{
           headers:testerHeaders(),credentials:'same-origin',
         });
         const value=await response.json();
         if (!response.ok) throw new Error(value.error||'MENTRA_SESSION_FAILED');
-        if (value.state==='waiting_for_photo') {
+        if (value.state==='waiting_for_enrollment') {
+          mentraPairing.hidden=false;
+          setMentraProgress('Open VillageLens Camera in the Mentra app and enter the one-time code.','ಮೆಂಟ್ರಾ ಆ್ಯಪ್‌ನಲ್ಲಿ VillageLens Camera ತೆರೆದು ಒಂದು ಬಾರಿ ಕೋಡ್ ನಮೂದಿಸಿ.');
+        } else if (value.state==='waiting_for_device') {
           mentraPairing.hidden=true;
-          setMentraProgress('Mentra connected. Capturing and uploading one photo…','ಮೆಂಟ್ರಾ ಸಂಪರ್ಕವಾಗಿದೆ. ಒಂದು ಚಿತ್ರ ತೆಗೆದು ಅಪ್‌ಲೋಡ್ ಮಾಡುತ್ತಿದೆ…');
+          setMentraProgress('Mentra is enrolled. Waiting for its phone app…','ಮೆಂಟ್ರಾ ನೋಂದಾಯಿಸಲಾಗಿದೆ. ಅದರ ಫೋನ್ ಆ್ಯಪ್‌ಗಾಗಿ ಕಾಯಲಾಗುತ್ತಿದೆ…');
+        } else if (value.state==='capturing') {
+          mentraPairing.hidden=true;
+          setMentraProgress('Hold steady. Mentra is taking and uploading one photo…','ಸ್ಥಿರವಾಗಿ ಹಿಡಿಯಿರಿ. ಮೆಂಟ್ರಾ ಒಂದು ಚಿತ್ರ ತೆಗೆದು ಅಪ್‌ಲೋಡ್ ಮಾಡುತ್ತಿದೆ…');
         } else if (value.state==='complete') {
           stopMentraPolling();
           setMentraProgress('Picture is in the gallery. Preparing its reading…','ಚಿತ್ರ ಗ್ಯಾಲರಿಯಲ್ಲಿದೆ. ಓದುವಿಕೆಯನ್ನು ಸಿದ್ಧಪಡಿಸುತ್ತಿದೆ…');
@@ -2140,7 +2146,7 @@
     async function requestMentraPhoto() {
       stopMentraPolling();
       if (mentraSession) {
-        await fetch(`/api/mentra/v1/sessions/${mentraSession.session_id}`,{
+        await fetch(`/api/mentra/v2/sessions/${mentraSession.session_id}`,{
           method:'DELETE',headers:testerHeaders(),credentials:'same-origin',
         }).catch(()=>{});
       }
@@ -2148,17 +2154,22 @@
       beginMentraTimer();
       setMentraProgress('Creating a private one-photo request…','ಖಾಸಗಿ ಒಂದು-ಚಿತ್ರ ವಿನಂತಿಯನ್ನು ಸಿದ್ಧಪಡಿಸುತ್ತಿದೆ…');
       try {
-        const response=await fetch('/api/mentra/v1/sessions',{
+        const response=await fetch('/api/mentra/v2/sessions',{
           method:'POST',credentials:'same-origin',headers:testerHeaders({'Content-Type':'application/json'}),
           body:JSON.stringify({output_language:outputLanguage}),
         });
         const value=await response.json();
         if (!response.ok) throw new Error(value.error||'MENTRA_SESSION_FAILED');
         mentraSession=value;
-        mentraPairing.hidden=false;
-        mentraPairing.textContent=`Mentra companion code: ${value.pairing_code}`;
-        mentraPairing.title='Tap to copy';
-        setMentraProgress('Open the VillageLens Mentra companion and enter or paste this code.','VillageLens ಮೆಂಟ್ರಾ ಸಹಾಯಕವನ್ನು ತೆರೆದು ಈ ಕೋಡ್ ನಮೂದಿಸಿ ಅಥವಾ ಅಂಟಿಸಿ.');
+        if (value.paired) {
+          mentraPairing.hidden=true;
+          setMentraProgress('Mentra enrolled. Waiting for its phone app…','ಮೆಂಟ್ರಾ ನೋಂದಾಯಿಸಲಾಗಿದೆ. ಅದರ ಫೋನ್ ಆ್ಯಪ್‌ಗಾಗಿ ಕಾಯಲಾಗುತ್ತಿದೆ…');
+        } else {
+          mentraPairing.hidden=false;
+          mentraPairing.textContent=`One-time Mentra enrollment code: ${value.pairing_code}`;
+          mentraPairing.title='Tap to copy';
+          setMentraProgress('Open VillageLens Camera in the Mentra app and enter this code once.','ಮೆಂಟ್ರಾ ಆ್ಯಪ್‌ನಲ್ಲಿ VillageLens Camera ತೆರೆದು ಈ ಕೋಡ್ ಅನ್ನು ಒಮ್ಮೆ ನಮೂದಿಸಿ.');
+        }
         mentraPollTimer=setTimeout(pollMentraSession,500);
       } catch (_) {
         endMentraTimer(); $('mentra-capture').disabled=false;
@@ -2168,7 +2179,7 @@
     async function closeMentraCamera() {
       stopMentraPolling(); endMentraTimer();
       const session=mentraSession; mentraSession=null;
-      if (session) fetch(`/api/mentra/v1/sessions/${session.session_id}`,{
+      if (session) fetch(`/api/mentra/v2/sessions/${session.session_id}`,{
         method:'DELETE',headers:testerHeaders(),credentials:'same-origin',
       }).catch(()=>{});
       mentraCameraGuide.hidden=true;

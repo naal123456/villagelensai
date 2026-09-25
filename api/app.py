@@ -19,6 +19,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import requests
 
@@ -28,6 +29,11 @@ from PIL import Image, ImageOps, UnidentifiedImageError
 from simple_websocket.errors import ConnectionClosed
 
 from .mentra_bridge import MentraBridgeError, MentraSessionHub
+from .mentra_enrollment import (
+    CREDENTIAL_SCHEMA as MENTRA_CREDENTIAL_SCHEMA,
+    MentraEnrollmentStore,
+)
+from .mentra_persistent import PersistentMentraHub
 from .pi_enrollment import ENROLLMENT_SCHEMA, PiEnrollmentStore
 from .pi_bridge import PiBridgeError, PiSessionHub
 
@@ -63,7 +69,7 @@ OPENAI_TRANSLATION_MODEL = os.environ.get("VILLAGELENS_TRANSLATION_MODEL", "gpt-
 OPENAI_STAGE_TWO_ANALYSIS_VERSION = "luna-compact-v1"
 OPENAI_STAGE_THREE_ANALYSIS_VERSION = "terra-ocr-grounded-v4"
 OPENAI_STAGE_FOUR_ANALYSIS_VERSION = "sol-ocr-review-v4"
-APP_VERSION = "2026-09-24.4"
+APP_VERSION = "2026-09-25.1"
 SPEECH_VOICES = {
     "kn-IN": os.environ.get("VILLAGELENS_KANNADA_TTS_VOICE", "kn-IN-Wavenet-A"),
     "ta-IN": os.environ.get("VILLAGELENS_TAMIL_TTS_VOICE", "ta-IN-Wavenet-A"),
@@ -192,6 +198,7 @@ app.config["VILLAGELENS_ACCESS_CODE"] = os.environ.get("VILLAGELENS_ACCESS_CODE"
 app.config["VILLAGELENS_SESSION_SECRET"] = os.environ.get("VILLAGELENS_SESSION_SECRET", "")
 _capture_processing_locks: defaultdict[tuple[str, int], threading.Lock] = defaultdict(threading.Lock)
 _mentra_hub = MentraSessionHub()
+_persistent_mentra_hub = PersistentMentraHub()
 _pi_hub = PiSessionHub()
 
 
@@ -270,8 +277,11 @@ def _require_access() -> Response | tuple[Response, int] | None:
     if request.path in {
         "/access", "/access/link", "/health", "/healthz", "/api/pi/v1/device/pair",
         "/api/pi/v1/device/socket", "/api/mentra/v1/device/pair",
+        "/api/mentra/v2/device/enroll", "/api/mentra/v2/device/jobs",
     } or request.path.startswith("/api/pi/v1/device/captures/") or request.path.startswith(
         "/api/mentra/v1/device/captures/"
+    ) or request.path.startswith(
+        "/api/mentra/v2/device/captures/"
     ) or _has_access():
         return None
     if request.path.startswith("/api/"):
@@ -2564,6 +2574,228 @@ def upload_mentra_capture(request_id: str) -> tuple[Response, int]:
     if not result.get("retained"):
         return jsonify(error="MENTRA_CAPTURE_NOT_RETAINED"), 503
     acceptance = _mentra_hub.complete_upload(
+        token, request_id, source_sha256, str(result["capture_id"]),
+    )
+    return jsonify(acceptance), 200
+
+
+def _mentra_enrollment_store() -> MentraEnrollmentStore:
+    return MentraEnrollmentStore(_storage_bucket)
+
+
+def _persistent_mentra_profile() -> str:
+    return _mentra_enrollment_store().active_profile_id() if CAPTURE_BUCKET else ""
+
+
+def _authenticate_persistent_mentra(token: str) -> str:
+    if CAPTURE_BUCKET:
+        profile_id = _mentra_enrollment_store().authenticate(token)
+        _persistent_mentra_hub.register_persistent_token(token, profile_id)
+        return profile_id
+    return _persistent_mentra_hub.authenticate_device(token)
+
+
+def _mentra_photo_hosts() -> set[str]:
+    return {
+        value.strip().lower().rstrip(".")
+        for value in os.environ.get("VILLAGELENS_MENTRA_PHOTO_HOSTS", "").split(",")
+        if value.strip()
+    }
+
+
+def _download_mentra_photo(photo_url: str, claimed_media_type: str) -> tuple[bytes, str]:
+    try:
+        parsed = urlsplit(photo_url)
+        port = parsed.port
+    except ValueError as error:
+        raise MentraBridgeError("MENTRA_PHOTO_URL_INVALID", 400) from error
+    hostname = (parsed.hostname or "").lower().rstrip(".")
+    allowed_hosts = _mentra_photo_hosts()
+    if not allowed_hosts:
+        raise MentraBridgeError("MENTRA_PHOTO_HOSTS_NOT_CONFIGURED", 503)
+    if (
+        parsed.scheme != "https"
+        or not hostname
+        or hostname not in allowed_hosts
+        or parsed.username is not None
+        or parsed.password is not None
+        or port not in {None, 443}
+        or parsed.fragment
+    ):
+        raise MentraBridgeError("MENTRA_PHOTO_URL_INVALID", 400)
+    response = None
+    try:
+        response = requests.get(
+            photo_url,
+            headers={"Accept": "image/jpeg,image/png,image/webp", "Accept-Encoding": "identity"},
+            stream=True,
+            allow_redirects=False,
+            timeout=(5, 45),
+        )
+        if response.status_code != 200:
+            raise MentraBridgeError("MENTRA_PHOTO_DOWNLOAD_FAILED", 502)
+        media_type = response.headers.get("Content-Type", claimed_media_type).split(";", 1)[0].lower()
+        if media_type not in ALLOWED_MEDIA_TYPES or claimed_media_type != media_type:
+            raise MentraBridgeError("MENTRA_PHOTO_MEDIA_TYPE_UNSUPPORTED", 415)
+        try:
+            content_length = int(response.headers.get("Content-Length", "0") or 0)
+        except ValueError as error:
+            raise MentraBridgeError("MENTRA_PHOTO_DOWNLOAD_INVALID", 502) from error
+        if content_length > MAX_CAPTURE_BYTES:
+            raise MentraBridgeError("MENTRA_PHOTO_TOO_LARGE", 413)
+        chunks: list[bytes] = []
+        total = 0
+        for chunk in response.iter_content(chunk_size=64 * 1024):
+            if not chunk:
+                continue
+            total += len(chunk)
+            if total > MAX_CAPTURE_BYTES:
+                raise MentraBridgeError("MENTRA_PHOTO_TOO_LARGE", 413)
+            chunks.append(chunk)
+        source = b"".join(chunks)
+        if not source:
+            raise MentraBridgeError("MENTRA_PHOTO_REQUIRED", 400)
+        return source, media_type
+    except MentraBridgeError:
+        raise
+    except requests.RequestException as error:
+        raise MentraBridgeError("MENTRA_PHOTO_DOWNLOAD_FAILED", 502) from error
+    finally:
+        if response is not None:
+            response.close()
+
+
+@app.post("/api/mentra/v2/sessions")
+def create_persistent_mentra_session() -> tuple[Response, int]:
+    payload = request.get_json(silent=True)
+    output_language = (
+        str(payload.get("output_language", "")).strip().lower()
+        if isinstance(payload, dict)
+        else ""
+    )
+    value = _persistent_mentra_hub.create_session(
+        _tester_id(), output_language, _persistent_mentra_profile(),
+    )
+    return jsonify(value), 201
+
+
+@app.get("/api/mentra/v2/sessions/<session_id>")
+def persistent_mentra_session_status(session_id: str) -> tuple[Response, int]:
+    return jsonify(_persistent_mentra_hub.describe_session(session_id, _tester_id())), 200
+
+
+@app.delete("/api/mentra/v2/sessions/<session_id>")
+def revoke_persistent_mentra_session(session_id: str) -> tuple[Response, int]:
+    _persistent_mentra_hub.revoke_session(session_id, _tester_id())
+    return jsonify(revoked=True), 200
+
+
+@app.post("/api/mentra/v2/device/enroll")
+def enroll_persistent_mentra_device() -> tuple[Response, int]:
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        raise MentraBridgeError("MENTRA_PAIRING_REQUEST_INVALID", 400)
+    value = _persistent_mentra_hub.pair_device(
+        str(payload.get("pairing_code", "")),
+        str(payload.get("device_profile_id", "")),
+    )
+    token = str(value["device_token"])
+    if CAPTURE_BUCKET:
+        try:
+            _mentra_enrollment_store().enroll(str(value["device_profile_id"]), token)
+        except MentraBridgeError:
+            _persistent_mentra_hub.rollback_pairing(token)
+            raise
+    return jsonify({
+        "schema": MENTRA_CREDENTIAL_SCHEMA,
+        "device_profile_id": value["device_profile_id"],
+        "device_token": token,
+    }), 200
+
+
+@app.get("/api/mentra/v2/device/jobs")
+def next_persistent_mentra_job() -> tuple[Response, int] | Response:
+    token = _mentra_device_token()
+    _authenticate_persistent_mentra(token)
+    value = _persistent_mentra_hub.next_job(token)
+    if value is None:
+        return Response(status=204)
+    request_id = str(value["request_id"])
+    value["upload_url"] = (
+        f"{request.url_root.rstrip('/')}/api/mentra/v2/device/captures/{request_id}"
+    )
+    return jsonify(value), 200
+
+
+@app.delete("/api/mentra/v2/devices/<device_profile_id>")
+def revoke_persistent_mentra_device(device_profile_id: str) -> tuple[Response, int]:
+    if not _is_reviewer(_tester_id()):
+        return jsonify(error="MENTRA_DEVICE_REVOCATION_FORBIDDEN"), 403
+    value = _mentra_enrollment_store().revoke(device_profile_id)
+    _persistent_mentra_hub.revoke_profile(device_profile_id)
+    return jsonify(value), 200
+
+
+@app.post("/api/mentra/v2/device/captures/<request_id>")
+def upload_persistent_mentra_capture(request_id: str) -> tuple[Response, int]:
+    token = _mentra_device_token()
+    session = _persistent_mentra_hub.authorize_upload(token, request_id)
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict) or str(payload.get("request_id", "")) != request_id:
+        raise MentraBridgeError("MENTRA_CAPTURE_REQUEST_MISMATCH", 400)
+    media_type = str(payload.get("media_type", "")).split(";", 1)[0].lower()
+    try:
+        reported_bytes = int(payload.get("reported_bytes", 0))
+    except (TypeError, ValueError) as error:
+        raise MentraBridgeError("MENTRA_PHOTO_SIZE_INVALID", 400) from error
+    if reported_bytes <= 0 or reported_bytes > MAX_CAPTURE_BYTES:
+        raise MentraBridgeError("MENTRA_PHOTO_SIZE_INVALID", 400)
+    photo_request_id = str(payload.get("photo_request_id", ""))
+    if (
+        not photo_request_id
+        or len(photo_request_id) > 128
+        or any(ord(character) < 32 for character in photo_request_id)
+    ):
+        raise MentraBridgeError("MENTRA_PHOTO_REQUEST_ID_INVALID", 400)
+    if (
+        payload.get("fov") != 62
+        or payload.get("roi_position") != "center"
+        or payload.get("capture_mode") != "text"
+    ):
+        raise MentraBridgeError("MENTRA_CAMERA_CONFIGURATION_INVALID", 400)
+    source, media_type = _download_mentra_photo(str(payload.get("photo_url", "")), media_type)
+    if len(source) != reported_bytes:
+        raise MentraBridgeError("MENTRA_PHOTO_SIZE_MISMATCH", 400)
+    source_sha256 = hashlib.sha256(source).hexdigest()
+    existing = _persistent_mentra_hub.existing_acceptance(token, request_id, source_sha256)
+    if existing is not None:
+        return jsonify(existing), 200
+    provenance = {
+        "schema": "villagelens.mentra-capture-provenance.v2",
+        "request_id": request_id,
+        "device_profile_id": session.device_profile_id,
+        "capture_mode": "explicit-still-photo",
+        "camera_mode": "text",
+        "fov_degrees": 62,
+        "roi_position": "center",
+        "transport": "mentra-miniapp-signed-photo-v1",
+        "received_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "source_sha256": source_sha256,
+        "source_bytes": len(source),
+    }
+    result, status = _ingest_capture(
+        source,
+        media_type,
+        tester_id=session.tester_id,
+        requested_id=request_id,
+        capture_source="mentra-live-v1",
+        capture_provenance=provenance,
+    )
+    if status != 200:
+        return jsonify(result), status
+    if not result.get("retained"):
+        return jsonify(error="MENTRA_CAPTURE_NOT_RETAINED"), 503
+    acceptance = _persistent_mentra_hub.complete_upload(
         token, request_id, source_sha256, str(result["capture_id"]),
     )
     return jsonify(acceptance), 200

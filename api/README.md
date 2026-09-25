@@ -20,11 +20,13 @@ The initial Cloud Run API exposes:
 
 The `/c` experiment adds versioned `/api/pi/v1/` routes for an expiring browser
 session, device enrollment, bounded WebSocket control and preview, and a
-hash-bound still upload. It also has an undeployed `/api/mentra/v1/` still-photo
-adapter: one explicit browser request creates an expiring companion pairing,
-and the official Mentra SDK can deliver one authenticated multipart photo to a
-hash-bound webhook. Pi and Mentra stills use the same capture helper as
-`/api/capture`; no reader or gallery pipeline is copied.
+hash-bound still upload. Its `/api/mentra/v2/` route persistently enrolls one
+Mentra MiniApp controller, creates a one-still job only after an explicit
+browser press, and accepts the resulting signed photo URL through an exact
+HTTPS-host allowlist. The original `/api/mentra/v1/` multipart adapter remains
+available for compatibility but is no longer used by the `/c` UI. Pi and
+Mentra stills use the same capture helper as `/api/capture`; no reader or
+gallery pipeline is copied.
 See `docs/PI_CAMERA_C_SERVER_CHECKPOINT_20260923.md` for the contract, safety
 limits, current validation, and rollback.
 

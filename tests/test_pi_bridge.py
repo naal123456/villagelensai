@@ -190,7 +190,7 @@ class PiBridgeApiTests(unittest.TestCase):
         self.assertIn(b'id="pi-camera"', pi_page.data)
         self.assertIn(b'id="mentra-camera"', pi_page.data)
         self.assertIn(b'id="mentra-camera-guide"', pi_page.data)
-        self.assertIn(b"/api/mentra/v1/sessions", pi_page.data)
+        self.assertIn(b"/api/mentra/v2/sessions", pi_page.data)
         self.assertIn(b"One explicit still photograph only", pi_page.data)
         self.assertIn(b"const piLane=location.pathname==='/c/'", pi_page.data)
         self.assertIn(b"piCamera.hidden=!piLane", pi_page.data)
