@@ -4,9 +4,9 @@
 
 The isolated `/c` source now has a persistent Mentra enrollment and a v2
 remote-shutter contract compatible with the current on-phone Mentra MiniApp
-SDK. It is locally tested and not yet physically qualified. The next deployment
-target is only the separate `vlens-pi-c-test` service; production promotion is
-not part of this checkpoint.
+SDK. It is locally tested and deployed only to the separate
+`vlens-pi-c-test` service. It is not yet physically qualified, and production
+promotion is not part of this checkpoint.
 
 No new cloud service or paid provider is required. Existing Cloud Storage is
 used for the credential record and retained gallery image. The Cloud Run test
@@ -51,14 +51,36 @@ identity-free jobs, idle behavior, one-job delivery, exact-host rejection,
 reported/downloaded size binding, immutable-source hashing, existing gallery
 ingress reuse, and unchanged `/a` and `/b` route behavior.
 
-## Staging and rollback
+## Staging deployment
 
-Build the committed source once and deploy the image first to
-`vlens-pi-c-test` with its existing service account, storage bucket, access
-secrets, resource limits, and no OpenAI secret. HTTP validation must not submit
-an image or invoke a reader provider.
+Server commit `391cd16` produced Cloud Build
+`57368217-5347-452d-af22-7365b3c702bd` and immutable image digest
+`sha256:946da30608e59e036281ca0f1db5492baaab4186f4ee3970b0dbee350611d84a`.
+The image is serving 100 percent of staging traffic on revision
+`vlens-pi-c-test-00008-5tf`.
+
+The staging service retained its existing runtime identity, private capture
+bucket, access and session secrets, one CPU, 2 GiB memory, concurrency eight,
+3,600-second timeout, minimum instances zero, and maximum instances one. It has
+no OpenAI secret and no Mentra relay hostname allowlist yet.
+
+Public validation confirmed health version `2026-09-25.1`, the protected `/c`
+redirect, and a 401 response to an invalid Mentra enrollment code. Error-level
+logs for the new revision were empty. No image, gallery upload, OCR, reader,
+speech, or other provider request was made. Production remained unchanged at
+revision `vlens-a-00081-44t` with 100 percent traffic.
+
+## Rollback
 
 Rollback before production is routing the staging service to its prior
-revision. Revert this source commit to remove the v2 contract. Revoking the
-Mentra enrollment disables its long-lived credential without deleting any
-previously accepted gallery capture.
+revision, `vlens-pi-c-test-00007-k47`:
+
+```sh
+gcloud run services update-traffic vlens-pi-c-test \
+  --project villagelensai --region us-central1 \
+  --to-revisions vlens-pi-c-test-00007-k47=100
+```
+
+Revert the source commit to remove the v2 contract. Revoking the Mentra
+enrollment disables its long-lived credential without deleting any previously
+accepted gallery capture.
