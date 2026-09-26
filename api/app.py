@@ -197,6 +197,9 @@ sock = Sock(app)
 app.config["MAX_CONTENT_LENGTH"] = MAX_CAPTURE_BYTES
 app.config["VILLAGELENS_ACCESS_CODE"] = os.environ.get("VILLAGELENS_ACCESS_CODE", "").strip()
 app.config["VILLAGELENS_SESSION_SECRET"] = os.environ.get("VILLAGELENS_SESSION_SECRET", "")
+app.config["VILLAGELENS_PUBLIC_ORIGIN"] = os.environ.get(
+    "VILLAGELENS_PUBLIC_ORIGIN", "https://villagelensai.com"
+).strip()
 _capture_processing_locks: defaultdict[tuple[str, int], threading.Lock] = defaultdict(threading.Lock)
 _mentra_hub = MentraSessionHub()
 _persistent_mentra_hub = PersistentMentraHub()
@@ -206,6 +209,22 @@ _pi_hub = PiSessionHub()
 
 def _access_code() -> str:
     return str(app.config.get("VILLAGELENS_ACCESS_CODE", "")).strip()
+
+
+def _public_origin() -> str:
+    value = str(app.config.get("VILLAGELENS_PUBLIC_ORIGIN", "")).strip()
+    parsed = urlsplit(value)
+    if (
+        parsed.scheme != "https"
+        or not parsed.hostname
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+        or parsed.path not in {"", "/"}
+    ):
+        raise RuntimeError("VILLAGELENS_PUBLIC_ORIGIN must be a bare HTTPS origin")
+    return value.rstrip("/")
 
 
 def _access_configured() -> bool:
@@ -2881,9 +2900,7 @@ def next_native_mentra_job() -> tuple[Response, int] | Response:
     return jsonify({
         "schema": "villagelens.mentra-native-photo-job.v1",
         "request_id": request_id,
-        "webhook_url": (
-            f"{request.url_root.rstrip('/')}/api/mentra/v3/device/captures/{request_id}"
-        ),
+        "webhook_url": f"{_public_origin()}/api/mentra/v3/device/captures/{request_id}",
         "auth_token": value["upload_token"],
         "expires_at": value["expires_at"],
         "camera": {

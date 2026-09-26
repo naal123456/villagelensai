@@ -128,6 +128,7 @@ class PersistentMentraApiTests(unittest.TestCase):
             TESTING=True,
             VILLAGELENS_ACCESS_CODE="",
             VILLAGELENS_SESSION_SECRET="",
+            VILLAGELENS_PUBLIC_ORIGIN="https://villagelensai.com",
         )
         _persistent_mentra_hub.reset()
         _native_mentra_hub.reset()
@@ -291,13 +292,36 @@ class NativeMentraApiTests(unittest.TestCase):
         self.assertNotIn("device_token", job)
         self.assertEqual(
             job["webhook_url"],
-            f"http://localhost/api/mentra/v3/device/captures/{browser['request_id']}",
+            f"https://villagelensai.com/api/mentra/v3/device/captures/{browser['request_id']}",
         )
         idle = self.client.get(
             "/api/mentra/v3/device/jobs",
             headers={"Authorization": f"Bearer {credential['device_token']}"},
         )
         self.assertEqual(idle.status_code, 204)
+
+    def test_native_job_uses_canonical_https_origin_behind_proxy(self) -> None:
+        browser = self.client.post(
+            "/api/mentra/v3/sessions",
+            base_url="http://internal-cloud-run-proxy",
+            headers={"X-VillageLens-Tester-ID": "a2"},
+            json={"output_language": "en"},
+        ).get_json()
+        credential = self.client.post("/api/mentra/v3/device/enroll", json={
+            "pairing_code": browser["pairing_code"],
+            "device_profile_id": "mentra-live-01",
+        }).get_json()
+
+        job = self.client.get(
+            "/api/mentra/v3/device/jobs",
+            base_url="http://internal-cloud-run-proxy",
+            headers={"Authorization": f"Bearer {credential['device_token']}"},
+        ).get_json()
+
+        self.assertEqual(
+            job["webhook_url"],
+            f"https://villagelensai.com/api/mentra/v3/device/captures/{browser['request_id']}",
+        )
 
     def test_miniapp_credential_cannot_consume_native_job(self) -> None:
         miniapp_browser = self.client.post(
