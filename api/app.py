@@ -2906,8 +2906,8 @@ def next_native_mentra_job() -> tuple[Response, int] | Response:
         "camera": {
             "fov": 62,
             "roi_position": "center",
-            "size": "max",
-            "compress": "none",
+            "size": "medium",
+            "compress": "medium",
             "sound": True,
             "save": False,
             "exposure": "auto",

@@ -281,8 +281,8 @@ class NativeMentraApiTests(unittest.TestCase):
         self.assertEqual(job["camera"], {
             "fov": 62,
             "roi_position": "center",
-            "size": "max",
-            "compress": "none",
+            "size": "medium",
+            "compress": "medium",
             "sound": True,
             "save": False,
             "exposure": "auto",
