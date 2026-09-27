@@ -276,13 +276,14 @@ class NativeMentraApiTests(unittest.TestCase):
     def test_native_job_is_bounded_and_excludes_browser_identity(self) -> None:
         browser, credential, job = self.enroll_and_get_job()
 
-        self.assertEqual(job["schema"], "villagelens.mentra-native-photo-job.v1")
+        self.assertEqual(job["schema"], "villagelens.mentra-native-photo-job.v2")
         self.assertEqual(job["request_id"], browser["request_id"])
         self.assertEqual(job["camera"], {
             "fov": 62,
             "roi_position": "center",
             "size": "medium",
             "compress": "medium",
+            "mode": "photo",
             "sound": True,
             "save": False,
             "exposure": "auto",
@@ -389,6 +390,7 @@ class NativeMentraApiTests(unittest.TestCase):
         self.assertEqual(ingest.call_args.kwargs["tester_id"], "a2")
         provenance = ingest.call_args.kwargs["capture_provenance"]
         self.assertEqual(provenance["transport"], "mentra-bluetooth-sdk-webhook-v1")
+        self.assertEqual(provenance["camera_mode"], "photo")
         self.assertEqual(provenance["source_sha256"], digest)
         self.assertNotIn("auth_token", provenance)
 
