@@ -69,13 +69,21 @@ publish a usable tagged candidate URL, so post-promotion public validation was
 performed immediately with the prior revision retained for rollback. The
 temporary production tag was then removed.
 
-## Remaining qualification
+## Physical confirmation
 
-The updated signed iPhone app must still be installed and the button-to-gallery
-path physically tested. Do not claim physical completion or field readiness
-from deployment checks alone. No photograph, tester URL, request identifier,
-device credential, authorization header, or provider response is in this
-record.
+The refreshed signed iPhone app was installed over the existing bundle. In one
+supervised trial, the owner connected the glasses in `VillageLens Glasses`,
+opened the authenticated `/c` Mentra panel to arm the gallery, and made no
+browser capture request. One short press of the glasses action button produced
+one gallery capture. The matching production upload completed with HTTP 200
+and 3.865 seconds of server-request latency; this is not an end-to-end latency
+measurement.
+
+This confirms the bounded physical button-to-gallery path once. It does not
+qualify repeated reliability, long-press or unarmed physical behavior,
+disconnect recovery, wearable safety, or field readiness. No photograph,
+tester URL, request identifier, device credential, authorization header, or
+provider response is in this record.
 
 ## Rollback
 
