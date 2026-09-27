@@ -276,13 +276,13 @@ class NativeMentraApiTests(unittest.TestCase):
     def test_native_job_is_bounded_and_excludes_browser_identity(self) -> None:
         browser, credential, job = self.enroll_and_get_job()
 
-        self.assertEqual(job["schema"], "villagelens.mentra-native-photo-job.v2")
+        self.assertEqual(job["schema"], "villagelens.mentra-native-photo-job.v3")
         self.assertEqual(job["request_id"], browser["request_id"])
         self.assertEqual(job["camera"], {
             "fov": 62,
             "roi_position": "center",
-            "size": "medium",
-            "compress": "medium",
+            "size": "max",
+            "compress": "none",
             "mode": "photo",
             "sound": True,
             "save": False,

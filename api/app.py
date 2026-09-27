@@ -2898,7 +2898,7 @@ def next_native_mentra_job() -> tuple[Response, int] | Response:
         return Response(status=204)
     request_id = str(value["request_id"])
     return jsonify({
-        "schema": "villagelens.mentra-native-photo-job.v2",
+        "schema": "villagelens.mentra-native-photo-job.v3",
         "request_id": request_id,
         "webhook_url": f"{_public_origin()}/api/mentra/v3/device/captures/{request_id}",
         "auth_token": value["upload_token"],
@@ -2906,8 +2906,8 @@ def next_native_mentra_job() -> tuple[Response, int] | Response:
         "camera": {
             "fov": 62,
             "roi_position": "center",
-            "size": "medium",
-            "compress": "medium",
+            "size": "max",
+            "compress": "none",
             "mode": "photo",
             "sound": True,
             "save": False,
