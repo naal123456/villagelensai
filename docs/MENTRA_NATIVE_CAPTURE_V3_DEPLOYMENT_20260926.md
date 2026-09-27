@@ -50,6 +50,19 @@ Production uses the same immutable digest as staging. `/a`, `/b`, the Pi path,
 gallery, reader, and access behavior were not changed by this contract-only
 deployment.
 
+## Physical confirmation
+
+One explicitly requested Mentra Live capture subsequently reached production
+through the native bridge. The authenticated upload returned HTTP 200 with
+6.479 seconds of server latency. The owner confirmed gallery arrival and that
+the existing pipeline parsed and read the difficult photograph. The glasses
+camera required a bounded settle interval after the FOV-triggered camera HAL
+restart; that sequencing correction is owned and tested in the wearable
+repository and required no additional server deployment.
+
+The photograph, its contents, request identifier, device credential, tester
+access URL, and provider output are not included in this deployment record.
+
 ## Rollback
 
 Return production traffic to the preceding revision:
