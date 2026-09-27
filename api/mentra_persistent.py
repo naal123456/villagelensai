@@ -21,6 +21,7 @@ DEVICE_PROFILE_PATTERN = re.compile(r"[a-z0-9][a-z0-9._-]{2,63}")
 REQUEST_ID_PATTERN = re.compile(r"[0-9a-f]{32}")
 PAIRING_CODE_PATTERN = re.compile(r"[0-9A-F]{16}")
 SOURCE_HASH_PATTERN = re.compile(r"[0-9a-f]{64}")
+CAPTURE_INITIATIONS = {"browser-control", "glasses-button"}
 
 
 def _utc_now() -> datetime:
@@ -50,6 +51,7 @@ class PersistentMentraSession:
     job_delivered: bool = False
     source_sha256: str = ""
     capture_id: str = ""
+    capture_initiation: str = ""
 
 
 class PersistentMentraHub:
@@ -210,9 +212,13 @@ class PersistentMentraHub:
                 raise MentraBridgeError("MENTRA_DEVICE_AUTH_INVALID", 401)
             return profile_id
 
-    def next_job(self, token: str) -> dict[str, Any] | None:
+    def next_job(
+        self, token: str, capture_initiation: str = "browser-control",
+    ) -> dict[str, Any] | None:
         if not token or len(token) > 128:
             raise MentraBridgeError("MENTRA_DEVICE_AUTH_REQUIRED", 401)
+        if capture_initiation not in CAPTURE_INITIATIONS:
+            raise MentraBridgeError("MENTRA_CAPTURE_INITIATION_INVALID", 400)
         with self._lock:
             self._purge()
             profile_id = self.authenticate_device(token)
@@ -223,6 +229,7 @@ class PersistentMentraHub:
             upload_token = secrets.token_urlsafe(32)
             session.upload_token_hash = _secret_hash(upload_token)
             session.job_delivered = True
+            session.capture_initiation = capture_initiation
             self._upload_tokens[session.upload_token_hash] = session.session_id
             return {
                 "schema": JOB_SCHEMA,

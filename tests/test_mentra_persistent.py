@@ -110,6 +110,20 @@ class PersistentMentraHubTests(unittest.TestCase):
         self.assertNotIn("pairing_code", later)
         self.assertEqual(job["request_id"], later["request_id"])
 
+    def test_glasses_button_initiation_is_bound_to_claimed_job(self) -> None:
+        hub = PersistentMentraHub()
+        browser = hub.create_session("a2", "en")
+        device = hub.pair_device(browser["pairing_code"], "mentra-live-01")
+
+        job = hub.next_job(device["device_token"], "glasses-button")
+        session = hub.authorize_upload(
+            str(job["upload_token"]), str(job["request_id"]),
+        )
+
+        self.assertEqual(session.capture_initiation, "glasses-button")
+        with self.assertRaisesRegex(MentraBridgeError, "MENTRA_CAPTURE_INITIATION_INVALID"):
+            hub.next_job(device["device_token"], "long-press")
+
 
 class FakeDownload:
     status_code = 200
@@ -300,6 +314,31 @@ class NativeMentraApiTests(unittest.TestCase):
             headers={"Authorization": f"Bearer {credential['device_token']}"},
         )
         self.assertEqual(idle.status_code, 204)
+
+    def test_native_glasses_button_claim_records_initiation(self) -> None:
+        browser = self.client.post(
+            "/api/mentra/v3/sessions",
+            headers={"X-VillageLens-Tester-ID": "a2"},
+            json={"output_language": "en"},
+        ).get_json()
+        credential = self.client.post("/api/mentra/v3/device/enroll", json={
+            "pairing_code": browser["pairing_code"],
+            "device_profile_id": "mentra-live-01",
+        }).get_json()
+
+        response = self.client.get(
+            "/api/mentra/v3/device/jobs",
+            headers={
+                "Authorization": f"Bearer {credential['device_token']}",
+                "X-VillageLens-Capture-Initiation": "glasses-button",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        session = _native_mentra_hub.authorize_upload(
+            response.get_json()["auth_token"], browser["request_id"],
+        )
+        self.assertEqual(session.capture_initiation, "glasses-button")
 
     def test_native_job_uses_canonical_https_origin_behind_proxy(self) -> None:
         browser = self.client.post(

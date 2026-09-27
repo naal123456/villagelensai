@@ -70,7 +70,7 @@ OPENAI_TRANSLATION_MODEL = os.environ.get("VILLAGELENS_TRANSLATION_MODEL", "gpt-
 OPENAI_STAGE_TWO_ANALYSIS_VERSION = "luna-compact-v1"
 OPENAI_STAGE_THREE_ANALYSIS_VERSION = "terra-ocr-grounded-v4"
 OPENAI_STAGE_FOUR_ANALYSIS_VERSION = "sol-ocr-review-v4"
-APP_VERSION = "2026-09-25.2"
+APP_VERSION = "2026-09-26.1"
 SPEECH_VOICES = {
     "kn-IN": os.environ.get("VILLAGELENS_KANNADA_TTS_VOICE", "kn-IN-Wavenet-A"),
     "ta-IN": os.environ.get("VILLAGELENS_TAMIL_TTS_VOICE", "ta-IN-Wavenet-A"),
@@ -2893,7 +2893,10 @@ def enroll_native_mentra_device() -> tuple[Response, int]:
 def next_native_mentra_job() -> tuple[Response, int] | Response:
     token = _mentra_device_token()
     _authenticate_native_mentra(token)
-    value = _native_mentra_hub.next_job(token)
+    capture_initiation = request.headers.get(
+        "X-VillageLens-Capture-Initiation", "browser-control",
+    ).strip().lower()
+    value = _native_mentra_hub.next_job(token, capture_initiation)
     if value is None:
         return Response(status=204)
     request_id = str(value["request_id"])
@@ -2942,6 +2945,7 @@ def upload_native_mentra_capture(request_id: str) -> tuple[Response, int]:
         "request_id": request_id,
         "device_profile_id": session.device_profile_id,
         "capture_mode": "explicit-still-photo",
+        "capture_initiation": session.capture_initiation or "browser-control",
         "camera_mode": "photo",
         "fov_degrees": 62,
         "roi_position": "center",

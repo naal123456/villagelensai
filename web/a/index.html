@@ -174,7 +174,7 @@
         <span class="bar" id="quality-1"></span><span class="bar" id="quality-2"></span>
         <span class="bar" id="quality-3"></span><button class="bar" id="quality-4" aria-label="Request strongest reading" data-tip="Request strongest reading"></button>
         <span id="quality-timer">—</span>
-        <span id="app-version" aria-label="App version">v2026-09-25.2</span>
+        <span id="app-version" aria-label="App version">v2026-09-26.1</span>
       </div>
       <p id="mic-status" role="status" aria-live="assertive" hidden></p>
     </section>
@@ -263,10 +263,10 @@
   <section id="mentra-camera-guide" hidden role="dialog" aria-modal="true" aria-label="Mentra Live camera">
     <div class="mentra-camera-panel">
       <h2>Mentra Live</h2>
-      <p id="mentra-camera-status" role="status" aria-live="assertive">Ready to request one photograph.</p>
+      <p id="mentra-camera-status" role="status" aria-live="assertive">Preparing the glasses-button shutter.</p>
       <p id="mentra-pairing" hidden></p>
-      <button id="mentra-open-app" hidden aria-label="Open the VillageLens Camera app">Open VillageLens Camera app</button>
-      <p class="note">One explicit still photograph only. Live streaming is not active. Return here after the camera app says the photo was delivered.</p>
+      <button id="mentra-open-app" hidden aria-label="Open the VillageLens Glasses app">Open VillageLens Glasses app</button>
+      <p class="note">Open this panel to arm your private gallery, then short-press the glasses button. One explicit still photograph only; long presses and continuous recording are not active.</p>
       <div class="mentra-camera-actions">
         <button id="mentra-close" aria-label="Close Mentra camera">✕</button>
         <button id="mentra-capture" aria-label="Request one photograph from Mentra Live">👓📷 Request one photo</button>
@@ -314,7 +314,7 @@
     let nextCaptureSequence=1;
     let piSession=null,piSocket=null,piPreviewUrl='',piReconnectAttempts=0;
     let piCaptureStartedAt=0,piCaptureTimer=0,piCaptureProgressText='';
-    let mentraSession=null,mentraPollTimer=0,mentraCaptureStartedAt=0,mentraCaptureTimer=0;
+    let mentraSession=null,mentraPollTimer=0,mentraCaptureStartedAt=0,mentraCaptureTimer=0,mentraArming=null;
     const piSessionKey='villagelens.pi_session.v1';
     const speechAudioCache=new Map();
     const translationCache=new Map();
@@ -2108,12 +2108,17 @@
         if (!response.ok) throw new Error(value.error||'MENTRA_SESSION_FAILED');
         if (value.state==='waiting_for_enrollment') {
           mentraPairing.hidden=false;
-          setMentraProgress('Open the VillageLens Camera app and enter the one-time code.','VillageLens Camera ಆ್ಯಪ್ ತೆರೆಯಿರಿ ಮತ್ತು ಒಂದು ಬಾರಿ ಕೋಡ್ ನಮೂದಿಸಿ.');
+          setMentraProgress('Open VillageLens Glasses and enter the one-time code.','VillageLens Glasses ಆ್ಯಪ್ ತೆರೆಯಿರಿ ಮತ್ತು ಒಂದು ಬಾರಿ ಕೋಡ್ ನಮೂದಿಸಿ.');
         } else if (value.state==='waiting_for_device') {
           mentraPairing.hidden=true;
-          setMentraProgress('Mentra is enrolled. Press Open VillageLens Camera app.','ಮೆಂಟ್ರಾ ನೋಂದಾಯಿಸಲಾಗಿದೆ. VillageLens Camera ಆ್ಯಪ್ ತೆರೆಯಿರಿ.');
+          if (mentraOpenApp.dataset.mode==='capture') {
+            setMentraProgress('Request ready. Press Open VillageLens Glasses app.','ವಿನಂತಿ ಸಿದ್ಧವಾಗಿದೆ. VillageLens Glasses ಆ್ಯಪ್ ತೆರೆಯಿರಿ.');
+          } else {
+            setMentraProgress('Gallery armed. Keep VillageLens Glasses connected, then short-press the glasses button.','ಗ್ಯಾಲರಿ ಸಿದ್ಧವಾಗಿದೆ. VillageLens Glasses ಸಂಪರ್ಕದಲ್ಲಿರಿಸಿ, ನಂತರ ಕನ್ನಡಕದ ಬಟನ್ ಅನ್ನು ಚಿಕ್ಕದಾಗಿ ಒತ್ತಿರಿ.');
+          }
         } else if (value.state==='capturing') {
           mentraPairing.hidden=true;
+          if (!mentraCaptureStartedAt) beginMentraTimer();
           setMentraProgress('Hold steady. Mentra is taking and uploading one photo…','ಸ್ಥಿರವಾಗಿ ಹಿಡಿಯಿರಿ. ಮೆಂಟ್ರಾ ಒಂದು ಚಿತ್ರ ತೆಗೆದು ಅಪ್‌ಲೋಡ್ ಮಾಡುತ್ತಿದೆ…');
         } else if (value.state==='complete') {
           stopMentraPolling();
@@ -2140,6 +2145,45 @@
         mentraCameraStatus.textContent=englishMode?'Mentra photo session ended. Please try again.':'ಮೆಂಟ್ರಾ ಚಿತ್ರ ಸಂಪರ್ಕ ಮುಗಿದಿದೆ. ಮತ್ತೊಮ್ಮೆ ಪ್ರಯತ್ನಿಸಿ.';
       }
     }
+    async function armMentraGallery() {
+      if (mentraSession) return mentraSession;
+      if (mentraArming) return mentraArming;
+      stopMentraPolling();
+      $('mentra-capture').disabled=true;
+      mentraOpenApp.hidden=true;
+      mentraOpenApp.dataset.mode='connect';
+      setMentraProgress('Arming this private Safari gallery…','ಈ ಖಾಸಗಿ ಸಫಾರಿ ಗ್ಯಾಲರಿಯನ್ನು ಸಿದ್ಧಪಡಿಸಲಾಗುತ್ತಿದೆ…');
+      mentraArming=(async()=>{
+        try {
+          const response=await fetch('/api/mentra/v3/sessions',{
+            method:'POST',credentials:'same-origin',headers:testerHeaders({'Content-Type':'application/json'}),
+            body:JSON.stringify({output_language:outputLanguage}),
+          });
+          const value=await response.json();
+          if (!response.ok) throw new Error(value.error||'MENTRA_SESSION_FAILED');
+          mentraSession=value;
+          mentraOpenApp.hidden=false;
+          if (value.paired) {
+            mentraPairing.hidden=true;
+            setMentraProgress('Gallery armed. Keep VillageLens Glasses connected, then short-press the glasses button.','ಗ್ಯಾಲರಿ ಸಿದ್ಧವಾಗಿದೆ. VillageLens Glasses ಸಂಪರ್ಕದಲ್ಲಿರಿಸಿ, ನಂತರ ಕನ್ನಡಕದ ಬಟನ್ ಅನ್ನು ಚಿಕ್ಕದಾಗಿ ಒತ್ತಿರಿ.');
+          } else {
+            mentraPairing.hidden=false;
+            mentraPairing.textContent=`One-time Mentra enrollment code: ${value.pairing_code}`;
+            mentraPairing.title='Tap to copy';
+            setMentraProgress('Open VillageLens Glasses and enter this code once.','VillageLens Glasses ಆ್ಯಪ್ ತೆರೆಯಿರಿ ಮತ್ತು ಈ ಕೋಡ್ ಅನ್ನು ಒಮ್ಮೆ ನಮೂದಿಸಿ.');
+          }
+          mentraPollTimer=setTimeout(pollMentraSession,500);
+          return value;
+        } catch (_) {
+          mentraCameraStatus.textContent=englishMode?'Could not arm the Mentra glasses button.':'ಮೆಂಟ್ರಾ ಕನ್ನಡಕದ ಬಟನ್ ಸಿದ್ಧಪಡಿಸಲಾಗಲಿಲ್ಲ.';
+          return null;
+        } finally {
+          mentraArming=null;
+          $('mentra-capture').disabled=false;
+        }
+      })();
+      return mentraArming;
+    }
     function openMentraCamera() {
       if (!piLane) return;
       stop(); closeGuidedCamera();
@@ -2147,41 +2191,22 @@
       mentraCameraGuide.hidden=false;
       mentraPairing.hidden=true;
       mentraOpenApp.hidden=true;
-      mentraCameraStatus.textContent=englishMode?'Ready to request one Mentra photograph.':'ಒಂದು ಮೆಂಟ್ರಾ ಚಿತ್ರ ಕೇಳಲು ಸಿದ್ಧವಾಗಿದೆ.';
+      mentraCameraStatus.textContent=englishMode?'Preparing the glasses-button shutter…':'ಕನ್ನಡಕದ ಬಟನ್ ಶಟರ್ ಸಿದ್ಧಪಡಿಸಲಾಗುತ್ತಿದೆ…';
+      void armMentraGallery();
     }
     async function requestMentraPhoto() {
-      stopMentraPolling();
-      if (mentraSession) {
-        await fetch(`/api/mentra/v3/sessions/${mentraSession.session_id}`,{
-          method:'DELETE',headers:testerHeaders(),credentials:'same-origin',
-        }).catch(()=>{});
-      }
       $('mentra-capture').disabled=true;
       beginMentraTimer();
-      setMentraProgress('Creating a private one-photo request…','ಖಾಸಗಿ ಒಂದು-ಚಿತ್ರ ವಿನಂತಿಯನ್ನು ಸಿದ್ಧಪಡಿಸುತ್ತಿದೆ…');
-      try {
-        const response=await fetch('/api/mentra/v3/sessions',{
-          method:'POST',credentials:'same-origin',headers:testerHeaders({'Content-Type':'application/json'}),
-          body:JSON.stringify({output_language:outputLanguage}),
-        });
-        const value=await response.json();
-        if (!response.ok) throw new Error(value.error||'MENTRA_SESSION_FAILED');
-        mentraSession=value;
-        mentraOpenApp.hidden=false;
-        if (value.paired) {
-          mentraPairing.hidden=true;
-          setMentraProgress('Request ready. Press Open VillageLens Camera app.','ವಿನಂತಿ ಸಿದ್ಧವಾಗಿದೆ. VillageLens Camera ಆ್ಯಪ್ ತೆರೆಯಿರಿ.');
-        } else {
-          mentraPairing.hidden=false;
-          mentraPairing.textContent=`One-time Mentra enrollment code: ${value.pairing_code}`;
-          mentraPairing.title='Tap to copy';
-          setMentraProgress('Open the VillageLens Camera app and enter this code once.','VillageLens Camera ಆ್ಯಪ್ ತೆರೆಯಿರಿ ಮತ್ತು ಈ ಕೋಡ್ ಅನ್ನು ಒಮ್ಮೆ ನಮೂದಿಸಿ.');
-        }
-        mentraPollTimer=setTimeout(pollMentraSession,500);
-      } catch (_) {
+      const value=await armMentraGallery();
+      if (!value) {
         endMentraTimer(); $('mentra-capture').disabled=false;
         mentraCameraStatus.textContent=englishMode?'Could not create the Mentra photo request.':'ಮೆಂಟ್ರಾ ಚಿತ್ರ ವಿನಂತಿಯನ್ನು ಸಿದ್ಧಪಡಿಸಲಾಗಲಿಲ್ಲ.';
+        return;
       }
+      mentraOpenApp.dataset.mode='capture';
+      mentraOpenApp.hidden=false;
+      $('mentra-capture').disabled=false;
+      if (value.paired) setMentraProgress('Request ready. Press Open VillageLens Glasses app.','ವಿನಂತಿ ಸಿದ್ಧವಾಗಿದೆ. VillageLens Glasses ಆ್ಯಪ್ ತೆರೆಯಿರಿ.');
     }
     async function closeMentraCamera() {
       stopMentraPolling(); endMentraTimer();
@@ -2192,6 +2217,7 @@
       mentraCameraGuide.hidden=true;
       mentraPairing.hidden=true;
       mentraOpenApp.hidden=true;
+      mentraOpenApp.dataset.mode='connect';
       $('mentra-capture').disabled=false;
     }
     async function askImageQuestion() {
@@ -2320,7 +2346,7 @@
     $('pi-close').onclick=closePiCamera;
     mentraCamera.onclick=openMentraCamera;
     $('mentra-capture').onclick=requestMentraPhoto;
-    mentraOpenApp.onclick=()=>{ location.href='villagelens-camera://capture'; };
+    mentraOpenApp.onclick=()=>{ location.href=mentraOpenApp.dataset.mode==='capture'?'villagelens-camera://capture':'villagelens-camera://connect'; };
     $('mentra-close').onclick=closeMentraCamera;
     mentraPairing.onclick=()=>navigator.clipboard&&navigator.clipboard.writeText(
       mentraSession&&mentraSession.pairing_code||''
