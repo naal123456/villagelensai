@@ -2,7 +2,7 @@
 <html lang="kn">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#101418">
   <link rel="manifest" href="/a/manifest.webmanifest">
   <link rel="icon" href="/a/icon.svg" type="image/svg+xml">
@@ -49,10 +49,16 @@
     .gallery { display: grid; grid-template-columns: 42px 1fr 42px; align-items: center; gap: 4px; margin-top: 7px; }
     .gallery > button { min-height: 42px; padding: 0; }
     #position { color: #c7d1da; font-size: .9rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #gallery-tools { display: grid; grid-template-columns: minmax(90px,.7fr) minmax(150px,1.3fr); gap: 5px; margin: 5px 46px 0; }
+    #gallery-tools[hidden] { display: none; }
+    #gallery-tools select { min-width: 0; min-height: 38px; border: 2px solid #52606d; border-radius: 8px;
+      padding: 2px 5px; background: #26323b; color: white; font-size: .85rem; }
     #owner-badge { display: inline-block; margin: 4px 0 0; padding: 3px 10px; border-radius: 999px;
       background: #f5f7fa; color: #101418; border: 2px solid #39ad68; font-size: .9rem; font-weight: 800; }
     #owner-badge[hidden] { display: none; }
-    .stage { position: relative; display: none; max-width: 100%; margin: 4px auto 0; background: #222; touch-action: pan-y; }
+    .stage { position: relative; display: none; max-width: 100%; margin: 4px auto 0; overflow: hidden;
+      background: #222; touch-action: pan-y; }
+    #stage-content { position: relative; display: inline-block; max-width: 100%; transform-origin: 0 0; will-change: transform; }
     #welcome { margin: 16px auto 10px; max-width: 560px; }
     #welcome[hidden] { display: none; }
     .welcome-arrow { margin: 0; color: #fff36a; font-size: 2.3rem; line-height: 1; animation: point 1s ease-in-out infinite alternate; }
@@ -146,6 +152,13 @@
     #mentra-capture { background: #176c42; border-color: #55e58b; }
     #mentra-open-app { width: 100%; margin: 8px 0; background: #174b5f; border-color: #62d7ff; }
     #mentra-open-app[hidden] { display: none; }
+    html.wide-mobile { font-size: 28px; }
+    html.wide-mobile main { width: 100%; max-width: none; padding: 12px 16px 28px; }
+    html.wide-mobile button { min-height: 76px; border-width: 3px; }
+    html.wide-mobile .gallery { grid-template-columns: 76px 1fr 76px; }
+    html.wide-mobile .gallery > button { min-height: 76px; }
+    html.wide-mobile #gallery-tools { margin-inline: 80px; }
+    html.wide-mobile #gallery-tools select { min-height: 68px; font-size: .9rem; }
     @media (hover:hover) { button:hover::after { content: attr(data-tip); position: absolute; transform: translate(-75%, 40px);
       background: #000; padding: 5px 8px; border-radius: 6px; font-size: .75rem; white-space: nowrap; z-index: 10; } }
   </style>
@@ -174,7 +187,7 @@
         <span class="bar" id="quality-1"></span><span class="bar" id="quality-2"></span>
         <span class="bar" id="quality-3"></span><button class="bar" id="quality-4" aria-label="Request strongest reading" data-tip="Request strongest reading"></button>
         <span id="quality-timer">—</span>
-        <span id="app-version" aria-label="App version">v2026-09-26.1</span>
+        <span id="app-version" aria-label="Tester and app version">v2026-10-06.1</span>
       </div>
       <p id="mic-status" role="status" aria-live="assertive" hidden></p>
     </section>
@@ -182,6 +195,10 @@
       <button id="previous" aria-label="Previous page" data-tip="Previous page">‹</button>
       <div id="position" aria-live="polite">ಹೊಸ ಚಿತ್ರ</div>
       <button id="next" aria-label="Next page" data-tip="Next page">›</button>
+    </div>
+    <div id="gallery-tools" hidden>
+      <select id="gallery-filter" aria-label="Filter saved images by tester"></select>
+      <select id="capture-jump" aria-label="Jump to a saved image"></select>
     </div>
     <div id="owner-badge" aria-live="polite" hidden></div>
     <input id="camera-input" type="file" accept="image/jpeg,image/png,image/webp" capture="environment" hidden>
@@ -210,8 +227,10 @@
       </div>
     </section>
     <div class="stage" id="stage">
-      <img id="source-image" alt="Page to read">
-      <svg id="overlay" aria-label="Readable words"></svg>
+      <div id="stage-content">
+        <img id="source-image" alt="Page to read">
+        <svg id="overlay" aria-label="Readable words"></svg>
+      </div>
     </div>
     <div id="current" lang="kn"></div>
     <section id="conversation" aria-live="polite" hidden>
@@ -286,6 +305,7 @@
       (location.pathname==='/b/'||location.pathname.startsWith('/b/')||initialTester==='a3'||savedLanguage==='en'));
     const outputLanguage=englishMode?'en':'kn';
     const input=$('camera-input'), photoInput=$('photo-input'), image=$('source-image'), overlay=$('overlay'), stage=$('stage');
+    const stageContent=$('stage-content'),galleryTools=$('gallery-tools'),galleryFilter=$('gallery-filter'),captureJump=$('capture-jump');
     const status=$('status'), current=$('current'), position=$('position'), timer=$('quality-timer');
     const ownerBadge=$('owner-badge'), micStatus=$('mic-status'), askButton=$('ask');
     const conversation=$('conversation'), conversationTurns=$('conversation-turns');
@@ -297,10 +317,11 @@
     const mentraCamera=$('mentra-camera'),mentraCameraGuide=$('mentra-camera-guide');
     const mentraCameraStatus=$('mentra-camera-status'),mentraPairing=$('mentra-pairing');
     const mentraOpenApp=$('mentra-open-app');
-    let gallery=[], galleryIndex=0, result=null, mode='word', timerId=0, started=0, timerOwner=null;
+    let gallery=[], galleryIndex=0, result=null, mode='word', timerId=0, started=0, timerOwner=null,reviewMode=false;
     let galleryWaitTimer=0,galleryWaitStarted=0;
     let navigationGeneration=0;
     let playbackGeneration=0, readingGeneration=0, speechGeneration=0, pointerStart=null, suppressTap=false, activeControl='mode-word';
+    let imageScale=1,imagePanX=0,imagePanY=0,imagePointers=new Map(),imageGesture=null,imageDragged=false;
     let lastSpokenSourceLanguage='';
     let audioContext=null, activeAudioSource=null, activeAudioResolve=null, activeSpeechResolve=null;
     let activeSpeechFetchController=null,activeTranslationController=null;
@@ -333,6 +354,12 @@
     let versionCheckPromise=null,pendingAppVersion='';
     let speechVoices=[];
     const testerId=configureTesterId();
+
+    const mobileBrowser=/Android|Mobile/i.test(navigator.userAgent)||
+      Math.min(Number(screen.width)||innerWidth,Number(screen.height)||innerHeight)<=600;
+    if (mobileBrowser&&innerWidth>=700) {
+      document.documentElement.classList.add('wide-mobile');
+    }
 
     piCamera.hidden=!piLane;
     mentraCamera.hidden=!piLane;
@@ -391,6 +418,7 @@
       const corners={nw:'ಮೇಲಿನ ಎಡ ಮೂಲೆ ಬದಲಿಸಿ',ne:'ಮೇಲಿನ ಬಲ ಮೂಲೆ ಬದಲಿಸಿ',sw:'ಕೆಳಗಿನ ಎಡ ಮೂಲೆ ಬದಲಿಸಿ',se:'ಕೆಳಗಿನ ಬಲ ಮೂಲೆ ಬದಲಿಸಿ'};
       document.querySelectorAll('.camera-resize').forEach(handle=>handle.setAttribute('aria-label',corners[handle.dataset.corner]));
     }
+    $('app-version').textContent=`${(testerId||'UN').toUpperCase()} · ${englishMode?'EN':'ಕ'} · v${appVersion}`;
     try { localStorage.setItem('villagelens.output_language.v1',outputLanguage); } catch (_) {}
 
     function refreshSpeechVoices() {
@@ -461,7 +489,7 @@
     }
     function showLanguageSwitchLoading(reference) {
       if (!reference||!reference.id) return;
-      stop(); ++navigationGeneration; $('welcome').hidden=true; ownerBadge.hidden=true; conversation.hidden=true;
+      stop(); resetImageZoom(); ++navigationGeneration; $('welcome').hidden=true; ownerBadge.hidden=true; conversation.hidden=true;
       stage.style.display='inline-block'; stage.classList.add('loading'); overlay.textContent=''; current.textContent='';
       image.onload=()=>{ stage.classList.remove('loading'); alignOverlayToImage(); };
       image.src=reference.image_url||`/api/captures/${reference.id}/image`;
@@ -493,7 +521,7 @@
       $('previous').classList.remove('working'); $('next').classList.remove('working');
     }
     function showWelcome() {
-      stop(); ++navigationGeneration; result=null; current.textContent=''; overlay.textContent=''; image.removeAttribute('src');
+      stop(); resetImageZoom(); ++navigationGeneration; result=null; current.textContent=''; overlay.textContent=''; image.removeAttribute('src');
       stage.style.display='none'; ownerBadge.hidden=true; conversation.hidden=true; $('welcome').hidden=false;
       position.textContent=englishMode?'New picture':'ಹೊಸ ಚಿತ್ರ';
       status.textContent=englishMode?'Tap the camera, or touch the yellow box below.':'ಕ್ಯಾಮೆರಾ ಒತ್ತಿ ಅಥವಾ ಕೆಳಗಿನ ಹಳದಿ ಚೌಕವನ್ನು ಸ್ಪರ್ಶಿಸಿ.';
@@ -502,6 +530,80 @@
       if (!image.clientWidth||!image.clientHeight) return;
       overlay.style.inset='auto'; overlay.style.left=`${image.offsetLeft}px`; overlay.style.top=`${image.offsetTop}px`;
       overlay.style.width=`${image.clientWidth}px`; overlay.style.height=`${image.clientHeight}px`;
+      clampImagePan(); applyImageTransform();
+    }
+    function applyImageTransform() {
+      stageContent.style.transform=`translate(${imagePanX}px,${imagePanY}px) scale(${imageScale})`;
+      stage.style.touchAction=imageScale>1?'none':'pan-y';
+    }
+    function clampImagePan() {
+      if (imageScale<=1) { imageScale=1; imagePanX=0; imagePanY=0; return; }
+      const width=stage.clientWidth,height=stage.clientHeight;
+      imagePanX=Math.min(0,Math.max(width-width*imageScale,imagePanX));
+      imagePanY=Math.min(0,Math.max(height-height*imageScale,imagePanY));
+    }
+    function resetImageZoom() {
+      imageScale=1; imagePanX=0; imagePanY=0; imagePointers.clear(); imageGesture=null; imageDragged=false;
+      applyImageTransform();
+    }
+    function imagePointDistance(points) {
+      return Math.hypot(points[0].x-points[1].x,points[0].y-points[1].y);
+    }
+    function imagePointCenter(points) {
+      return {x:(points[0].x+points[1].x)/2,y:(points[0].y+points[1].y)/2};
+    }
+    function beginImageGesture() {
+      const points=[...imagePointers.values()];
+      if (points.length>=2) {
+        const pair=points.slice(0,2),center=imagePointCenter(pair),rect=stage.getBoundingClientRect();
+        imageGesture={kind:'pinch',distance:Math.max(1,imagePointDistance(pair)),scale:imageScale,
+          contentX:(center.x-rect.left-imagePanX)/imageScale,contentY:(center.y-rect.top-imagePanY)/imageScale};
+        pointerStart=null; imageDragged=true; suppressTap=true;
+      } else if (points.length===1) {
+        imageGesture={kind:imageScale>1?'pan':'swipe',startX:points[0].x,startY:points[0].y,
+          panX:imagePanX,panY:imagePanY};
+        pointerStart={x:points[0].x,y:points[0].y}; imageDragged=false;
+      }
+    }
+    function imagePointerDown(event) {
+      if (event.pointerType==='mouse'&&event.button!==0) return;
+      imagePointers.set(event.pointerId,{x:event.clientX,y:event.clientY});
+      try { stage.setPointerCapture(event.pointerId); } catch (_) {}
+      beginImageGesture();
+    }
+    function imagePointerMove(event) {
+      if (!imagePointers.has(event.pointerId)) return;
+      imagePointers.set(event.pointerId,{x:event.clientX,y:event.clientY});
+      const points=[...imagePointers.values()];
+      if (points.length>=2) {
+        if (!imageGesture||imageGesture.kind!=='pinch') beginImageGesture();
+        const pair=points.slice(0,2),center=imagePointCenter(pair),rect=stage.getBoundingClientRect();
+        imageScale=Math.max(1,Math.min(4,imageGesture.scale*imagePointDistance(pair)/imageGesture.distance));
+        imagePanX=center.x-rect.left-imageGesture.contentX*imageScale;
+        imagePanY=center.y-rect.top-imageGesture.contentY*imageScale;
+        clampImagePan(); applyImageTransform(); event.preventDefault(); return;
+      }
+      if (points.length===1&&imageScale>1&&imageGesture&&imageGesture.kind==='pan') {
+        const dx=points[0].x-imageGesture.startX,dy=points[0].y-imageGesture.startY;
+        if (Math.abs(dx)>6||Math.abs(dy)>6) { imageDragged=true; suppressTap=true; }
+        imagePanX=imageGesture.panX+dx; imagePanY=imageGesture.panY+dy;
+        clampImagePan(); applyImageTransform(); event.preventDefault();
+      }
+    }
+    function imagePointerEnd(event) {
+      const start=pointerStart,end=imagePointers.get(event.pointerId)||{x:event.clientX,y:event.clientY};
+      imagePointers.delete(event.pointerId);
+      try { stage.releasePointerCapture(event.pointerId); } catch (_) {}
+      if (imagePointers.size) { beginImageGesture(); return; }
+      imageGesture=null; pointerStart=null;
+      if (imageScale<1.03) resetImageZoom();
+      if (!imageDragged&&imageScale===1&&start) {
+        const dx=end.x-start.x,dy=end.y-start.y;
+        if (Math.abs(dx)>45&&Math.abs(dx)>Math.abs(dy)) {
+          suppressTap=true; moveGallery(dx<0?1:-1);
+        }
+      }
+      setTimeout(()=>{ suppressTap=false; imageDragged=false; },250);
     }
     async function speakWelcome() {
       const message=englishMode?
@@ -680,7 +782,7 @@
     }
     function applyReaderResult(item,stageNumber,value) {
       saveCachedStage(item,stageNumber,value);
-      if (stageNumber===1&&item.id!=='demo-i2'&&(value.words||[]).length) {
+      if (stageNumber===1&&item.id!=='demo-i2') {
         item.result=value; copyMeaning(item.result,item);
       }
       if ([2,3,4].includes(stageNumber)) {
@@ -695,7 +797,7 @@
         $('quality-'+stageNumber).classList.toggle('ready',validated);
         $('quality-'+stageNumber).classList.toggle('failed',!validated);
         if (stageNumber===1) $('quality-1').classList.remove('local');
-        if (stageNumber===1&&(value.words||[]).length&&item.id!=='demo-i2') {
+        if (stageNumber===1&&item.id!=='demo-i2') {
           render(item.result,false); restoreQuestionFocus(item);
         }
         if (stageNumber===1) track('stage_1_cloud',Boolean((value.words||[]).length),value.latency_ms||0);
@@ -703,7 +805,8 @@
           position.textContent=`${item.capture_code?item.capture_code+' · ':''}${item.label}  ${galleryIndex+1}/${gallery.length}`;
           const count=(value.objects||[]).length;
           status.textContent=stageNumber===4&&!validated?strongestStatus(value):
-            (count?`ಓದುವಿಕೆ, ಅರ್ಥ ಮತ್ತು ${count} ವಸ್ತುಗಳು ಸಿದ್ಧವಾಗಿವೆ.`:'ಓದುವಿಕೆ ಮತ್ತು ಅರ್ಥ ಸಿದ್ಧವಾಗಿದೆ.');
+            (englishMode?(count?`Reading, meaning, and ${count} objects are ready.`:'Reading and meaning are ready.'):
+              (count?`ಓದುವಿಕೆ, ಅರ್ಥ ಮತ್ತು ${count} ವಸ್ತುಗಳು ಸಿದ್ಧವಾಗಿವೆ.`:'ಓದುವಿಕೆ ಮತ್ತು ಅರ್ಥ ಸಿದ್ಧವಾಗಿದೆ.'));
           renderContextRegions(); track(`stage_${stageNumber}`,validated,value.latency_ms||0);
         }
       }
@@ -1395,15 +1498,46 @@
       }
       return item.cached;
     }
+    function filteredGalleryIndices() {
+      const tester=galleryFilter.value||'all';
+      return gallery.map((item,index)=>({item,index})).filter(({item})=>
+        tester==='all'||item.tester_id===tester).map(({index})=>index);
+    }
+    function populateCaptureJump() {
+      captureJump.textContent='';
+      for (const index of filteredGalleryIndices()) {
+        const item=gallery[index],option=document.createElement('option');
+        option.value=String(index); option.textContent=[item.capture_code,item.label].filter(Boolean).join(' · ');
+        captureJump.appendChild(option);
+      }
+      if ([...captureJump.options].some(option=>Number(option.value)===galleryIndex)) captureJump.value=String(galleryIndex);
+    }
+    function populateGalleryTools() {
+      galleryTools.hidden=!reviewMode;
+      if (!reviewMode) return;
+      const selected=galleryFilter.value||'all',testers=[...new Set(gallery.map(item=>item.tester_id).filter(value=>/^a(?:10|[1-9])$/.test(value)))].sort();
+      galleryFilter.textContent='';
+      for (const [value,label] of [['all',englishMode?'All testers':'ಎಲ್ಲ ಬಳಕೆದಾರರು'],...testers.map(value=>[value,value.toUpperCase()])]) {
+        const option=document.createElement('option'); option.value=value; option.textContent=label; galleryFilter.appendChild(option);
+      }
+      galleryFilter.value=[...galleryFilter.options].some(option=>option.value===selected)?selected:'all';
+      populateCaptureJump();
+    }
+    function moveGallery(direction) {
+      const indices=filteredGalleryIndices(); if (!indices.length) return;
+      const current=indices.indexOf(galleryIndex),position=current<0?0:(current+direction+indices.length)%indices.length;
+      showGallery(indices[position]);
+    }
     async function showGallery(index) {
       if (!gallery.length) return;
-      stop(); defaultWordMode(); const navigation=++navigationGeneration;
+      stop(); resetImageZoom(); defaultWordMode(); const navigation=++navigationGeneration;
       $('welcome').hidden=true;
       galleryIndex=(index+gallery.length)%gallery.length; const item=gallery[galleryIndex];
       renderConversation(item);
       const owner=item.tester_id&&item.tester_id!=='unassigned'?item.tester_id.toUpperCase():'';
       const ownerName=item.tester_name?` · ${item.tester_name}`:'';
       position.textContent=`${item.capture_code?item.capture_code+' · ':''}${item.label}  ${galleryIndex+1}/${gallery.length}`;
+      if (reviewMode) { populateCaptureJump(); captureJump.value=String(galleryIndex); }
       ownerBadge.hidden=false;
       ownerBadge.textContent=item.kind==='demo'?'DEMO IMAGE':
         (owner?`${owner}${ownerName}`:'UNASSIGNED · OLDER CAPTURE');
@@ -1438,7 +1572,9 @@
         if (response.status===401) { location.href='/access'; return false; }
         if (!response.ok) throw new Error('GALLERY_FAILED');
         const payload=await response.json(); gallery=payload.items||[];
+        reviewMode=payload.review_mode===true;
         nextCaptureSequence=Math.max(1,Number(payload.next_capture_sequence)||1);
+        populateGalleryTools();
         return true;
       } catch (_) {
         if (!$('welcome').hidden) status.textContent=englishMode?'Tap the camera to take a picture.':'ಚಿತ್ರ ತೆಗೆಯಲು ಕ್ಯಾಮೆರಾ ಒತ್ತಿ.';
@@ -1801,6 +1937,25 @@
         saveFailure(item,stageNumber); return {ok:false,error:error.message||'READER_FAILED'};
       }
     }
+    async function processStoredReaders(item,requested) {
+      try {
+        const response=await fetch(`/api/captures/${item.id}/process`,{
+          method:'POST',headers:testerHeaders(),credentials:'same-origin',keepalive:true,
+        });
+        if (response.status===401) { location.href='/access'; return requested.map(stageNumber=>({stageNumber,outcome:{ok:false,error:'ACCESS_REQUIRED'}})); }
+        const value=await response.json(); if (!response.ok) throw new Error(value.error||'PROCESSING_FAILED');
+        return requested.map(stageNumber=>{
+          const result=value.stages&&value.stages[String(stageNumber)];
+          const error=value.errors&&value.errors[String(stageNumber)];
+          if (result) { applyReaderResult(item,stageNumber,result); return {stageNumber,outcome:{ok:true}}; }
+          saveFailure(item,stageNumber); return {stageNumber,outcome:{ok:false,error:error||'PROCESSING_INCOMPLETE'}};
+        });
+      } catch (error) {
+        return requested.map(stageNumber=>{ saveFailure(item,stageNumber); return {
+          stageNumber,outcome:{ok:false,error:error.message||'READER_FAILED'},
+        }; });
+      }
+    }
     async function startCloudReaders(item,blob) {
       const missing=automaticStages.filter(stageNumber=>!readCachedStage(item,stageNumber));
       const cooling=missing.filter(stageNumber=>coolingDown(item,stageNumber));
@@ -1821,8 +1976,7 @@
         const captureId=/^[0-9a-f]{32}$/.test(item.id)?item.id:'';
         const completed=[];
         if (captureId&&(item.retained||item.result&&item.result.retained)) {
-          const outcomes=await Promise.all(requested.map(stageNumber=>processStoredReader(item,stageNumber)));
-          requested.forEach((stageNumber,index)=>completed.push({stageNumber,outcome:outcomes[index]}));
+          completed.push(...await processStoredReaders(item,requested));
         } else {
           if (!blob) { const response=await fetch(item.image_url); if (!response.ok) throw new Error('IMAGE_FAILED'); blob=await response.blob(); }
           const outcomes=await Promise.all(requested.map(stageNumber=>callReader(stageNumber,blob,captureId,item)));
@@ -1876,7 +2030,7 @@
       status.textContent=strongestStatus(readCachedStage(item,4));
     }
     async function useCapture(file,captureMeta={}) {
-      if (!file) return; stop(); defaultWordMode(); const navigation=++navigationGeneration; resetQuality();
+      if (!file) return; stop(); resetImageZoom(); defaultWordMode(); const navigation=++navigationGeneration; resetQuality();
       const imported=captureMeta.source==='photo-library-v1';
       const captureLabel=imported?(englishMode?'Imported photo':'ಆಯ್ಕೆ ಮಾಡಿದ ಚಿತ್ರ'):(englishMode?'Captured photo':'ತೆಗೆದ ಚಿತ್ರ');
       status.textContent=englishMode?(imported?'Reading the selected photo…':'Reading the new photo…'):'ಚಿತ್ರವನ್ನು ಓದುತ್ತಿದೆ…';
@@ -1890,6 +2044,7 @@
       renderConversation(item);
       beginTimer(item,item.startedAt);
       gallery.splice(Math.min(2,gallery.length),0,item); galleryIndex=gallery.indexOf(item);
+      if (reviewMode) populateGalleryTools();
       position.textContent=`${captureCode} · ${captureLabel}  ${galleryIndex+1}/${gallery.length}`;
       ownerBadge.hidden=false; ownerBadge.textContent=testerId?testerId.toUpperCase():'UNASSIGNED';
       try {
@@ -2355,8 +2510,10 @@
     $('play-words').onclick=()=>result&&play(readingWords(),'play-words','word');
     $('play-sentences').onclick=()=>result&&play(readingLines(),'play-sentences','line');
     $('select-object').onclick=chooseObjectMode; $('infer-global').onclick=explainGlobal; $('ask').onclick=askImageQuestion; $('stop').onclick=()=>stop();
-    $('previous').onclick=()=>showGallery($('welcome').hidden?galleryIndex-1:gallery.length-1);
-    $('next').onclick=()=>showGallery($('welcome').hidden?galleryIndex+1:0);
+    $('previous').onclick=()=>{ if ($('welcome').hidden) moveGallery(-1); else { const indices=filteredGalleryIndices(); showGallery(indices.length?indices[indices.length-1]:gallery.length-1); } };
+    $('next').onclick=()=>{ if ($('welcome').hidden) moveGallery(1); else { const indices=filteredGalleryIndices(); showGallery(indices.length?indices[0]:0); } };
+    galleryFilter.onchange=()=>{ populateCaptureJump(); const first=filteredGalleryIndices()[0]; if (first!==undefined) showGallery(first); };
+    captureJump.onchange=()=>showGallery(Number(captureJump.value));
     $('welcome-touch').onclick=speakWelcome;
     $('welcome-camera').onclick=openGuidedCamera;
     $('welcome-photos').onclick=openPhotoLibrary;
@@ -2392,11 +2549,10 @@
       track('app_foreground'); track('audio_reset');
     });
     window.addEventListener('pageshow',event=>{ if (event.persisted) ensureCurrentApp(); });
-    stage.addEventListener('pointerdown',event=>{ pointerStart={x:event.clientX,y:event.clientY}; suppressTap=false; });
-    stage.addEventListener('pointerup',event=>{
-      if (!pointerStart) return; const dx=event.clientX-pointerStart.x,dy=event.clientY-pointerStart.y; pointerStart=null;
-      if (Math.abs(dx)>45&&Math.abs(dx)>Math.abs(dy)) { suppressTap=true; showGallery(galleryIndex+(dx<0?1:-1)); setTimeout(()=>suppressTap=false,250); }
-    });
+    stage.addEventListener('pointerdown',imagePointerDown);
+    stage.addEventListener('pointermove',imagePointerMove);
+    stage.addEventListener('pointerup',imagePointerEnd);
+    stage.addEventListener('pointercancel',imagePointerEnd);
     const isStandalone=matchMedia('(display-mode: standalone)').matches||navigator.standalone===true;
     if (isStandalone) $('install').hidden=true;
     let installPrompt=null;
