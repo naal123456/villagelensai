@@ -46,12 +46,18 @@ VillageLensAI has become a practical multilingual reading and learning tool:
 - On 2026-09-23, the owner reported that A3-50, a mixed Chinese/English mooncake
   package, was understood correctly by contextual inference while the word and
   sentence controls misidentified Han text as English and did not pronounce it.
-  The authorized diagnosis found that cloud OCR retained Chinese regions and
-  stage 3 covered the primary text, but the browser and speech API lacked a Han
-  script route. A local `2026-09-23.1` repair adds conservative “Chinese / Han
-  script” identification, mixed Chinese/English segmentation, Mandarin server
-  speech, and translation routing tests. It has passed 78 tests and static
-  checks but is not committed, pushed, or deployed.
+  The authorized repair added conservative “Chinese / Han script”
+  identification, mixed Chinese/English segmentation, Mandarin server speech,
+  and translation routing tests. It was committed as `8914f96` and is included
+  in the current deployed production lineage.
+- On 2026-10-06, mobile field feedback identified an extremely small Android
+  layout, missing pinch zoom, difficult navigation through the A3 reviewer's
+  large gallery, noisy local OCR remaining on A3-63, and incomplete automatic
+  stages on A3-64. Version `2026-10-06.1` repairs these issues with a wide-mobile
+  fallback, bounded image pinch/pan, no-typing reviewer filters, explicit tester
+  identity, cloud OCR replacement even when empty, and one phone-to-server bulk
+  processing request. See
+  `docs/MOBILE_GALLERY_RELIABILITY_DEPLOYMENT_20261006.md`.
 - Imported WhatsApp screenshots and saved document photographs use the same
   retained OCR, inference, language, audio, gallery, and question pipeline as
   camera captures.
@@ -64,22 +70,21 @@ school learning are valuable extensions, not replacements for that mission.
 
 - Repository: `https://github.com/naal123456/villagelensai`
 - Branch: `main`
-- Photo-import code commit: `ce9e2fb`
-- Photo-import deployment record commit: `baf3f0b`
-- Application version: `2026-09-17.2`
+- Current source commit: `57387f1`
+- Application version: `2026-10-06.1`
 - Cloud project/service/region: `villagelensai` / `vlens-a` / `us-central1`
-- Live revision: `vlens-a-00076-98l`, 100 percent traffic
-- Image: `gcr.io/villagelensai/vlens-a:ce9e2fb`
+- Live revision: `vlens-a-00166-tav`, 100 percent traffic
+- Image: `gcr.io/villagelensai/vlens-pi-c-test:57387f1`
 - Container digest:
-  `sha256:6fd2da9a1d987ba7270e064758f8b817b21ed963148d1ce869ea2d65789b498b`
-- Cloud Build: `571feed8-63f5-4e61-8940-ad9a9bdf99c3`
-- Public health rechecked 2026-09-20: HTTP 200, access gate enabled, no missing
-  OCR models, version `2026-09-17.2`
-- Last full local validation: 76/76 tests plus Python compilation, embedded
+  `sha256:afd4be15d8667756a3712eda0ec5b61bd4451012e733857a8dc680cfb4ab546e`
+- Cloud Build: `33c02a96-d1ed-4ec3-8ab4-9fb2ca4d7231`
+- Public health rechecked 2026-10-06: HTTP 200, access gate enabled, no missing
+  OCR models, version `2026-10-06.1`, and stage 4 manual
+- Last full local validation: 125/125 tests plus Python compilation, embedded
   JavaScript parsing, and `git diff --check`
-- Rollback: route traffic to `vlens-a-00075-mpm` (`2026-09-17.1`)
+- Rollback: route traffic to `vlens-a-00087-s9f` (`2026-09-26.1`)
 
-Documentation-only commits after `ce9e2fb` do not require another deployment.
+Documentation-only commits after `57387f1` do not require another deployment.
 
 ## Current interface and processing behavior
 
